@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 void main() {
   runApp(const MyApp());
@@ -83,6 +85,15 @@ class _MyHomePageState extends State<MyHomePage> {
       ),
     );
   }
+  
+  // 添加导航到登录页面的方法
+  void _navigateToLogin() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const LoginPage(),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -101,6 +112,16 @@ class _MyHomePageState extends State<MyHomePage> {
         // Here we take the value from the MyHomePage object that was created by
         // the App.build method, and use it to set our appbar title.
         title: Text(widget.title),
+        actions: [
+          // 在应用栏右侧添加登录按钮
+          TextButton(
+            onPressed: _navigateToLogin,
+            child: const Text(
+              '登录',
+              style: TextStyle(color: Colors.white),
+            ),
+          ),
+        ],
       ),
       body: Center(
         // Center is a layout widget. It takes a single child and positions it
@@ -138,6 +159,17 @@ class _MyHomePageState extends State<MyHomePage> {
             ElevatedButton(
               onPressed: _scanBarcode,
               child: const Text('开始扫码'),
+            ),
+            // 添加一个间距
+            const SizedBox(height: 20),
+            // 在主界面中间也添加一个登录按钮
+            ElevatedButton(
+              onPressed: _navigateToLogin,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                padding: const EdgeInsets.symmetric(horizontal: 50, vertical: 15),
+              ),
+              child: const Text('用户登录', style: TextStyle(fontSize: 16)),
             ),
           ],
         ),
@@ -178,6 +210,142 @@ class ScannerPage extends StatelessWidget {
             });
           }
         },
+      ),
+    );
+  }
+}
+
+// 添加登录页面
+class LoginPage extends StatefulWidget {
+  const LoginPage({Key? key}) : super(key: key);
+
+  @override
+  State<LoginPage> createState() => _LoginPageState();
+}
+
+class _LoginPageState extends State<LoginPage> {
+  final TextEditingController _usernameController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
+  bool _isLoading = false;
+  
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+  
+  Future<void> _login() async {
+    final username = _usernameController.text;
+    final password = _passwordController.text;
+    
+    if (username.isEmpty || password.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('用户名和密码不能为空')),
+      );
+      return;
+    }
+    
+    // 显示加载状态
+    setState(() {
+      _isLoading = true;
+    });
+    
+    try {
+      // 调用登录API
+      print('开始发送登录请求 - 用户名: $username');
+      
+      final response = await http.post(
+        Uri.parse('http://localhost:9088/user/login'),
+        body: {
+          'username': username,
+          'password': password,
+        },
+      );
+      
+      // 打印响应详情
+      print('HTTP状态码: ${response.statusCode}');
+      print('响应头: ${response.headers}');
+      print('响应体: ${response.body}');
+      
+      // 处理响应
+      if (response.statusCode == 200) {
+        // 尝试解析响应
+        final responseData = jsonDecode(response.body);
+        print('解析后的JSON: $responseData');
+        
+        // 根据API响应显示适当的消息
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('登录成功: ${responseData['message'] ?? "欢迎回来"}')),
+        );
+        
+        // 登录成功后返回
+        Future.delayed(const Duration(seconds: 1), () {
+          Navigator.pop(context);
+        });
+      } else {
+        // 登录失败
+        print('登录失败，状态码: ${response.statusCode}');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('登录失败: ${response.statusCode}')),
+        );
+      }
+    } catch (e) {
+      // 处理网络错误
+      print('登录过程中发生异常: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('网络错误: $e')),
+      );
+    } finally {
+      // 无论成功失败，都需要关闭加载状态
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('用户登录'),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            TextField(
+              controller: _usernameController,
+              decoration: const InputDecoration(
+                labelText: '用户名',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.person),
+              ),
+            ),
+            const SizedBox(height: 20),
+            TextField(
+              controller: _passwordController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: '密码',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.lock),
+              ),
+            ),
+            const SizedBox(height: 30),
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton(
+                onPressed: _isLoading ? null : _login,
+                child: _isLoading 
+                    ? const CircularProgressIndicator(color: Colors.white)
+                    : const Text('登录', style: TextStyle(fontSize: 18)),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
