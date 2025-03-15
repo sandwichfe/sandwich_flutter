@@ -2,53 +2,185 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';  // 导入 shared_preferences
+import 'api_response.dart';
 
-void main() {
-  runApp(const MyApp());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();  // 确保 Flutter 初始化完成
+  SharedPreferences prefs = await SharedPreferences.getInstance();
+  String? token = prefs.getString('token');  // 读取 token
+  print('token is $token');
+  runApp(MyApp(token: token));  // 将 token 传递给 MyApp
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final String? token;
 
-  // This widget is the root of your application.
+  const MyApp({super.key, this.token});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Flutter Demo',
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page11111323'),
+      home: token == null ? const MyHomePage(title: 'Flutter Demo Home Page') : const MainPage(),  // 根据 token 是否存在决定首页
+    );
+  }
+}
+
+class MainPage extends StatefulWidget {
+  const MainPage({super.key});
+
+  @override
+  State<MainPage> createState() => _MainPageState();
+}
+
+class _MainPageState extends State<MainPage> {
+  Map<String, dynamic>? _userInfo;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchUserInfo();
+  }
+
+  Future<void> _fetchUserInfo() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? token = prefs.getString('token');
+
+    if (token == null) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (context) => const LoginPage(),
+        ),
+      );
+      return;
+    }
+
+    try {
+      final response = await http.get(
+        Uri.parse('http://49.235.149.110:9088/sys/user/current'),
+        headers: {
+          'Authorization': '$token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final responseData = jsonDecode(utf8.decode(response.bodyBytes));
+        if (responseData['code'] == 200) {
+          setState(() {
+            _userInfo = responseData['data'];
+          });
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('获取用户信息失败: ${responseData['msg']}')),
+          );
+        }
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('获取用户信息失败: ${response.statusCode}')),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('网络错误: $e')),
+      );
+    }
+  }
+
+  void _scanBarcode() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => ScannerPage(
+          onDetect: (String value) async {
+            if (value.startsWith('http://49.235.149.110:9088/user/qrCode/scan?qrCodeId=')) {
+              try {
+                print('开始请求扫码接口: $value');  // 打印请求的URL
+                final response = await http.get(Uri.parse(value));
+                print('扫码接口返回状态码: ${response.statusCode}');  // 打印返回状态码
+                if (response.statusCode == 200) {
+                  final responseData = jsonDecode(utf8.decode(response.bodyBytes));
+                  print('扫码接口返回数据: $responseData');  // 打印返回数据
+                  if (responseData['code'] == 200) {
+                    Navigator.of(context).pushReplacement(
+                      MaterialPageRoute(
+                        builder: (context) => ConfirmLoginPage(
+                          qrCodeUrl: value,
+                          qrCodeTicket: responseData['data']['qrCodeTicket'],
+                        ),
+                      ),
+                    );
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('获取二维码信息失败: ${responseData['msg']}')),
+                    );
+                  }
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('获取二维码信息失败: ${response.statusCode}')),
+                  );
+                }
+              } catch (e) {
+                print('扫码接口请求异常: $e');  // 打印异常信息
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('网络错误: $e')),
+                );
+              }
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('扫描结果: $value')),
+              );
+            }
+          },
+        ),
+      ),
+    );
+  }
+
+  void _navigateToLogin() {
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (context) => const LoginPage(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('主页面'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.login),
+            onPressed: _navigateToLogin,
+          ),
+          IconButton(
+            icon: const Icon(Icons.qr_code_scanner),
+            onPressed: _scanBarcode,
+          ),
+        ],
+      ),
+      body: Center(
+        child: _userInfo == null
+            ? const CircularProgressIndicator()
+            : Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text('欢迎回来, ${_userInfo!['nickname']}'),
+                  const SizedBox(height: 20),
+                  Image.network(_userInfo!['avatarUrl']),
+                ],
+              ),
+      ),
     );
   }
 }
 
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
 
   final String title;
 
@@ -62,11 +194,6 @@ class _MyHomePageState extends State<MyHomePage> {
 
   void _incrementCounter() {
     setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
       _counter+=8;
     });
   }
@@ -86,7 +213,6 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
   
-  // 添加导航到登录页面的方法
   void _navigateToLogin() {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -97,23 +223,11 @@ class _MyHomePageState extends State<MyHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
         title: Text(widget.title),
         actions: [
-          // 在应用栏右侧添加登录按钮
           TextButton(
             onPressed: _navigateToLogin,
             child: const Text(
@@ -124,22 +238,7 @@ class _MyHomePageState extends State<MyHomePage> {
         ],
       ),
       body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
         child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
             const Text('You have pushed the button this many times:'),
@@ -160,17 +259,7 @@ class _MyHomePageState extends State<MyHomePage> {
               onPressed: _scanBarcode,
               child: const Text('开始扫码'),
             ),
-            // 添加一个间距
             const SizedBox(height: 20),
-            // 在主界面中间也添加一个登录按钮
-            ElevatedButton(
-              onPressed: _navigateToLogin,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green,
-                padding: const EdgeInsets.symmetric(horizontal: 50, vertical: 15),
-              ),
-              child: const Text('用户登录', style: TextStyle(fontSize: 16)),
-            ),
           ],
         ),
       ),
@@ -190,7 +279,6 @@ class ScannerPage extends StatelessWidget {
   
   @override
   Widget build(BuildContext context) {
-    // 添加变量来防止多次触发
     bool hasScanned = false;
     
     return Scaffold(
@@ -200,11 +288,9 @@ class ScannerPage extends StatelessWidget {
       body: MobileScanner(
         onDetect: (capture) {
           final List<Barcode> barcodes = capture.barcodes;
-          // 避免重复触发
           if (!hasScanned && barcodes.isNotEmpty && barcodes[0].rawValue != null) {
             hasScanned = true; // 标记已扫描
             
-            // 使用延迟以确保扫描器有足够时间处理
             Future.delayed(const Duration(milliseconds: 500), () {
               onDetect(barcodes[0].rawValue!);
             });
@@ -215,7 +301,91 @@ class ScannerPage extends StatelessWidget {
   }
 }
 
-// 添加登录页面
+class ConfirmLoginPage extends StatelessWidget {
+  final String qrCodeUrl;
+  final String qrCodeTicket;
+
+  const ConfirmLoginPage({Key? key, required this.qrCodeUrl, required this.qrCodeTicket}) : super(key: key);
+
+  Future<void> _confirmLogin(BuildContext context) async {
+    // 解析 qrCodeUrl 获取 qrCodeId
+    Uri uri = Uri.parse(qrCodeUrl);
+    String qrCodeId = uri.queryParameters['qrCodeId'] ?? '';
+
+    if (qrCodeId.isEmpty || qrCodeTicket.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('二维码信息不完整')),
+      );
+      return;
+    }
+
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      String? token = prefs.getString('token');
+
+      final requestBody = {
+        'qrCodeId': qrCodeId,
+        'qrCodeTicket': qrCodeTicket,
+      };
+      print('开始请求确认登录接口, 请求参数: $requestBody');  // 打印请求参数
+      final response = await http.post(
+        Uri.parse('http://49.235.149.110:9088/user/qrCode/consent'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': '$token',  // 添加 Authorization 请求头
+        },
+        body: jsonEncode(requestBody),
+      );
+      print('确认登录接口返回状态码: ${response.statusCode}');  // 打印返回状态码
+      if (response.statusCode == 200) {
+        final responseData = jsonDecode(utf8.decode(response.bodyBytes));
+        print('确认登录接口返回数据: $responseData');  // 打印返回数据
+        if (responseData['code'] == 200) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('登录成功')),
+          );
+          Navigator.of(context).pop();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('登录失败: ${responseData['msg']}')),
+          );
+        }
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('登录失败: ${response.statusCode}')),
+        );
+      }
+    } catch (e) {
+      print('确认登录接口请求异常: $e');  // 打印异常信息
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('网络错误: $e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('确认登录'),
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text('您正在尝试登录'),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () => _confirmLogin(context),
+              child: const Text('确认登录'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class LoginPage extends StatefulWidget {
   const LoginPage({Key? key}) : super(key: key);
 
@@ -227,81 +397,80 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   bool _isLoading = false;
-  
-  @override
-  void dispose() {
-    _usernameController.dispose();
-    _passwordController.dispose();
-    super.dispose();
+
+  Future<void> _saveToken(String token) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setString('token', token);  // 存储 token
   }
-  
+
   Future<void> _login() async {
     final username = _usernameController.text;
     final password = _passwordController.text;
-    
+
     if (username.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('用户名和密码不能为空')),
       );
       return;
     }
-    
-    // 显示加载状态
+
     setState(() {
       _isLoading = true;
     });
-    
+
     try {
-      // 调用登录API
-      print('开始发送登录请求 - 用户名: $username');
-      
       final response = await http.post(
-        Uri.parse('http://localhost:9088/user/login'),
+        Uri.parse('http://49.235.149.110:9088/user/login'),
         body: {
           'username': username,
           'password': password,
         },
       );
-      
-      // 打印响应详情
-      print('HTTP状态码: ${response.statusCode}');
-      print('响应头: ${response.headers}');
-      print('响应体: ${response.body}');
-      
-      // 处理响应
+
       if (response.statusCode == 200) {
-        // 尝试解析响应
-        final responseData = jsonDecode(response.body);
-        print('解析后的JSON: $responseData');
-        
-        // 根据API响应显示适当的消息
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('登录成功: ${responseData['message'] ?? "欢迎回来"}')),
+        final responseData = jsonDecode(utf8.decode(response.bodyBytes));
+        final apiResponse = ApiResponse.fromJson(
+          responseData,
+          (dynamic json) => json != null && json is Map<String, dynamic> ? json : <String, dynamic>{},
         );
-        
-        // 登录成功后返回
-        Future.delayed(const Duration(seconds: 1), () {
-          Navigator.pop(context);
-        });
+        print(apiResponse);
+        if (apiResponse.code == 200) {
+          String token =responseData?['data'] as String;
+          await _saveToken(token);  // 保存 token
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('登录成功: ${responseData['message'] ?? "欢迎回来"}')),
+          );
+
+          Navigator.of(context).pushReplacement(MaterialPageRoute(
+            builder: (context) => const MainPage(),  // 跳转到主页面
+          ));
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('登录失败: ${apiResponse.msg}')),
+          );
+        }
       } else {
-        // 登录失败
-        print('登录失败，状态码: ${response.statusCode}');
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('登录失败: ${response.statusCode}')),
         );
       }
     } catch (e) {
-      // 处理网络错误
-      print('登录过程中发生异常: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('网络错误: $e')),
       );
     } finally {
-      // 无论成功失败，都需要关闭加载状态
       setState(() {
         _isLoading = false;
       });
     }
+  }
+
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _passwordController.dispose();
+    super.dispose();
   }
 
   @override
