@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import '../app.dart';
 import '../services/api_service.dart';
-import '../main.dart';  // 导入main.dart以访问MyApp
 
 class LoginPage extends StatefulWidget {
   const LoginPage({Key? key}) : super(key: key);

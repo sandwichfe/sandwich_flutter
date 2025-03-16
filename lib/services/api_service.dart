@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
-import '/api_response.dart';
+import '../models/api_response.dart';
 import '../utils/constants.dart';
+import '../utils/storage_util.dart';
 
 class ApiService {
   // 单例模式
@@ -10,19 +10,18 @@ class ApiService {
   factory ApiService() => _instance;
   ApiService._internal();
   
-  // 登录API
+  // 登录
   Future<ApiResponse<String>> login(String username, String password) async {
     try {
       final response = await http.post(
-        Uri.parse(ApiConstants.loginUrl),
+        Uri.parse(ApiConstants.getLoginUrl()),
         body: {
           'username': username,
           'password': password,
         },
       );
       
-      print('登录状态码: ${response.statusCode}');
-      print('登录响应: ${response.body}');
+      print('登录响应状态码: ${response.statusCode}');
       
       if (response.statusCode == 200) {
         final responseData = jsonDecode(utf8.decode(response.bodyBytes));
@@ -31,9 +30,9 @@ class ApiService {
           (dynamic json) => json != null && json is String ? json : '',
         );
         
-        // 如果登录成功，保存token
+        // 登录成功，保存token
         if (apiResponse.code == 200 && apiResponse.data != null) {
-          await _saveToken(apiResponse.data as String);
+          await StorageUtil.saveToken(apiResponse.data as String);
         }
         
         return apiResponse;
@@ -44,6 +43,7 @@ class ApiService {
         );
       }
     } catch (e) {
+      print('登录异常: $e');
       return ApiResponse(
         code: 500,
         msg: '网络错误: $e',
@@ -54,8 +54,7 @@ class ApiService {
   // 获取用户信息
   Future<ApiResponse<Map<String, dynamic>>> getUserInfo() async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? token = prefs.getString('token');
+      String? token = StorageUtil.getToken();
       
       if (token == null) {
         return ApiResponse(
@@ -65,7 +64,7 @@ class ApiService {
       }
       
       final response = await http.get(
-        Uri.parse(ApiConstants.userInfoUrl),
+        Uri.parse(ApiConstants.getUserInfoUrl()),
         headers: {
           'Authorization': token,
         },
@@ -75,7 +74,14 @@ class ApiService {
         final responseData = jsonDecode(utf8.decode(response.bodyBytes));
         return ApiResponse.fromJson(
           responseData,
-          (dynamic json) => json != null && json is Map<String, dynamic> ? json : <String, dynamic>{},
+          (dynamic json) => json != null ? json as Map<String, dynamic> : <String, dynamic>{},
+        );
+      } else if (response.statusCode == 401) {
+        // 未登录或token失效
+        await StorageUtil.removeToken();
+        return ApiResponse(
+          code: 401,
+          msg: '登录已过期',
         );
       } else {
         return ApiResponse(
@@ -84,6 +90,7 @@ class ApiService {
         );
       }
     } catch (e) {
+      print('获取用户信息异常: $e');
       return ApiResponse(
         code: 500,
         msg: '网络错误: $e',
@@ -123,8 +130,7 @@ class ApiService {
   // 确认二维码登录
   Future<ApiResponse<dynamic>> confirmQrCodeLogin(String qrCodeId, String qrCodeTicket) async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? token = prefs.getString('token');
+      String? token = StorageUtil.getToken();
       
       final requestBody = {
         'qrCodeId': qrCodeId,
@@ -133,7 +139,7 @@ class ApiService {
       
       print('开始请求确认登录接口, 请求参数: $requestBody');
       final response = await http.post(
-        Uri.parse(ApiConstants.qrCodeConsentUrl),
+        Uri.parse(ApiConstants.getQrCodeConsentUrl()),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': '$token',
@@ -165,15 +171,12 @@ class ApiService {
     }
   }
   
-  // 保存token到SharedPreferences
-  Future<void> _saveToken(String token) async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    await prefs.setString('token', token);
-  }
-  
-  // 退出登录，清除token
+  // 退出登录
   Future<void> logout() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    await prefs.remove('token');
+    try {
+      await StorageUtil.removeToken();
+    } catch (e) {
+      print('退出登录异常: $e');
+    }
   }
 } 

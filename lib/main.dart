@@ -1,14 +1,20 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'pages/scanner_page.dart';
+
 import 'pages/login_page.dart';
+import 'pages/scanner_page.dart';
 import 'services/api_service.dart';
+import 'utils/storage_util.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  SharedPreferences prefs = await SharedPreferences.getInstance();
-  String? token = prefs.getString('token');
+  
+  // 初始化本地存储
+  await StorageUtil.init();
+  
+  // 获取保存的token
+  String? token = StorageUtil.getToken();
   print('token is $token');
+  
   runApp(MyApp(token: token));
 }
 
@@ -120,7 +126,12 @@ class _MyHomePageState extends State<MyHomePage> {
       MaterialPageRoute(
         builder: (context) => const LoginPage(),
       ),
-    );
+    ).then((_) {
+      // 登录成功后，重新获取用户信息
+      if (_isLoggedIn) {
+        _fetchUserInfo();
+      }
+    });
   }
 
   void _logout() {
