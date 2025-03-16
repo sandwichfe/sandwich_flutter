@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
-import 'main_page.dart';
+import '../main.dart';  // 导入main.dart以访问MyApp
 
 class LoginPage extends StatefulWidget {
   const LoginPage({Key? key}) : super(key: key);
@@ -37,9 +37,15 @@ class _LoginPageState extends State<LoginPage> {
           SnackBar(content: Text('登录成功: ${apiResponse.msg}')),
         );
 
-        Navigator.of(context).pushReplacement(MaterialPageRoute(
-          builder: (context) => const MainPage(),
-        ));
+        // 登录成功后，重新启动应用并传递token
+        if (mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(
+              builder: (context) => MyApp(token: apiResponse.data as String),
+            ),
+            (route) => false,  // 清除所有路由历史
+          );
+        }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('登录失败: ${apiResponse.msg}')),
