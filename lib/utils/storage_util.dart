@@ -22,4 +22,14 @@ class StorageUtil {
   static Future<bool> removeToken() async {
     return await _preferences?.remove('token') ?? false;
   }
-} 
+
+  // 保存baseUrl
+  static Future<bool> saveBaseUrl(String baseUrl) async {
+    return await _preferences?.setString('baseUrl', baseUrl) ?? false;
+  }
+
+  // 获取baseUrl
+  static String? getBaseUrl() {
+    return _preferences?.getString('baseUrl');
+  }
+}

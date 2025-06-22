@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'pages/login_page.dart';
 import 'pages/scanner_page.dart';
 import 'services/api_service.dart';
+import 'utils/constants.dart';
 import 'utils/storage_util.dart';
 
 void main() async {
@@ -10,6 +11,12 @@ void main() async {
   
   // 初始化本地存储
   await StorageUtil.init();
+  
+  // 获取保存的baseUrl并设置
+  String? savedBaseUrl = StorageUtil.getBaseUrl();
+  if (savedBaseUrl != null && savedBaseUrl.isNotEmpty) {
+    ApiConstants.setBaseUrl(savedBaseUrl);
+  }
   
   // 获取保存的token
   String? token = StorageUtil.getToken();
@@ -66,7 +73,7 @@ class _MyHomePageState extends State<MyHomePage> {
   Future<void> _fetchUserInfo() async {
     try {
       final apiResponse = await ApiService().getUserInfo();
-
+      print('apiResponse is $apiResponse');
       if (apiResponse.code == 200) {
         setState(() {
           _userInfo = apiResponse.data;
@@ -134,6 +141,47 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
+  void _showSettingsDialog() {
+    final TextEditingController _controller = TextEditingController(text: ApiConstants.baseUrl);
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('设置服务器地址'),
+          content: TextField(
+            controller: _controller,
+            decoration: const InputDecoration(hintText: 'http://example.com'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () {
+                final newUrl = _controller.text.trim();
+                if (newUrl.isNotEmpty) {
+                  ApiConstants.setBaseUrl(newUrl);
+                  StorageUtil.saveBaseUrl(newUrl); // 保存到本地
+                  Navigator.of(context).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('地址已保存')),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('地址不能为空')),
+                  );
+                }
+              },
+              child: const Text('保存'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   void _logout() {
     ApiService().logout().then((_) {
       // 重启应用以清除状态
@@ -169,6 +217,10 @@ class _MyHomePageState extends State<MyHomePage> {
           IconButton(
             icon: const Icon(Icons.qr_code_scanner),
             onPressed: _scanBarcode,
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: _showSettingsDialog,
           ),
         ],
       ),
