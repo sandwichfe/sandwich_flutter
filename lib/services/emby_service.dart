@@ -111,13 +111,37 @@ class EmbyService {
         '/Users/${config.userId}/Items?api_key=${config.token}'
         '&Recursive=true'
         '&IncludeItemTypes=Movie,Episode,Video,MusicVideo'
-        '&Fields=Overview,RunTimeTicks'
+        '&Fields=Overview,RunTimeTicks,UserData'
         '&Limit=$limit&StartIndex=$startIndex'
         '&SortBy=$sortBy&SortOrder=Descending');
     if (parentId != null) url += '&ParentId=$parentId';
 
     final resp = await http.get(Uri.parse(url), headers: _authHeader);
     if (resp.statusCode != 200) throw Exception('获取视频列表失败');
+    final data = jsonDecode(resp.body);
+    final items = (data['Items'] as List).map((e) => EmbyItem.fromJson(e)).toList();
+    return (items: items, total: data['TotalRecordCount'] as int);
+  }
+
+  Future<void> setFavorite(String itemId, {required bool favorite}) async {
+    final url = _url('/Users/${config.userId}/FavoriteItems/$itemId?api_key=${config.token}');
+    if (favorite) {
+      await http.post(Uri.parse(url), headers: _authHeader);
+    } else {
+      await http.delete(Uri.parse(url), headers: _authHeader);
+    }
+  }
+
+  Future<({List<EmbyItem> items, int total})> getFavorites({int limit = 150, int startIndex = 0}) async {
+    var url = _url('/Users/${config.userId}/Items?api_key=${config.token}'
+        '&Recursive=true'
+        '&Filters=IsFavorite'
+        '&IncludeItemTypes=Movie,Episode,Video,MusicVideo'
+        '&Fields=Overview,RunTimeTicks,UserData'
+        '&Limit=$limit&StartIndex=$startIndex'
+        '&SortBy=DateCreated&SortOrder=Descending');
+    final resp = await http.get(Uri.parse(url), headers: _authHeader);
+    if (resp.statusCode != 200) throw Exception('获取收藏失败');
     final data = jsonDecode(resp.body);
     final items = (data['Items'] as List).map((e) => EmbyItem.fromJson(e)).toList();
     return (items: items, total: data['TotalRecordCount'] as int);

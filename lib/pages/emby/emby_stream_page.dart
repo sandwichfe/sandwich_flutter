@@ -15,6 +15,7 @@ class EmbyStreamPage extends StatefulWidget {
 
 class _EmbyStreamPageState extends State<EmbyStreamPage> {
   late int _index;
+  late List<EmbyItem> _items;
   VideoPlayerController? _ctrl;
   bool _showControls = false;
 
@@ -22,6 +23,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage> {
   void initState() {
     super.initState();
     _index = widget.initialIndex;
+    _items = List.of(widget.items);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersive);
     _play(_index);
   }
@@ -38,7 +40,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage> {
     _ctrl = null;
     setState(() {});
 
-    final url = EmbyService().getStreamUrl(widget.items[index].id);
+    final url = EmbyService().getStreamUrl(_items[index].id);
     final ctrl = VideoPlayerController.networkUrl(Uri.parse(url));
     await ctrl.initialize();
     ctrl.play();
@@ -46,7 +48,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage> {
   }
 
   void _next() {
-    if (_index < widget.items.length - 1) { _index++; _play(_index); }
+    if (_index < _items.length - 1) { _index++; _play(_index); }
   }
 
   void _prev() {
@@ -63,12 +65,26 @@ class _EmbyStreamPageState extends State<EmbyStreamPage> {
   void _togglePlay() => _ctrl?.value.isPlaying == true ? _ctrl?.pause() : _ctrl?.play();
   void _toggleControls() => setState(() => _showControls = !_showControls);
 
+  Future<void> _toggleFavorite() async {
+    final item = _items[_index];
+    final newVal = !item.isFavorite;
+    setState(() => _items[_index] = item.copyWith(isFavorite: newVal));
+    try {
+      await EmbyService().setFavorite(item.id, favorite: newVal);
+    } catch (_) {
+      setState(() => _items[_index] = item.copyWith(isFavorite: item.isFavorite));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final ctrl = _ctrl;
-    final item = widget.items[_index];
+    final item = _items[_index];
 
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) { if (!didPop) Navigator.pop(context, _items); },
+      child: Scaffold(
       backgroundColor: Colors.black,
       body: GestureDetector(
         onVerticalDragEnd: (d) {
@@ -115,9 +131,9 @@ class _EmbyStreamPageState extends State<EmbyStreamPage> {
                 child: SafeArea(
                   child: Row(
                     children: [
-                      IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context)),
+                      IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context, _items)),
                       const Spacer(),
-                      Text('${_index + 1} / ${widget.items.length}', style: const TextStyle(color: Colors.white)),
+                      Text('${_index + 1} / ${_items.length}', style: const TextStyle(color: Colors.white)),
                       const SizedBox(width: 16),
                     ],
                   ),
@@ -143,13 +159,31 @@ class _EmbyStreamPageState extends State<EmbyStreamPage> {
             if (_showControls) ...[
               if (_index > 0)
                 const Positioned(top: 80, left: 0, right: 0, child: Icon(Icons.keyboard_arrow_up, color: Colors.white54, size: 28)),
-              if (_index < widget.items.length - 1)
+              if (_index < _items.length - 1)
                 const Positioned(bottom: 120, left: 0, right: 0, child: Icon(Icons.keyboard_arrow_down, color: Colors.white54, size: 28)),
             ],
+            // 右侧点赞按钮（常驻）
+            Positioned(
+              right: 12,
+              bottom: 120,
+              child: Column(
+                children: [
+                  IconButton(
+                    iconSize: 36,
+                    icon: Icon(
+                      item.isFavorite ? Icons.favorite : Icons.favorite_border,
+                      color: item.isFavorite ? Colors.red : Colors.white,
+                    ),
+                    onPressed: _toggleFavorite,
+                  ),
+                  Text(item.isFavorite ? '已收藏' : '收藏', style: const TextStyle(color: Colors.white, fontSize: 11)),
+                ],
+              ),
+            ),
           ],
         ),
       ),
-    );
+    ));
   }
 }
 

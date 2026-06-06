@@ -3,6 +3,7 @@ import '../../models/emby_models.dart';
 import '../../services/emby_service.dart';
 import 'emby_login_page.dart';
 import 'emby_video_feed_page.dart';
+import 'emby_favorites_page.dart';
 
 class EmbyHomePage extends StatefulWidget {
   const EmbyHomePage({super.key});
@@ -65,19 +66,26 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
           ? const Center(child: CircularProgressIndicator())
           : _libraries.isEmpty
               ? const Center(child: Text('没有媒体库'))
-              : ListView.builder(
-                  itemCount: _libraries.length,
-                  itemBuilder: (_, i) {
-                    final lib = _libraries[i];
-                    return ListTile(
+              : ListView(
+                  children: [
+                    ListTile(
+                      leading: Icon(Icons.favorite, color: Colors.red.shade400),
+                      title: const Text('我的收藏'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const EmbyFavoritesPage()),
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    ..._libraries.map((lib) => ListTile(
                       leading: Icon(_libIcon(lib.collectionType), color: Theme.of(context).colorScheme.primary),
                       title: Text(lib.name),
                       trailing: const Icon(Icons.chevron_right),
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute(builder: (_) => EmbyVideoFeedPage(library: lib)),
                       ),
-                    );
-                  },
+                    )),
+                  ],
                 ),
     );
   }

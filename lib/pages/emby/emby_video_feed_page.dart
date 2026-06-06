@@ -46,10 +46,16 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
     }
   }
 
-  void _openStream(int index) {
-    Navigator.of(context).push(MaterialPageRoute(
+  Future<void> _openStream(int index) async {
+    final updated = await Navigator.of(context).push<List<EmbyItem>>(MaterialPageRoute(
       builder: (_) => EmbyStreamPage(items: _items, initialIndex: index),
     ));
+    if (updated != null) setState(() {
+      for (final u in updated) {
+        final i = _items.indexWhere((e) => e.id == u.id);
+        if (i != -1) _items[i] = u;
+      }
+    });
   }
 
   @override

@@ -35,6 +35,7 @@ class EmbyItem {
   final int runTimeTicks;
   final String? seriesName;
   final int? indexNumber;
+  final bool isFavorite;
 
   const EmbyItem({
     required this.id,
@@ -43,6 +44,7 @@ class EmbyItem {
     this.runTimeTicks = 0,
     this.seriesName,
     this.indexNumber,
+    this.isFavorite = false,
   });
 
   factory EmbyItem.fromJson(Map<String, dynamic> json) => EmbyItem(
@@ -52,6 +54,17 @@ class EmbyItem {
         runTimeTicks: json['RunTimeTicks'] ?? 0,
         seriesName: json['SeriesName'],
         indexNumber: json['IndexNumber'],
+        isFavorite: json['UserData']?['IsFavorite'] ?? false,
+      );
+
+  EmbyItem copyWith({bool? isFavorite}) => EmbyItem(
+        id: id,
+        name: name,
+        overview: overview,
+        runTimeTicks: runTimeTicks,
+        seriesName: seriesName,
+        indexNumber: indexNumber,
+        isFavorite: isFavorite ?? this.isFavorite,
       );
 
   Duration get duration => Duration(microseconds: runTimeTicks ~/ 10);
