@@ -44,6 +44,9 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
   bool _showSeekFeedback = false;
   bool _isSeekScrubbing = false;
   bool _isFullscreen = false;
+  bool _isPlaying = false;
+  bool? _desiredPlaying;
+  bool _isApplyingPlayState = false;
   _PlaybackOrientation _playbackOrientation = _PlaybackOrientation.portrait;
 
   @override
@@ -65,6 +68,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _slideController.dispose();
+    _ctrl?.removeListener(_handlePlaybackControllerChanged);
     _ctrl?.dispose();
     super.dispose();
   }
@@ -73,8 +77,13 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
     final requestId = ++_playRequestId;
     final oldCtrl = _ctrl;
     if (oldCtrl != null) {
+      oldCtrl.removeListener(_handlePlaybackControllerChanged);
       if (mounted) {
-        setState(() => _ctrl = null);
+        setState(() {
+          _ctrl = null;
+          _isPlaying = false;
+          _desiredPlaying = null;
+        });
         await WidgetsBinding.instance.endOfFrame;
       } else {
         _ctrl = null;
@@ -98,8 +107,30 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
         return;
       }
     }
-    ctrl.play();
-    setState(() => _ctrl = ctrl);
+    ctrl.addListener(_handlePlaybackControllerChanged);
+    setState(() {
+      _ctrl = ctrl;
+      _isPlaying = true;
+      _desiredPlaying = null;
+    });
+    await ctrl.play();
+    if (!mounted || requestId != _playRequestId || _ctrl != ctrl) return;
+    setState(() => _isPlaying = ctrl.value.isPlaying);
+  }
+
+  void _handlePlaybackControllerChanged() {
+    final ctrl = _ctrl;
+    if (!mounted ||
+        ctrl == null ||
+        !ctrl.value.isInitialized ||
+        _desiredPlaying != null) {
+      return;
+    }
+
+    final nextPlaying = ctrl.value.isPlaying;
+    if (_isPlaying != nextPlaying) {
+      setState(() => _isPlaying = nextPlaying);
+    }
   }
 
   _PlaybackOrientation _orientationForVideoSize(Size size) {
@@ -393,9 +424,74 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
     });
   }
 
-  void _togglePlay() =>
-      _ctrl?.value.isPlaying == true ? _ctrl?.pause() : _ctrl?.play();
+  void _togglePlay() {
+    final ctrl = _ctrl;
+    if (ctrl == null || !ctrl.value.isInitialized) return;
+
+    final nextPlaying = !(_desiredPlaying ?? _isPlaying);
+    setState(() {
+      _isPlaying = nextPlaying;
+      _desiredPlaying = nextPlaying;
+    });
+    _applyDesiredPlayState();
+  }
+
+  Future<void> _applyDesiredPlayState() async {
+    if (_isApplyingPlayState) return;
+
+    _isApplyingPlayState = true;
+    try {
+      while (mounted) {
+        final ctrl = _ctrl;
+        final desiredPlaying = _desiredPlaying;
+        if (ctrl == null ||
+            desiredPlaying == null ||
+            !ctrl.value.isInitialized) {
+          _desiredPlaying = null;
+          return;
+        }
+
+        var commandSucceeded = true;
+        try {
+          if (ctrl.value.isPlaying != desiredPlaying) {
+            if (desiredPlaying) {
+              await ctrl.play();
+            } else {
+              await ctrl.pause();
+            }
+          }
+        } catch (_) {
+          commandSucceeded = false;
+          // Keep the UI responsive; the controller listener will resync state.
+        }
+
+        if (!mounted || _ctrl != ctrl) return;
+        if (_desiredPlaying == desiredPlaying) {
+          setState(() {
+            _desiredPlaying = null;
+            _isPlaying =
+                commandSucceeded ? desiredPlaying : ctrl.value.isPlaying;
+          });
+          return;
+        }
+      }
+    } finally {
+      _isApplyingPlayState = false;
+      if (mounted && _desiredPlaying != null) {
+        _applyDesiredPlayState();
+      }
+    }
+  }
+
   void _toggleControls() => setState(() => _showControls = !_showControls);
+
+  void _handleProgressPlayingChanged(bool playing) {
+    if (!mounted) return;
+    setState(() {
+      _isPlaying = playing;
+      _desiredPlaying = null;
+    });
+  }
 
   Future<void> _toggleFavorite() async {
     final item = _items[_index];
@@ -497,6 +593,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                               ctrl: ctrl,
                               onDragStart: () {},
                               onDragEnd: () {},
+                              onPlayingChanged: _handleProgressPlayingChanged,
                             ),
                         ],
                       ),
@@ -576,7 +673,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                           IconButton(
                             iconSize: 56,
                             icon: Icon(
-                              ctrl.value.isPlaying
+                              _isPlaying
                                   ? Icons.pause_circle
                                   : Icons.play_circle,
                               color: Colors.white,
@@ -617,27 +714,32 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                     ),
                   Positioned(
                     right: 12,
-                    bottom: 120,
-                    child: Column(
-                      children: [
-                        IconButton(
-                          iconSize: 36,
-                          icon: Icon(
-                            item.isFavorite
-                                ? Icons.favorite
-                                : Icons.favorite_border,
-                            color: item.isFavorite ? Colors.red : Colors.white,
+                    top: 0,
+                    bottom: 0,
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            iconSize: 36,
+                            icon: Icon(
+                              item.isFavorite
+                                  ? Icons.favorite
+                                  : Icons.favorite_border,
+                              color:
+                                  item.isFavorite ? Colors.red : Colors.white,
+                            ),
+                            onPressed: _toggleFavorite,
                           ),
-                          onPressed: _toggleFavorite,
-                        ),
-                        Text(
-                          item.isFavorite ? '已收藏' : '收藏',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
+                          Text(
+                            item.isFavorite ? '已收藏' : '收藏',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ],
@@ -654,10 +756,12 @@ class _ProgressBar extends StatefulWidget {
   final VideoPlayerController ctrl;
   final VoidCallback onDragStart;
   final VoidCallback onDragEnd;
+  final ValueChanged<bool> onPlayingChanged;
   const _ProgressBar({
     required this.ctrl,
     required this.onDragStart,
     required this.onDragEnd,
+    required this.onPlayingChanged,
   });
 
   @override
@@ -788,6 +892,7 @@ class _SeekFeedback extends StatelessWidget {
 
 class _ProgressBarState extends State<_ProgressBar> {
   double? _dragValue;
+  bool _wasPlayingBeforeDrag = false;
 
   @override
   void initState() {
@@ -827,30 +932,41 @@ class _ProgressBarState extends State<_ProgressBar> {
           style: const TextStyle(color: Colors.white, fontSize: 11),
         ),
         Expanded(
-          child: SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              trackHeight: 2,
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-              overlayShape: SliderComponentShape.noOverlay,
-              activeTrackColor: Colors.green,
-              inactiveTrackColor: Colors.white24,
-              thumbColor: Colors.white,
-            ),
-            child: Slider(
-              value: dur > 0 ? pos.clamp(0, dur.toDouble()) : 0,
-              min: 0,
-              max: dur > 0 ? dur.toDouble() : 1,
-              onChangeStart: (_) {
-                widget.onDragStart();
-                widget.ctrl.pause();
-              },
-              onChanged: (v) => setState(() => _dragValue = v),
-              onChangeEnd: (v) {
-                widget.ctrl.seekTo(Duration(milliseconds: v.toInt()));
-                widget.ctrl.play();
-                _dragValue = null;
-                widget.onDragEnd();
-              },
+          child: SizedBox(
+            height: 44,
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 4,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 9),
+                overlayShape: const RoundSliderOverlayShape(
+                  overlayRadius: 22,
+                ),
+                activeTrackColor: Colors.green,
+                inactiveTrackColor: Colors.white30,
+                overlayColor: Colors.white.withValues(alpha: 0.14),
+                thumbColor: Colors.white,
+              ),
+              child: Slider(
+                value: dur > 0 ? pos.clamp(0, dur.toDouble()) : 0,
+                min: 0,
+                max: dur > 0 ? dur.toDouble() : 1,
+                onChangeStart: (_) {
+                  _wasPlayingBeforeDrag = widget.ctrl.value.isPlaying;
+                  widget.onDragStart();
+                  widget.onPlayingChanged(false);
+                  widget.ctrl.pause();
+                },
+                onChanged: (v) => setState(() => _dragValue = v),
+                onChangeEnd: (v) async {
+                  await widget.ctrl.seekTo(Duration(milliseconds: v.toInt()));
+                  if (_wasPlayingBeforeDrag) {
+                    await widget.ctrl.play();
+                    widget.onPlayingChanged(true);
+                  }
+                  _dragValue = null;
+                  widget.onDragEnd();
+                },
+              ),
             ),
           ),
         ),
