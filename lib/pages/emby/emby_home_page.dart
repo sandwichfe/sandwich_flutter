@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../models/emby_models.dart';
-import '../services/emby_service.dart';
+import '../../models/emby_models.dart';
+import '../../services/emby_service.dart';
 import 'emby_login_page.dart';
 import 'emby_video_feed_page.dart';
 

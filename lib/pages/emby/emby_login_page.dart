@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../services/emby_service.dart';
+import '../../services/emby_service.dart';
 import 'emby_home_page.dart';
 
 class EmbyLoginPage extends StatefulWidget {

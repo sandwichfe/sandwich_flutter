@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
-import '../models/emby_models.dart';
-import '../services/emby_service.dart';
+import '../../models/emby_models.dart';
+import '../../services/emby_service.dart';
 
 class EmbyStreamPage extends StatefulWidget {
   final List<EmbyItem> items;
@@ -46,17 +46,11 @@ class _EmbyStreamPageState extends State<EmbyStreamPage> {
   }
 
   void _next() {
-    if (_index < widget.items.length - 1) {
-      _index++;
-      _play(_index);
-    }
+    if (_index < widget.items.length - 1) { _index++; _play(_index); }
   }
 
   void _prev() {
-    if (_index > 0) {
-      _index--;
-      _play(_index);
-    }
+    if (_index > 0) { _index--; _play(_index); }
   }
 
   void _seek(int seconds) {
@@ -67,7 +61,6 @@ class _EmbyStreamPageState extends State<EmbyStreamPage> {
   }
 
   void _togglePlay() => _ctrl?.value.isPlaying == true ? _ctrl?.pause() : _ctrl?.play();
-
   void _toggleControls() => setState(() => _showControls = !_showControls);
 
   @override
@@ -92,18 +85,10 @@ class _EmbyStreamPageState extends State<EmbyStreamPage> {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // Video
             if (ctrl != null && ctrl.value.isInitialized)
-              Center(
-                child: AspectRatio(
-                  aspectRatio: ctrl.value.aspectRatio,
-                  child: VideoPlayer(ctrl),
-                ),
-              )
+              Center(child: AspectRatio(aspectRatio: ctrl.value.aspectRatio, child: VideoPlayer(ctrl)))
             else
               const Center(child: CircularProgressIndicator(color: Colors.green)),
-
-            // Info overlay (always visible at bottom)
             Positioned(
               bottom: 0, left: 0, right: 0,
               child: Container(
@@ -124,8 +109,6 @@ class _EmbyStreamPageState extends State<EmbyStreamPage> {
                 ),
               ),
             ),
-
-            // Controls overlay
             if (_showControls)
               Positioned(
                 top: 0, left: 0, right: 0,
@@ -140,7 +123,6 @@ class _EmbyStreamPageState extends State<EmbyStreamPage> {
                   ),
                 ),
               ),
-
             if (_showControls && ctrl != null)
               Center(
                 child: Row(
@@ -158,8 +140,6 @@ class _EmbyStreamPageState extends State<EmbyStreamPage> {
                   ],
                 ),
               ),
-
-            // Swipe hints
             if (_showControls) ...[
               if (_index > 0)
                 const Positioned(top: 80, left: 0, right: 0, child: Icon(Icons.keyboard_arrow_up, color: Colors.white54, size: 28)),
