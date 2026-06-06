@@ -23,6 +23,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
   static const double _seekSwipeDurationPercent = 0.08;
   static const double _seekSwipeMinDistance = 18;
   static const Duration _settleDuration = Duration(milliseconds: 180);
+  static const Duration _switchExitDuration = Duration(milliseconds: 320);
 
   late int _index;
   late List<EmbyItem> _items;
@@ -97,8 +98,10 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
   Future<void> _animateDragTo(
     double target, {
     Curve curve = Curves.easeOutCubic,
+    Duration? duration,
   }) async {
     _slideController.stop();
+    _slideController.duration = duration ?? _settleDuration;
     final animation = Tween<double>(
       begin: _dragOffsetY,
       end: target,
@@ -128,7 +131,13 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
     }
 
     setState(() => _isSwitchingVideo = true);
-    if (exitOffset != null) await _animateDragTo(exitOffset);
+    if (exitOffset != null) {
+      await _animateDragTo(
+        exitOffset,
+        duration: _switchExitDuration,
+        curve: Curves.easeInOutCubic,
+      );
+    }
     if (!mounted) return;
 
     setState(() {
