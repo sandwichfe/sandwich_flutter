@@ -64,9 +64,16 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
 
   Future<void> _play(int index) async {
     final requestId = ++_playRequestId;
-    await _ctrl?.dispose();
-    _ctrl = null;
-    if (mounted) setState(() {});
+    final oldCtrl = _ctrl;
+    if (oldCtrl != null) {
+      if (mounted) {
+        setState(() => _ctrl = null);
+        await WidgetsBinding.instance.endOfFrame;
+      } else {
+        _ctrl = null;
+      }
+      await oldCtrl.dispose();
+    }
 
     final url = EmbyService().getStreamUrl(_items[index].id);
     final ctrl = VideoPlayerController.networkUrl(Uri.parse(url));
@@ -438,13 +445,10 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                         children: [
                           IconButton(
                             iconSize: 40,
-                            icon: const Icon(
-                              Icons.replay_10,
-                              color: Colors.white,
-                            ),
-                            onPressed: () => _seek(-10),
+                            icon: const _SeekButtonIcon(seconds: -15),
+                            onPressed: () => _seek(-15),
                           ),
-                          const SizedBox(width: 16),
+                          const SizedBox(width: 48),
                           IconButton(
                             iconSize: 56,
                             icon: Icon(
@@ -455,14 +459,11 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                             ),
                             onPressed: _togglePlay,
                           ),
-                          const SizedBox(width: 16),
+                          const SizedBox(width: 48),
                           IconButton(
                             iconSize: 40,
-                            icon: const Icon(
-                              Icons.forward_10,
-                              color: Colors.white,
-                            ),
-                            onPressed: () => _seek(10),
+                            icon: const _SeekButtonIcon(seconds: 15),
+                            onPressed: () => _seek(15),
                           ),
                         ],
                       ),
@@ -490,30 +491,6 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                         ),
                       ),
                     ),
-                  if (_showControls) ...[
-                    if (_index > 0)
-                      const Positioned(
-                        top: 80,
-                        left: 0,
-                        right: 0,
-                        child: Icon(
-                          Icons.keyboard_arrow_up,
-                          color: Colors.white54,
-                          size: 28,
-                        ),
-                      ),
-                    if (_index < _items.length - 1)
-                      const Positioned(
-                        bottom: 120,
-                        left: 0,
-                        right: 0,
-                        child: Icon(
-                          Icons.keyboard_arrow_down,
-                          color: Colors.white54,
-                          size: 28,
-                        ),
-                      ),
-                  ],
                   Positioned(
                     right: 12,
                     bottom: 120,
@@ -561,6 +538,44 @@ class _ProgressBar extends StatefulWidget {
 
   @override
   State<_ProgressBar> createState() => _ProgressBarState();
+}
+
+class _SeekButtonIcon extends StatelessWidget {
+  final int seconds;
+
+  const _SeekButtonIcon({required this.seconds});
+
+  @override
+  Widget build(BuildContext context) {
+    final isForward = seconds > 0;
+
+    return SizedBox(
+      width: 40,
+      height: 40,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Transform(
+            alignment: Alignment.center,
+            transform: Matrix4.identity()..scale(isForward ? -1.0 : 1.0, 1.0),
+            child: const Icon(Icons.replay, color: Colors.white, size: 36),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 3),
+            child: Text(
+              '${isForward ? '+' : '-'}${seconds.abs()}',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 9,
+                height: 1,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _SeekFeedback extends StatelessWidget {
@@ -653,9 +668,26 @@ class _ProgressBarState extends State<_ProgressBar> {
   @override
   void initState() {
     super.initState();
-    widget.ctrl.addListener(() {
-      if (mounted) setState(() {});
-    });
+    widget.ctrl.addListener(_handleControllerChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant _ProgressBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.ctrl == widget.ctrl) return;
+    oldWidget.ctrl.removeListener(_handleControllerChanged);
+    widget.ctrl.addListener(_handleControllerChanged);
+    _dragValue = null;
+  }
+
+  @override
+  void dispose() {
+    widget.ctrl.removeListener(_handleControllerChanged);
+    super.dispose();
+  }
+
+  void _handleControllerChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
