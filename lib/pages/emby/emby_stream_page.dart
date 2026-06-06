@@ -4,6 +4,8 @@ import 'package:video_player/video_player.dart';
 import '../../models/emby_models.dart';
 import '../../services/emby_service.dart';
 
+enum _PlaybackOrientation { portrait, landscape }
+
 class EmbyStreamPage extends StatefulWidget {
   final List<EmbyItem> items;
   final int initialIndex;
@@ -41,6 +43,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
   Duration? _seekFeedbackTarget;
   bool _showSeekFeedback = false;
   bool _isSeekScrubbing = false;
+  _PlaybackOrientation _playbackOrientation = _PlaybackOrientation.portrait;
 
   @override
   void initState() {
@@ -51,12 +54,13 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
       vsync: this,
       duration: _settleDuration,
     );
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersive);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _play(_index);
   }
 
   @override
   void dispose() {
+    SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _slideController.dispose();
     _ctrl?.dispose();
@@ -79,12 +83,48 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
     final url = EmbyService().getStreamUrl(_items[index].id);
     final ctrl = VideoPlayerController.networkUrl(Uri.parse(url));
     await ctrl.initialize();
-    ctrl.play();
     if (!mounted || requestId != _playRequestId) {
       await ctrl.dispose();
       return;
     }
+    await _applyPlaybackOrientation(_orientationForVideoSize(ctrl.value.size));
+    if (!mounted || requestId != _playRequestId) {
+      await ctrl.dispose();
+      return;
+    }
+    ctrl.play();
     setState(() => _ctrl = ctrl);
+  }
+
+  _PlaybackOrientation _orientationForVideoSize(Size size) {
+    if (size.width > 0 && size.width > size.height) {
+      return _PlaybackOrientation.landscape;
+    }
+    return _PlaybackOrientation.portrait;
+  }
+
+  Future<void> _applyPlaybackOrientation(
+    _PlaybackOrientation orientation,
+  ) async {
+    final orientations =
+        orientation == _PlaybackOrientation.landscape
+            ? const [
+              DeviceOrientation.landscapeLeft,
+              DeviceOrientation.landscapeRight,
+            ]
+            : const [DeviceOrientation.portraitUp];
+
+    await SystemChrome.setPreferredOrientations(orientations);
+    if (!mounted) return;
+    setState(() => _playbackOrientation = orientation);
+  }
+
+  Future<void> _togglePlaybackOrientation() {
+    final next =
+        _playbackOrientation == _PlaybackOrientation.landscape
+            ? _PlaybackOrientation.portrait
+            : _PlaybackOrientation.landscape;
+    return _applyPlaybackOrientation(next);
   }
 
   double _visualDragOffset(double rawOffset) {
@@ -438,6 +478,22 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                               onPressed: () => Navigator.pop(context, _items),
                             ),
                             const Spacer(),
+                            IconButton(
+                              tooltip:
+                                  _playbackOrientation ==
+                                          _PlaybackOrientation.landscape
+                                      ? '切换竖屏'
+                                      : '切换横屏',
+                              icon: Icon(
+                                _playbackOrientation ==
+                                        _PlaybackOrientation.landscape
+                                    ? Icons.stay_current_portrait
+                                    : Icons.stay_current_landscape,
+                                color: Colors.white,
+                              ),
+                              onPressed: _togglePlaybackOrientation,
+                            ),
+                            const SizedBox(width: 8),
                             Text(
                               '${_index + 1} / ${_items.length}',
                               style: const TextStyle(color: Colors.white),
