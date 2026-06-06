@@ -7,23 +7,40 @@ import '../../services/emby_service.dart';
 class EmbyStreamPage extends StatefulWidget {
   final List<EmbyItem> items;
   final int initialIndex;
-  const EmbyStreamPage({super.key, required this.items, required this.initialIndex});
+  const EmbyStreamPage({
+    super.key,
+    required this.items,
+    required this.initialIndex,
+  });
 
   @override
   State<EmbyStreamPage> createState() => _EmbyStreamPageState();
 }
 
-class _EmbyStreamPageState extends State<EmbyStreamPage> {
+class _EmbyStreamPageState extends State<EmbyStreamPage>
+    with SingleTickerProviderStateMixin {
+  static const double _switchVelocity = 600;
+  static const Duration _settleDuration = Duration(milliseconds: 180);
+
   late int _index;
   late List<EmbyItem> _items;
+  late final AnimationController _slideController;
   VideoPlayerController? _ctrl;
   bool _showControls = false;
+  bool _isSwitchingVideo = false;
+  double _rawDragOffsetY = 0;
+  double _dragOffsetY = 0;
+  int _playRequestId = 0;
 
   @override
   void initState() {
     super.initState();
     _index = widget.initialIndex;
     _items = List.of(widget.items);
+    _slideController = AnimationController(
+      vsync: this,
+      duration: _settleDuration,
+    );
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersive);
     _play(_index);
   }
@@ -31,28 +48,123 @@ class _EmbyStreamPageState extends State<EmbyStreamPage> {
   @override
   void dispose() {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    _slideController.dispose();
     _ctrl?.dispose();
     super.dispose();
   }
 
   Future<void> _play(int index) async {
+    final requestId = ++_playRequestId;
     await _ctrl?.dispose();
     _ctrl = null;
-    setState(() {});
+    if (mounted) setState(() {});
 
     final url = EmbyService().getStreamUrl(_items[index].id);
     final ctrl = VideoPlayerController.networkUrl(Uri.parse(url));
     await ctrl.initialize();
     ctrl.play();
-    if (mounted) setState(() => _ctrl = ctrl);
+    if (!mounted || requestId != _playRequestId) {
+      await ctrl.dispose();
+      return;
+    }
+    setState(() => _ctrl = ctrl);
   }
 
-  void _next() {
-    if (_index < _items.length - 1) { _index++; _play(_index); }
+  double _visualDragOffset(double rawOffset) {
+    if ((_index == 0 && rawOffset > 0) ||
+        (_index == _items.length - 1 && rawOffset < 0)) {
+      return rawOffset * 0.28;
+    }
+    return rawOffset;
   }
 
-  void _prev() {
-    if (_index > 0) { _index--; _play(_index); }
+  Future<void> _animateDragTo(
+    double target, {
+    Curve curve = Curves.easeOutCubic,
+  }) async {
+    _slideController.stop();
+    final animation = Tween<double>(
+      begin: _dragOffsetY,
+      end: target,
+    ).animate(CurvedAnimation(parent: _slideController, curve: curve));
+
+    void updateOffset() {
+      if (mounted) setState(() => _dragOffsetY = animation.value);
+    }
+
+    animation.addListener(updateOffset);
+    _slideController.reset();
+    try {
+      await _slideController.forward();
+    } on TickerCanceled {
+      // A new drag or page dispose can intentionally cancel the in-flight slide.
+    } finally {
+      animation.removeListener(updateOffset);
+    }
+  }
+
+  Future<void> _switchTo(int targetIndex, {double? exitOffset}) async {
+    if (_isSwitchingVideo ||
+        targetIndex == _index ||
+        targetIndex < 0 ||
+        targetIndex >= _items.length) {
+      return;
+    }
+
+    setState(() => _isSwitchingVideo = true);
+    if (exitOffset != null) await _animateDragTo(exitOffset);
+    if (!mounted) return;
+
+    setState(() {
+      _index = targetIndex;
+      _rawDragOffsetY = 0;
+      _dragOffsetY = 0;
+    });
+    await _play(targetIndex);
+    if (mounted) setState(() => _isSwitchingVideo = false);
+  }
+
+  void _handleVerticalDragStart(DragStartDetails details) {
+    if (_isSwitchingVideo) return;
+    _slideController.stop();
+    _rawDragOffsetY = 0;
+  }
+
+  void _handleVerticalDragUpdate(DragUpdateDetails details) {
+    if (_isSwitchingVideo) return;
+    setState(() {
+      _rawDragOffsetY += details.delta.dy;
+      _dragOffsetY = _visualDragOffset(_rawDragOffsetY);
+    });
+  }
+
+  void _handleVerticalDragEnd(DragEndDetails details) {
+    if (_isSwitchingVideo) return;
+
+    final height = MediaQuery.sizeOf(context).height;
+    final velocity = details.primaryVelocity ?? 0;
+    final distanceThreshold = height * 0.16;
+    final shouldNext =
+        _index < _items.length - 1 &&
+        (_rawDragOffsetY < -distanceThreshold || velocity < -_switchVelocity);
+    final shouldPrev =
+        _index > 0 &&
+        (_rawDragOffsetY > distanceThreshold || velocity > _switchVelocity);
+
+    if (shouldNext) {
+      _switchTo(_index + 1, exitOffset: -height);
+    } else if (shouldPrev) {
+      _switchTo(_index - 1, exitOffset: height);
+    } else {
+      _rawDragOffsetY = 0;
+      _animateDragTo(0);
+    }
+  }
+
+  void _handleVerticalDragCancel() {
+    if (_isSwitchingVideo) return;
+    _rawDragOffsetY = 0;
+    _animateDragTo(0);
   }
 
   void _seek(int seconds) {
@@ -62,7 +174,8 @@ class _EmbyStreamPageState extends State<EmbyStreamPage> {
     ctrl.seekTo(pos.isNegative ? Duration.zero : pos);
   }
 
-  void _togglePlay() => _ctrl?.value.isPlaying == true ? _ctrl?.pause() : _ctrl?.play();
+  void _togglePlay() =>
+      _ctrl?.value.isPlaying == true ? _ctrl?.pause() : _ctrl?.play();
   void _toggleControls() => setState(() => _showControls = !_showControls);
 
   Future<void> _toggleFavorite() async {
@@ -72,7 +185,9 @@ class _EmbyStreamPageState extends State<EmbyStreamPage> {
     try {
       await EmbyService().setFavorite(item.id, favorite: newVal);
     } catch (_) {
-      setState(() => _items[_index] = item.copyWith(isFavorite: item.isFavorite));
+      setState(
+        () => _items[_index] = item.copyWith(isFavorite: item.isFavorite),
+      );
     }
   }
 
@@ -83,107 +198,202 @@ class _EmbyStreamPageState extends State<EmbyStreamPage> {
 
     return PopScope(
       canPop: false,
-      onPopInvokedWithResult: (didPop, _) { if (!didPop) Navigator.pop(context, _items); },
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) Navigator.pop(context, _items);
+      },
       child: Scaffold(
-      backgroundColor: Colors.black,
-      body: GestureDetector(
-        onVerticalDragEnd: (d) {
-          if (d.primaryVelocity == null) return;
-          if (d.primaryVelocity! < -300) _next();
-          if (d.primaryVelocity! > 300) _prev();
-        },
-        onDoubleTapDown: (d) {
-          final half = MediaQuery.of(context).size.width / 2;
-          _seek(d.localPosition.dx < half ? -15 : 15);
-        },
-        onDoubleTap: () {},
-        onTap: _toggleControls,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (ctrl != null && ctrl.value.isInitialized)
-              Center(child: AspectRatio(aspectRatio: ctrl.value.aspectRatio, child: VideoPlayer(ctrl)))
-            else
-              const Center(child: CircularProgressIndicator(color: Colors.green)),
-            Positioned(
-              bottom: 0, left: 0, right: 0,
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(16, 32, 16, 16),
-                decoration: const BoxDecoration(gradient: LinearGradient(
-                  begin: Alignment.bottomCenter, end: Alignment.topCenter,
-                  colors: [Colors.black87, Colors.transparent],
-                )),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(item.name, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                    if (item.overview.isNotEmpty)
-                      Text(item.overview, style: const TextStyle(color: Colors.grey, fontSize: 12), maxLines: 2, overflow: TextOverflow.ellipsis),
-                    const SizedBox(height: 8),
-                    if (ctrl != null) _ProgressBar(ctrl: ctrl, onDragStart: () {}, onDragEnd: () {}),
-                  ],
-                ),
-              ),
-            ),
-            if (_showControls)
-              Positioned(
-                top: 0, left: 0, right: 0,
-                child: SafeArea(
-                  child: Row(
-                    children: [
-                      IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context, _items)),
-                      const Spacer(),
-                      Text('${_index + 1} / ${_items.length}', style: const TextStyle(color: Colors.white)),
-                      const SizedBox(width: 16),
-                    ],
-                  ),
-                ),
-              ),
-            if (_showControls && ctrl != null)
-              Center(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(iconSize: 40, icon: const Icon(Icons.replay_10, color: Colors.white), onPressed: () => _seek(-10)),
-                    const SizedBox(width: 16),
-                    IconButton(
-                      iconSize: 56,
-                      icon: Icon(ctrl.value.isPlaying ? Icons.pause_circle : Icons.play_circle, color: Colors.white),
-                      onPressed: _togglePlay,
-                    ),
-                    const SizedBox(width: 16),
-                    IconButton(iconSize: 40, icon: const Icon(Icons.forward_10, color: Colors.white), onPressed: () => _seek(10)),
-                  ],
-                ),
-              ),
-            if (_showControls) ...[
-              if (_index > 0)
-                const Positioned(top: 80, left: 0, right: 0, child: Icon(Icons.keyboard_arrow_up, color: Colors.white54, size: 28)),
-              if (_index < _items.length - 1)
-                const Positioned(bottom: 120, left: 0, right: 0, child: Icon(Icons.keyboard_arrow_down, color: Colors.white54, size: 28)),
-            ],
-            // 右侧点赞按钮（常驻）
-            Positioned(
-              right: 12,
-              bottom: 120,
-              child: Column(
+        backgroundColor: Colors.black,
+        body: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onVerticalDragStart: _handleVerticalDragStart,
+          onVerticalDragUpdate: _handleVerticalDragUpdate,
+          onVerticalDragEnd: _handleVerticalDragEnd,
+          onVerticalDragCancel: _handleVerticalDragCancel,
+          onDoubleTapDown: (d) {
+            final half = MediaQuery.of(context).size.width / 2;
+            _seek(d.localPosition.dx < half ? -15 : 15);
+          },
+          onDoubleTap: () {},
+          onTap: _toggleControls,
+          child: ClipRect(
+            child: Transform.translate(
+              offset: Offset(0, _dragOffsetY),
+              child: Stack(
+                fit: StackFit.expand,
                 children: [
-                  IconButton(
-                    iconSize: 36,
-                    icon: Icon(
-                      item.isFavorite ? Icons.favorite : Icons.favorite_border,
-                      color: item.isFavorite ? Colors.red : Colors.white,
+                  if (ctrl != null && ctrl.value.isInitialized)
+                    Center(
+                      child: AspectRatio(
+                        aspectRatio: ctrl.value.aspectRatio,
+                        child: VideoPlayer(ctrl),
+                      ),
+                    )
+                  else
+                    const Center(
+                      child: CircularProgressIndicator(color: Colors.green),
                     ),
-                    onPressed: _toggleFavorite,
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: Container(
+                      padding: const EdgeInsets.fromLTRB(16, 32, 16, 16),
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.bottomCenter,
+                          end: Alignment.topCenter,
+                          colors: [Colors.black87, Colors.transparent],
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            item.name,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          if (item.overview.isNotEmpty)
+                            Text(
+                              item.overview,
+                              style: const TextStyle(
+                                color: Colors.grey,
+                                fontSize: 12,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          const SizedBox(height: 8),
+                          if (ctrl != null)
+                            _ProgressBar(
+                              ctrl: ctrl,
+                              onDragStart: () {},
+                              onDragEnd: () {},
+                            ),
+                        ],
+                      ),
+                    ),
                   ),
-                  Text(item.isFavorite ? '已收藏' : '收藏', style: const TextStyle(color: Colors.white, fontSize: 11)),
+                  if (_showControls)
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: SafeArea(
+                        child: Row(
+                          children: [
+                            IconButton(
+                              icon: const Icon(
+                                Icons.arrow_back,
+                                color: Colors.white,
+                              ),
+                              onPressed: () => Navigator.pop(context, _items),
+                            ),
+                            const Spacer(),
+                            Text(
+                              '${_index + 1} / ${_items.length}',
+                              style: const TextStyle(color: Colors.white),
+                            ),
+                            const SizedBox(width: 16),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (_showControls && ctrl != null)
+                    Center(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            iconSize: 40,
+                            icon: const Icon(
+                              Icons.replay_10,
+                              color: Colors.white,
+                            ),
+                            onPressed: () => _seek(-10),
+                          ),
+                          const SizedBox(width: 16),
+                          IconButton(
+                            iconSize: 56,
+                            icon: Icon(
+                              ctrl.value.isPlaying
+                                  ? Icons.pause_circle
+                                  : Icons.play_circle,
+                              color: Colors.white,
+                            ),
+                            onPressed: _togglePlay,
+                          ),
+                          const SizedBox(width: 16),
+                          IconButton(
+                            iconSize: 40,
+                            icon: const Icon(
+                              Icons.forward_10,
+                              color: Colors.white,
+                            ),
+                            onPressed: () => _seek(10),
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (_showControls) ...[
+                    if (_index > 0)
+                      const Positioned(
+                        top: 80,
+                        left: 0,
+                        right: 0,
+                        child: Icon(
+                          Icons.keyboard_arrow_up,
+                          color: Colors.white54,
+                          size: 28,
+                        ),
+                      ),
+                    if (_index < _items.length - 1)
+                      const Positioned(
+                        bottom: 120,
+                        left: 0,
+                        right: 0,
+                        child: Icon(
+                          Icons.keyboard_arrow_down,
+                          color: Colors.white54,
+                          size: 28,
+                        ),
+                      ),
+                  ],
+                  Positioned(
+                    right: 12,
+                    bottom: 120,
+                    child: Column(
+                      children: [
+                        IconButton(
+                          iconSize: 36,
+                          icon: Icon(
+                            item.isFavorite
+                                ? Icons.favorite
+                                : Icons.favorite_border,
+                            color: item.isFavorite ? Colors.red : Colors.white,
+                          ),
+                          onPressed: _toggleFavorite,
+                        ),
+                        Text(
+                          item.isFavorite ? '已收藏' : '收藏',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
-          ],
+          ),
         ),
       ),
-    ));
+    );
   }
 }
 
@@ -191,7 +401,11 @@ class _ProgressBar extends StatefulWidget {
   final VideoPlayerController ctrl;
   final VoidCallback onDragStart;
   final VoidCallback onDragEnd;
-  const _ProgressBar({required this.ctrl, required this.onDragStart, required this.onDragEnd});
+  const _ProgressBar({
+    required this.ctrl,
+    required this.onDragStart,
+    required this.onDragEnd,
+  });
 
   @override
   State<_ProgressBar> createState() => _ProgressBarState();
@@ -203,17 +417,23 @@ class _ProgressBarState extends State<_ProgressBar> {
   @override
   void initState() {
     super.initState();
-    widget.ctrl.addListener(() { if (mounted) setState(() {}); });
+    widget.ctrl.addListener(() {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final dur = widget.ctrl.value.duration.inMilliseconds;
-    final pos = _dragValue ?? widget.ctrl.value.position.inMilliseconds.toDouble();
+    final pos =
+        _dragValue ?? widget.ctrl.value.position.inMilliseconds.toDouble();
 
     return Row(
       children: [
-        Text(_fmt(pos.toInt()), style: const TextStyle(color: Colors.white, fontSize: 11)),
+        Text(
+          _fmt(pos.toInt()),
+          style: const TextStyle(color: Colors.white, fontSize: 11),
+        ),
         Expanded(
           child: SliderTheme(
             data: SliderTheme.of(context).copyWith(
@@ -228,7 +448,10 @@ class _ProgressBarState extends State<_ProgressBar> {
               value: dur > 0 ? pos.clamp(0, dur.toDouble()) : 0,
               min: 0,
               max: dur > 0 ? dur.toDouble() : 1,
-              onChangeStart: (_) { widget.onDragStart(); widget.ctrl.pause(); },
+              onChangeStart: (_) {
+                widget.onDragStart();
+                widget.ctrl.pause();
+              },
               onChanged: (v) => setState(() => _dragValue = v),
               onChangeEnd: (v) {
                 widget.ctrl.seekTo(Duration(milliseconds: v.toInt()));
@@ -239,7 +462,10 @@ class _ProgressBarState extends State<_ProgressBar> {
             ),
           ),
         ),
-        Text(_fmt(dur), style: const TextStyle(color: Colors.grey, fontSize: 11)),
+        Text(
+          _fmt(dur),
+          style: const TextStyle(color: Colors.grey, fontSize: 11),
+        ),
       ],
     );
   }
