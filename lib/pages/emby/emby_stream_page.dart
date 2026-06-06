@@ -43,6 +43,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
   Duration? _seekFeedbackTarget;
   bool _showSeekFeedback = false;
   bool _isSeekScrubbing = false;
+  bool _isFullscreen = false;
   _PlaybackOrientation _playbackOrientation = _PlaybackOrientation.portrait;
 
   @override
@@ -54,7 +55,8 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
       vsync: this,
       duration: _settleDuration,
     );
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    SystemChrome.setPreferredOrientations(const [DeviceOrientation.portraitUp]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _play(_index);
   }
 
@@ -87,10 +89,14 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
       await ctrl.dispose();
       return;
     }
-    await _applyPlaybackOrientation(_orientationForVideoSize(ctrl.value.size));
-    if (!mounted || requestId != _playRequestId) {
-      await ctrl.dispose();
-      return;
+    if (_isFullscreen) {
+      await _applyPlaybackOrientation(
+        _orientationForVideoSize(ctrl.value.size),
+      );
+      if (!mounted || requestId != _playRequestId) {
+        await ctrl.dispose();
+        return;
+      }
     }
     ctrl.play();
     setState(() => _ctrl = ctrl);
@@ -125,6 +131,40 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
             ? _PlaybackOrientation.portrait
             : _PlaybackOrientation.landscape;
     return _applyPlaybackOrientation(next);
+  }
+
+  Future<void> _enterFullscreen() async {
+    setState(() => _isFullscreen = true);
+    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    final ctrl = _ctrl;
+    final orientation =
+        ctrl != null && ctrl.value.isInitialized
+            ? _orientationForVideoSize(ctrl.value.size)
+            : _PlaybackOrientation.portrait;
+    await _applyPlaybackOrientation(orientation);
+  }
+
+  Future<void> _exitFullscreen() async {
+    await SystemChrome.setPreferredOrientations(const [
+      DeviceOrientation.portraitUp,
+    ]);
+    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    if (!mounted) return;
+    setState(() {
+      _isFullscreen = false;
+      _playbackOrientation = _PlaybackOrientation.portrait;
+    });
+  }
+
+  Future<void> _handleBackPressed() async {
+    if (_isFullscreen ||
+        _playbackOrientation == _PlaybackOrientation.landscape) {
+      await _exitFullscreen();
+      return;
+    }
+
+    if (!mounted) return;
+    Navigator.pop(context, _items);
   }
 
   double _visualDragOffset(double rawOffset) {
@@ -378,7 +418,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) Navigator.pop(context, _items);
+        if (!didPop) _handleBackPressed();
       },
       child: Scaffold(
         backgroundColor: Colors.black,
@@ -475,24 +515,43 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                                 Icons.arrow_back,
                                 color: Colors.white,
                               ),
-                              onPressed: () => Navigator.pop(context, _items),
+                              onPressed: _handleBackPressed,
                             ),
                             const Spacer(),
-                            IconButton(
-                              tooltip:
+                            if (_isFullscreen) ...[
+                              IconButton(
+                                tooltip:
+                                    _playbackOrientation ==
+                                            _PlaybackOrientation.landscape
+                                        ? '切换竖屏'
+                                        : '切换横屏',
+                                icon: Icon(
                                   _playbackOrientation ==
                                           _PlaybackOrientation.landscape
-                                      ? '切换竖屏'
-                                      : '切换横屏',
-                              icon: Icon(
-                                _playbackOrientation ==
-                                        _PlaybackOrientation.landscape
-                                    ? Icons.stay_current_portrait
-                                    : Icons.stay_current_landscape,
-                                color: Colors.white,
+                                      ? Icons.stay_current_portrait
+                                      : Icons.stay_current_landscape,
+                                  color: Colors.white,
+                                ),
+                                onPressed: _togglePlaybackOrientation,
                               ),
-                              onPressed: _togglePlaybackOrientation,
-                            ),
+                              const SizedBox(width: 8),
+                              IconButton(
+                                tooltip: '退出全屏',
+                                icon: const Icon(
+                                  Icons.fullscreen_exit,
+                                  color: Colors.white,
+                                ),
+                                onPressed: _exitFullscreen,
+                              ),
+                            ] else
+                              IconButton(
+                                tooltip: '全屏播放',
+                                icon: const Icon(
+                                  Icons.fullscreen,
+                                  color: Colors.white,
+                                ),
+                                onPressed: _enterFullscreen,
+                              ),
                             const SizedBox(width: 8),
                             Text(
                               '${_index + 1} / ${_items.length}',
