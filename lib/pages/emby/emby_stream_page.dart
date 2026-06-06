@@ -31,6 +31,9 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
   double _rawDragOffsetY = 0;
   double _dragOffsetY = 0;
   int _playRequestId = 0;
+  int _seekFeedbackId = 0;
+  int? _seekFeedbackSeconds;
+  bool _showSeekFeedback = false;
 
   @override
   void initState() {
@@ -174,6 +177,24 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
     ctrl.seekTo(pos.isNegative ? Duration.zero : pos);
   }
 
+  void _showSeekHint(int seconds) {
+    final feedbackId = ++_seekFeedbackId;
+    setState(() {
+      _seekFeedbackSeconds = seconds;
+      _showSeekFeedback = true;
+    });
+
+    Future.delayed(const Duration(milliseconds: 620), () {
+      if (!mounted || feedbackId != _seekFeedbackId) return;
+      setState(() => _showSeekFeedback = false);
+    });
+
+    Future.delayed(const Duration(milliseconds: 880), () {
+      if (!mounted || feedbackId != _seekFeedbackId) return;
+      setState(() => _seekFeedbackSeconds = null);
+    });
+  }
+
   void _togglePlay() =>
       _ctrl?.value.isPlaying == true ? _ctrl?.pause() : _ctrl?.play();
   void _toggleControls() => setState(() => _showControls = !_showControls);
@@ -211,7 +232,9 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
           onVerticalDragCancel: _handleVerticalDragCancel,
           onDoubleTapDown: (d) {
             final half = MediaQuery.of(context).size.width / 2;
-            _seek(d.localPosition.dx < half ? -15 : 15);
+            final seconds = d.localPosition.dx < half ? -15 : 15;
+            _seek(seconds);
+            _showSeekHint(seconds);
           },
           onDoubleTap: () {},
           onTap: _toggleControls,
@@ -338,6 +361,25 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                         ],
                       ),
                     ),
+                  if (_seekFeedbackSeconds != null)
+                    Align(
+                      alignment: const Alignment(0, -0.38),
+                      child: AnimatedOpacity(
+                        duration: const Duration(milliseconds: 180),
+                        opacity: _showSeekFeedback ? 1 : 0,
+                        curve: Curves.easeOutCubic,
+                        child: TweenAnimationBuilder<double>(
+                          key: ValueKey(_seekFeedbackId),
+                          tween: Tween(begin: 0.86, end: 1),
+                          duration: const Duration(milliseconds: 220),
+                          curve: Curves.easeOutBack,
+                          builder: (context, scale, child) {
+                            return Transform.scale(scale: scale, child: child);
+                          },
+                          child: _SeekFeedback(seconds: _seekFeedbackSeconds!),
+                        ),
+                      ),
+                    ),
                   if (_showControls) ...[
                     if (_index > 0)
                       const Positioned(
@@ -409,6 +451,46 @@ class _ProgressBar extends StatefulWidget {
 
   @override
   State<_ProgressBar> createState() => _ProgressBarState();
+}
+
+class _SeekFeedback extends StatelessWidget {
+  final int seconds;
+
+  const _SeekFeedback({required this.seconds});
+
+  @override
+  Widget build(BuildContext context) {
+    final isForward = seconds > 0;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.56),
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.28),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: SizedBox(
+        width: 82,
+        height: 82,
+        child: Center(
+          child: Text(
+            '${isForward ? '+' : '-'}${seconds.abs()}',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 24,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _ProgressBarState extends State<_ProgressBar> {
