@@ -2,26 +2,26 @@ import 'package:flutter/material.dart';
 
 import 'pages/login_page.dart';
 import 'pages/scanner_page.dart';
+import 'pages/emby_login_page.dart';
+import 'pages/emby_home_page.dart';
 import 'services/api_service.dart';
+import 'services/emby_service.dart';
 import 'utils/constants.dart';
 import 'utils/storage_util.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // 初始化本地存储
+
   await StorageUtil.init();
-  
-  // 获取保存的baseUrl并设置
+  await EmbyService().loadFromStorage();
+
   String? savedBaseUrl = StorageUtil.getBaseUrl();
   if (savedBaseUrl != null && savedBaseUrl.isNotEmpty) {
     ApiConstants.setBaseUrl(savedBaseUrl);
   }
-  
-  // 获取保存的token
+
   String? token = StorageUtil.getToken();
-  print('token is $token');
-  
+
   runApp(MyApp(token: token));
 }
 
@@ -37,7 +37,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
       ),
-      home: MyHomePage(title: 'Flutter Demo Home Page', token: token),
+      home: EmbyService().isLoggedIn ? const EmbyHomePage() : const EmbyLoginPage(),
     );
   }
 }
