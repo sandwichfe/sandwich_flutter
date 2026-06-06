@@ -267,12 +267,12 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
       _showSeekFeedback = true;
     });
 
-    Future.delayed(const Duration(milliseconds: 620), () {
+    Future.delayed(const Duration(milliseconds: 1100), () {
       if (!mounted || feedbackId != _seekFeedbackId) return;
       setState(() => _showSeekFeedback = false);
     });
 
-    Future.delayed(const Duration(milliseconds: 880), () {
+    Future.delayed(const Duration(milliseconds: 1340), () {
       if (!mounted || feedbackId != _seekFeedbackId) return;
       setState(() {
         _seekFeedbackSeconds = null;
@@ -602,7 +602,7 @@ class _SeekFeedback extends StatelessWidget {
       ),
       child: SizedBox(
         width: isScrubbing ? 168 : 96,
-        height: isScrubbing ? 78 : 62,
+        height: isScrubbing ? 86 : 70,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -613,6 +613,7 @@ class _SeekFeedback extends StatelessWidget {
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 22,
+                height: 1,
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -620,7 +621,11 @@ class _SeekFeedback extends StatelessWidget {
               const SizedBox(height: 2),
               Text(
                 _formatDuration(target!),
-                style: const TextStyle(color: Colors.white70, fontSize: 12),
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 12,
+                  height: 1,
+                ),
               ),
             ],
           ],
