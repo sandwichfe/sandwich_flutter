@@ -4,12 +4,14 @@ import 'pages/launcher_page.dart';
 import 'services/emby_service.dart';
 import 'utils/constants.dart';
 import 'utils/storage_util.dart';
+import 'utils/theme_manager.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await StorageUtil.init();
   await EmbyService().loadFromStorage();
+  await ThemeManager().load();
 
   String? savedBaseUrl = StorageUtil.getBaseUrl();
   if (savedBaseUrl != null && savedBaseUrl.isNotEmpty) {
@@ -28,12 +30,13 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+    return ListenableBuilder(
+      listenable: ThemeManager(),
+      builder: (context, _) => MaterialApp(
+        title: 'Flutter Demo',
+        theme: ThemeManager().themeData,
+        home: const LauncherPage(),
       ),
-      home: const LauncherPage(),
     );
   }
 }

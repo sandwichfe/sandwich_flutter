@@ -1,49 +1,81 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'emby/emby_login_page.dart';
 import 'emby/emby_home_page.dart';
 import 'scanner/scanner_home_page.dart';
+import 'settings_page.dart';
 import '../services/emby_service.dart';
 
 class LauncherPage extends StatelessWidget {
   const LauncherPage({super.key});
 
+  Future<bool> _onWillPop(BuildContext context) async {
+    return await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('退出应用'),
+        content: const Text('确定要退出应用吗？'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('取消')),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('退出')),
+        ],
+      ),
+    ) ?? false;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text('选择功能', style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
-              const SizedBox(height: 48),
-              _AppCard(
-                icon: Icons.play_circle_fill,
-                title: 'Emby 播放器',
-                subtitle: '连接 Emby 服务器，浏览并播放媒体',
-                color: Colors.green,
-                onTap: () => Navigator.of(context).pushReplacement(
-                  MaterialPageRoute(
-                    builder: (_) => EmbyService().isLoggedIn ? const EmbyHomePage() : const EmbyLoginPage(),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        if (await _onWillPop(context)) SystemNavigator.pop();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('选择功能'),
+          automaticallyImplyLeading: false,
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.settings),
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage())),
+            ),
+          ],
+        ),
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('选择功能', style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 28, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+                const SizedBox(height: 48),
+                _AppCard(
+                  icon: Icons.play_circle_fill,
+                  title: 'Emby 播放器',
+                  subtitle: '连接 Emby 服务器，浏览并播放媒体',
+                  color: Colors.green,
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => EmbyService().isLoggedIn ? const EmbyHomePage() : const EmbyLoginPage(),
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              _AppCard(
-                icon: Icons.qr_code_scanner,
-                title: '扫码登录',
-                subtitle: '扫描二维码进行账号登录',
-                color: Colors.deepPurple,
-                onTap: () => Navigator.of(context).pushReplacement(
-                  MaterialPageRoute(
-                    builder: (_) => const ScannerHomePage(title: '扫码登录'),
+                const SizedBox(height: 16),
+                _AppCard(
+                  icon: Icons.qr_code_scanner,
+                  title: '扫码登录',
+                  subtitle: '扫描二维码进行账号登录',
+                  color: Colors.deepPurple,
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const ScannerHomePage(title: '扫码登录'),
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -62,8 +94,9 @@ class _AppCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Material(
-      color: Colors.grey[900],
+      color: cs.surfaceContainerHighest,
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
@@ -78,13 +111,13 @@ class _AppCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                    Text(title, style: TextStyle(color: cs.onSurface, fontSize: 18, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 4),
-                    Text(subtitle, style: TextStyle(color: Colors.grey[400], fontSize: 13)),
+                    Text(subtitle, style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13)),
                   ],
                 ),
               ),
-              Icon(Icons.chevron_right, color: Colors.grey[600]),
+              Icon(Icons.chevron_right, color: cs.onSurfaceVariant),
             ],
           ),
         ),

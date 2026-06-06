@@ -57,7 +57,6 @@ class _EmbyLoginPageState extends State<EmbyLoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -65,7 +64,7 @@ class _EmbyLoginPageState extends State<EmbyLoginPage> {
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text('EmbyX', style: TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+              Text('EmbyX', style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 32, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
               const SizedBox(height: 40),
               _field(_serverCtrl, '服务器地址', hint: 'http://192.168.1.1:8096'),
               const SizedBox(height: 12),
@@ -74,13 +73,13 @@ class _EmbyLoginPageState extends State<EmbyLoginPage> {
               _pwField(),
               if (_error != null) ...[
                 const SizedBox(height: 12),
-                Text(_error!, style: const TextStyle(color: Colors.redAccent)),
+                Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
               ],
               const SizedBox(height: 24),
               ElevatedButton(
                 onPressed: _loading ? null : _login,
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.green, padding: const EdgeInsets.symmetric(vertical: 14)),
-                child: _loading ? const CircularProgressIndicator(color: Colors.white, strokeWidth: 2) : const Text('登录', style: TextStyle(color: Colors.white, fontSize: 16)),
+                style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
+                child: _loading ? const CircularProgressIndicator(strokeWidth: 2) : const Text('登录', style: TextStyle(fontSize: 16)),
               ),
             ],
           ),
@@ -93,14 +92,11 @@ class _EmbyLoginPageState extends State<EmbyLoginPage> {
     return TextField(
       controller: _pwCtrl,
       obscureText: !_pwVisible,
-      style: const TextStyle(color: Colors.white),
       decoration: InputDecoration(
         labelText: '密码',
-        labelStyle: const TextStyle(color: Colors.grey),
-        enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.grey)),
-        focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.green)),
+        border: const OutlineInputBorder(),
         suffixIcon: IconButton(
-          icon: Icon(_pwVisible ? Icons.visibility_off : Icons.visibility, color: Colors.grey),
+          icon: Icon(_pwVisible ? Icons.visibility_off : Icons.visibility),
           onPressed: () => setState(() => _pwVisible = !_pwVisible),
         ),
       ),
@@ -110,14 +106,10 @@ class _EmbyLoginPageState extends State<EmbyLoginPage> {
   Widget _field(TextEditingController ctrl, String label, {String? hint}) {
     return TextField(
       controller: ctrl,
-      style: const TextStyle(color: Colors.white),
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
-        labelStyle: const TextStyle(color: Colors.grey),
-        hintStyle: const TextStyle(color: Colors.grey),
-        enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.grey)),
-        focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.green)),
+        border: const OutlineInputBorder(),
       ),
     );
   }

@@ -55,26 +55,24 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
       appBar: AppBar(
-        backgroundColor: Colors.black,
-        title: const Text('媒体库', style: TextStyle(color: Colors.white)),
+        title: const Text('媒体库'),
         actions: [
-          IconButton(icon: const Icon(Icons.logout, color: Colors.white), onPressed: _logout),
+          IconButton(icon: const Icon(Icons.logout), onPressed: _logout),
         ],
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: Colors.green))
+          ? const Center(child: CircularProgressIndicator())
           : _libraries.isEmpty
-              ? const Center(child: Text('没有媒体库', style: TextStyle(color: Colors.grey)))
+              ? const Center(child: Text('没有媒体库'))
               : ListView.builder(
                   itemCount: _libraries.length,
                   itemBuilder: (_, i) {
                     final lib = _libraries[i];
                     return ListTile(
-                      leading: Icon(_libIcon(lib.collectionType), color: Colors.green),
-                      title: Text(lib.name, style: const TextStyle(color: Colors.white)),
-                      trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+                      leading: Icon(_libIcon(lib.collectionType), color: Theme.of(context).colorScheme.primary),
+                      title: Text(lib.name),
+                      trailing: const Icon(Icons.chevron_right),
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute(builder: (_) => EmbyVideoFeedPage(library: lib)),
                       ),

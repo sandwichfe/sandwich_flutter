@@ -55,15 +55,12 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
       appBar: AppBar(
-        backgroundColor: Colors.black,
-        title: Text(widget.library.name, style: const TextStyle(color: Colors.white)),
+        title: Text(widget.library.name),
         actions: [
           IconButton(
             icon: Icon(
               _viewMode == _ViewMode.stream ? Icons.grid_view : Icons.view_stream,
-              color: Colors.white,
             ),
             onPressed: () => setState(() {
               _viewMode = _viewMode == _ViewMode.stream ? _ViewMode.grid : _ViewMode.stream;
@@ -73,7 +70,7 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
         ],
       ),
       body: _loading && _items.isEmpty
-          ? const Center(child: CircularProgressIndicator(color: Colors.green))
+          ? const Center(child: CircularProgressIndicator())
           : _viewMode == _ViewMode.stream
               ? _buildStreamEntry()
               : _buildGrid(),
@@ -81,12 +78,12 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
   }
 
   Widget _buildStreamEntry() {
-    if (_items.isEmpty) return const Center(child: Text('没有视频', style: TextStyle(color: Colors.grey)));
+    if (_items.isEmpty) return const Center(child: Text('没有视频'));
     return Center(
       child: ElevatedButton.icon(
-        style: ElevatedButton.styleFrom(backgroundColor: Colors.green, padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14)),
-        icon: const Icon(Icons.play_arrow, color: Colors.white),
-        label: Text('播放 (${_items.length} 个视频)', style: const TextStyle(color: Colors.white)),
+        style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14)),
+        icon: const Icon(Icons.play_arrow),
+        label: Text('播放 (${_items.length} 个视频)'),
         onPressed: () => _openStream(0),
       ),
     );
@@ -111,7 +108,7 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
         if (_items.length < _total)
           TextButton(
             onPressed: () => _load(startIndex: _items.length),
-            child: Text('加载更多 (${_items.length}/$_total)', style: const TextStyle(color: Colors.green)),
+            child: Text('加载更多 (${_items.length}/$_total)'),
           ),
       ],
     );
@@ -132,7 +129,7 @@ class _GridTile extends StatelessWidget {
         fit: StackFit.expand,
         children: [
           Image.network(thumb, fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Container(color: Colors.grey[900], child: const Icon(Icons.movie, color: Colors.grey))),
+              errorBuilder: (_, __, ___) => Container(color: Theme.of(context).colorScheme.surfaceContainerHighest, child: const Icon(Icons.movie))),
           Positioned(
             bottom: 0, left: 0, right: 0,
             child: Container(
