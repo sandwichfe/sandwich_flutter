@@ -553,52 +553,54 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                     const Center(
                       child: CircularProgressIndicator(color: Colors.green),
                     ),
-                  Positioned(
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    child: Container(
-                      padding: const EdgeInsets.fromLTRB(16, 32, 16, 16),
-                      decoration: const BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.bottomCenter,
-                          end: Alignment.topCenter,
-                          colors: [Colors.black87, Colors.transparent],
+                  if (!_isFullscreen || _showControls)
+                    Positioned(
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      child: Container(
+                        padding: const EdgeInsets.fromLTRB(16, 32, 16, 16),
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.bottomCenter,
+                            end: Alignment.topCenter,
+                            colors: [Colors.black87, Colors.transparent],
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              item.name,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            if (item.overview.isNotEmpty)
+                              Text(
+                                item.overview,
+                                style: const TextStyle(
+                                  color: Colors.grey,
+                                  fontSize: 12,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            const SizedBox(height: 8),
+                            if (ctrl != null)
+                              _ProgressBar(
+                                ctrl: ctrl,
+                                onDragStart: () {},
+                                onDragEnd: () {},
+                                onPlayingChanged:
+                                    _handleProgressPlayingChanged,
+                              ),
+                          ],
                         ),
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            item.name,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          if (item.overview.isNotEmpty)
-                            Text(
-                              item.overview,
-                              style: const TextStyle(
-                                color: Colors.grey,
-                                fontSize: 12,
-                              ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          const SizedBox(height: 8),
-                          if (ctrl != null)
-                            _ProgressBar(
-                              ctrl: ctrl,
-                              onDragStart: () {},
-                              onDragEnd: () {},
-                              onPlayingChanged: _handleProgressPlayingChanged,
-                            ),
-                        ],
-                      ),
                     ),
-                  ),
                   if (_showControls)
                     Positioned(
                       top: 0,
@@ -712,36 +714,37 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                         ),
                       ),
                     ),
-                  Positioned(
-                    right: 12,
-                    top: 0,
-                    bottom: 0,
-                    child: Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            iconSize: 36,
-                            icon: Icon(
-                              item.isFavorite
-                                  ? Icons.favorite
-                                  : Icons.favorite_border,
-                              color:
-                                  item.isFavorite ? Colors.red : Colors.white,
+                  if (!_isFullscreen || _showControls)
+                    Positioned(
+                      right: 12,
+                      top: 0,
+                      bottom: 0,
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              iconSize: 36,
+                              icon: Icon(
+                                item.isFavorite
+                                    ? Icons.favorite
+                                    : Icons.favorite_border,
+                                color:
+                                    item.isFavorite ? Colors.red : Colors.white,
+                              ),
+                              onPressed: _toggleFavorite,
                             ),
-                            onPressed: _toggleFavorite,
-                          ),
-                          Text(
-                            item.isFavorite ? '已收藏' : '收藏',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
+                            Text(
+                              item.isFavorite ? '已收藏' : '收藏',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
-                  ),
                 ],
               ),
             ),
