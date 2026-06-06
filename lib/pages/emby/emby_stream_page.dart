@@ -20,6 +20,8 @@ class EmbyStreamPage extends StatefulWidget {
 class _EmbyStreamPageState extends State<EmbyStreamPage>
     with SingleTickerProviderStateMixin {
   static const double _switchVelocity = 600;
+  static const double _seekSwipeDurationPercent = 0.08;
+  static const double _seekSwipeMinDistance = 18;
   static const Duration _settleDuration = Duration(milliseconds: 180);
 
   late int _index;
@@ -30,10 +32,14 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
   bool _isSwitchingVideo = false;
   double _rawDragOffsetY = 0;
   double _dragOffsetY = 0;
+  double _rawDragOffsetX = 0;
+  Duration _seekDragStartPosition = Duration.zero;
   int _playRequestId = 0;
   int _seekFeedbackId = 0;
   int? _seekFeedbackSeconds;
+  Duration? _seekFeedbackTarget;
   bool _showSeekFeedback = false;
+  bool _isSeekScrubbing = false;
 
   @override
   void initState() {
@@ -170,17 +176,94 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
     _animateDragTo(0);
   }
 
+  void _handleHorizontalDragStart(DragStartDetails details) {
+    final ctrl = _ctrl;
+    if (ctrl == null || !ctrl.value.isInitialized) return;
+    _rawDragOffsetX = 0;
+    _seekDragStartPosition = ctrl.value.position;
+    setState(() {
+      _seekFeedbackSeconds = 0;
+      _seekFeedbackTarget = _seekDragStartPosition;
+      _showSeekFeedback = true;
+      _isSeekScrubbing = true;
+    });
+  }
+
+  void _handleHorizontalDragUpdate(DragUpdateDetails details) {
+    final ctrl = _ctrl;
+    if (ctrl == null || !ctrl.value.isInitialized) return;
+    _rawDragOffsetX += details.delta.dx;
+    final seconds = _seekSwipeSecondsForOffset(_rawDragOffsetX);
+    final target = _clampPosition(
+      _seekDragStartPosition + Duration(seconds: seconds),
+      ctrl.value.duration,
+    );
+    setState(() {
+      _seekFeedbackSeconds = seconds;
+      _seekFeedbackTarget = target;
+      _showSeekFeedback = true;
+      _isSeekScrubbing = true;
+    });
+  }
+
+  void _handleHorizontalDragEnd(DragEndDetails details) {
+    final ctrl = _ctrl;
+    if (ctrl != null &&
+        ctrl.value.isInitialized &&
+        _rawDragOffsetX.abs() >= _seekSwipeMinDistance) {
+      final seconds = _seekSwipeSecondsForOffset(_rawDragOffsetX);
+      final target = _clampPosition(
+        _seekDragStartPosition + Duration(seconds: seconds),
+        ctrl.value.duration,
+      );
+      ctrl.seekTo(target);
+      _showSeekHint(seconds, target: target);
+    } else {
+      _hideSeekHint();
+    }
+    _rawDragOffsetX = 0;
+    if (mounted) setState(() => _isSeekScrubbing = false);
+  }
+
+  void _handleHorizontalDragCancel() {
+    _rawDragOffsetX = 0;
+    _hideSeekHint();
+  }
+
+  int _seekSwipeSecondsForOffset(double offsetX) {
+    final ctrl = _ctrl;
+    if (ctrl == null || !ctrl.value.isInitialized) return 0;
+
+    final width = MediaQuery.sizeOf(context).width;
+    final durationSeconds = ctrl.value.duration.inSeconds;
+    if (width <= 0 || durationSeconds <= 0) return 0;
+
+    final maxSeconds = (durationSeconds * _seekSwipeDurationPercent)
+        .round()
+        .clamp(10, 180);
+    return (offsetX / width * maxSeconds).round();
+  }
+
+  Duration _clampPosition(Duration position, Duration duration) {
+    if (position.isNegative) return Duration.zero;
+    if (duration > Duration.zero && position > duration) return duration;
+    return position;
+  }
+
   void _seek(int seconds) {
     final ctrl = _ctrl;
     if (ctrl == null) return;
+    final duration = ctrl.value.duration;
     final pos = ctrl.value.position + Duration(seconds: seconds);
-    ctrl.seekTo(pos.isNegative ? Duration.zero : pos);
+    final target = _clampPosition(pos, duration);
+    ctrl.seekTo(target);
   }
 
-  void _showSeekHint(int seconds) {
+  void _showSeekHint(int seconds, {Duration? target}) {
     final feedbackId = ++_seekFeedbackId;
     setState(() {
       _seekFeedbackSeconds = seconds;
+      _seekFeedbackTarget = target;
       _showSeekFeedback = true;
     });
 
@@ -191,7 +274,26 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
 
     Future.delayed(const Duration(milliseconds: 880), () {
       if (!mounted || feedbackId != _seekFeedbackId) return;
-      setState(() => _seekFeedbackSeconds = null);
+      setState(() {
+        _seekFeedbackSeconds = null;
+        _seekFeedbackTarget = null;
+      });
+    });
+  }
+
+  void _hideSeekHint() {
+    final feedbackId = ++_seekFeedbackId;
+    setState(() {
+      _showSeekFeedback = false;
+      _isSeekScrubbing = false;
+    });
+
+    Future.delayed(const Duration(milliseconds: 180), () {
+      if (!mounted || feedbackId != _seekFeedbackId) return;
+      setState(() {
+        _seekFeedbackSeconds = null;
+        _seekFeedbackTarget = null;
+      });
     });
   }
 
@@ -230,6 +332,10 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
           onVerticalDragUpdate: _handleVerticalDragUpdate,
           onVerticalDragEnd: _handleVerticalDragEnd,
           onVerticalDragCancel: _handleVerticalDragCancel,
+          onHorizontalDragStart: _handleHorizontalDragStart,
+          onHorizontalDragUpdate: _handleHorizontalDragUpdate,
+          onHorizontalDragEnd: _handleHorizontalDragEnd,
+          onHorizontalDragCancel: _handleHorizontalDragCancel,
           onDoubleTapDown: (d) {
             final half = MediaQuery.of(context).size.width / 2;
             final seconds = d.localPosition.dx < half ? -15 : 15;
@@ -376,7 +482,11 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                           builder: (context, scale, child) {
                             return Transform.scale(scale: scale, child: child);
                           },
-                          child: _SeekFeedback(seconds: _seekFeedbackSeconds!),
+                          child: _SeekFeedback(
+                            seconds: _seekFeedbackSeconds!,
+                            target: _seekFeedbackTarget,
+                            isScrubbing: _isSeekScrubbing,
+                          ),
                         ),
                       ),
                     ),
@@ -455,17 +565,32 @@ class _ProgressBar extends StatefulWidget {
 
 class _SeekFeedback extends StatelessWidget {
   final int seconds;
+  final Duration? target;
+  final bool isScrubbing;
 
-  const _SeekFeedback({required this.seconds});
+  const _SeekFeedback({
+    required this.seconds,
+    required this.target,
+    required this.isScrubbing,
+  });
 
   @override
   Widget build(BuildContext context) {
     final isForward = seconds > 0;
+    final isNeutral = seconds == 0;
+    final icon =
+        isNeutral
+            ? Icons.drag_handle
+            : isForward
+            ? Icons.fast_forward
+            : Icons.fast_rewind;
+    final secondsText =
+        isNeutral ? '0s' : '${isForward ? '+' : '-'}${seconds.abs()}s';
 
     return DecoratedBox(
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.56),
-        shape: BoxShape.circle,
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
         boxShadow: [
           BoxShadow(
@@ -476,20 +601,44 @@ class _SeekFeedback extends StatelessWidget {
         ],
       ),
       child: SizedBox(
-        width: 82,
-        height: 82,
-        child: Center(
-          child: Text(
-            '${isForward ? '+' : '-'}${seconds.abs()}',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 24,
-              fontWeight: FontWeight.w700,
+        width: isScrubbing ? 168 : 96,
+        height: isScrubbing ? 78 : 62,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: Colors.white, size: isScrubbing ? 26 : 24),
+            const SizedBox(height: 4),
+            Text(
+              secondsText,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 22,
+                fontWeight: FontWeight.w700,
+              ),
             ),
-          ),
+            if (isScrubbing && target != null) ...[
+              const SizedBox(height: 2),
+              Text(
+                _formatDuration(target!),
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ],
+          ],
         ),
       ),
     );
+  }
+
+  String _formatDuration(Duration duration) {
+    final totalSeconds = duration.inSeconds;
+    final hours = totalSeconds ~/ 3600;
+    final minutes = (totalSeconds % 3600) ~/ 60;
+    final seconds = totalSeconds % 60;
+
+    if (hours > 0) {
+      return '$hours:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    }
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
 }
 
