@@ -862,6 +862,18 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
     _applyDesiredPlayState();
   }
 
+  void _handlePlaybackSurfaceTap() {
+    final ctrl = _ctrl;
+    if (_isApplyingSeek || ctrl == null || !ctrl.value.isInitialized) return;
+
+    final isPlaying = _desiredPlaying ?? ctrl.value.isPlaying;
+    if (isPlaying) {
+      _pauseAndShowPlayButton();
+    } else {
+      _resumeFromPlayButton();
+    }
+  }
+
   Future<void> _applyDesiredPlayState() async {
     if (_isApplyingPlayState) return;
 
@@ -962,7 +974,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
             _showSeekHint(seconds);
           },
           onDoubleTap: () {},
-          onTap: _pauseAndShowPlayButton,
+          onTap: _handlePlaybackSurfaceTap,
           child: ClipRect(
             child: Transform.translate(
               offset: Offset(0, _dragOffsetY),
