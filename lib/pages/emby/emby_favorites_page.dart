@@ -11,7 +11,13 @@ class EmbyFavoritesPage extends StatefulWidget {
 }
 
 class _EmbyFavoritesPageState extends State<EmbyFavoritesPage> {
+  static const int _gridColumnCount = 3;
+  static const double _gridPadding = 4;
+  static const double _gridSpacing = 4;
+  static const double _gridChildAspectRatio = 9 / 16;
+
   List<EmbyItem> _items = [];
+  final ScrollController _scrollCtrl = ScrollController();
   int _total = 0;
   bool _loading = true;
 
@@ -60,6 +66,7 @@ class _EmbyFavoritesPageState extends State<EmbyFavoritesPage> {
     );
     if (!mounted || result == null) return;
 
+    String? scrollTargetItemId;
     setState(() {
       for (final item in result.items) {
         final i = _items.indexWhere((e) => e.id == item.id);
@@ -73,7 +80,42 @@ class _EmbyFavoritesPageState extends State<EmbyFavoritesPage> {
       }
       _total = result.totalCount ?? _total;
       if (_total < _items.length) _total = _items.length;
+      if (result.currentIndex >= 0 &&
+          result.currentIndex < result.items.length &&
+          result.items[result.currentIndex].isFavorite) {
+        scrollTargetItemId = result.items[result.currentIndex].id;
+      }
     });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _scrollToCard(scrollTargetItemId);
+    });
+  }
+
+  void _scrollToCard(String? itemId) {
+    if (itemId == null || !_scrollCtrl.hasClients) return;
+
+    final index = _items.indexWhere((e) => e.id == itemId);
+    if (index == -1) return;
+
+    final gridWidth = MediaQuery.sizeOf(context).width;
+    final tileWidth =
+        (gridWidth -
+            (_gridPadding * 2) -
+            (_gridSpacing * (_gridColumnCount - 1))) /
+        _gridColumnCount;
+    if (tileWidth <= 0) return;
+
+    final row = index ~/ _gridColumnCount;
+    final rowHeight = tileWidth / _gridChildAspectRatio;
+    final offset = _gridPadding + row * (rowHeight + _gridSpacing);
+    final safeOffset = offset.clamp(0.0, _scrollCtrl.position.maxScrollExtent);
+    _scrollCtrl.jumpTo(safeOffset.toDouble());
+  }
+
+  @override
+  void dispose() {
+    _scrollCtrl.dispose();
+    super.dispose();
   }
 
   @override
@@ -89,13 +131,14 @@ class _EmbyFavoritesPageState extends State<EmbyFavoritesPage> {
                 children: [
                   Expanded(
                     child: GridView.builder(
-                      padding: const EdgeInsets.all(4),
+                      controller: _scrollCtrl,
+                      padding: const EdgeInsets.all(_gridPadding),
                       gridDelegate:
                           const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 3,
-                            childAspectRatio: 9 / 16,
-                            crossAxisSpacing: 4,
-                            mainAxisSpacing: 4,
+                            crossAxisCount: _gridColumnCount,
+                            childAspectRatio: _gridChildAspectRatio,
+                            crossAxisSpacing: _gridSpacing,
+                            mainAxisSpacing: _gridSpacing,
                           ),
                       itemCount: _items.length,
                       itemBuilder:

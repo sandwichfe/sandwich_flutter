@@ -12,6 +12,12 @@ class EmbyVideoFeedPage extends StatefulWidget {
 }
 
 class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
+  static const int _gridColumnCount = 3;
+  static const double _gridPadding = 4;
+  static const double _gridSpacing = 4;
+  static const double _gridChildAspectRatio = 9 / 16;
+  static const int _pageSize = 150;
+
   final List<EmbyItem> _items = [];
   final TextEditingController _searchCtrl = TextEditingController();
   final ScrollController _scrollCtrl = ScrollController();
@@ -19,7 +25,6 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
   bool _loading = false;
   bool _openedInitialStream = false;
   bool _streamOpen = false;
-  static const int _pageSize = 150;
   String _searchTerm = '';
   int _requestId = 0;
   String? _currentPlayingItemId;
@@ -147,6 +152,7 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
     _streamOpen = false;
     if (!mounted) return;
     if (result != null) {
+      String? scrollTargetItemId;
       setState(() {
         for (final u in result.items) {
           final i = _items.indexWhere((e) => e.id == u.id);
@@ -162,9 +168,41 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
             result.currentIndex < result.items.length) {
           _currentPlayingItemId = result.items[result.currentIndex].id;
           _playbackPositions[_currentPlayingItemId!] = result.currentPosition;
+          scrollTargetItemId = _currentPlayingItemId;
         }
       });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _scrollToCard(scrollTargetItemId);
+      });
     }
+  }
+
+  void _scrollToCard(String? itemId) {
+    if (!_scrollCtrl.hasClients) return;
+
+    var index = -1;
+    if (itemId != null) {
+      index = _items.indexWhere((e) => e.id == itemId);
+    }
+    if (index == -1) {
+      final fallbackIndex = _currentPlayingIndex;
+      if (fallbackIndex == null) return;
+      index = _validStreamIndex(fallbackIndex);
+    }
+
+    final gridWidth = MediaQuery.sizeOf(context).width;
+    final tileWidth =
+        (gridWidth -
+            (_gridPadding * 2) -
+            (_gridSpacing * (_gridColumnCount - 1))) /
+        _gridColumnCount;
+    if (tileWidth <= 0) return;
+
+    final row = index ~/ _gridColumnCount;
+    final rowHeight = tileWidth / _gridChildAspectRatio;
+    final offset = _gridPadding + row * (rowHeight + _gridSpacing);
+    final safeOffset = offset.clamp(0.0, _scrollCtrl.position.maxScrollExtent);
+    _scrollCtrl.jumpTo(safeOffset.toDouble());
   }
 
   @override
@@ -256,17 +294,20 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
         Expanded(
           child: GridView.builder(
             controller: _scrollCtrl,
-            padding: const EdgeInsets.all(4),
+            padding: const EdgeInsets.all(_gridPadding),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              childAspectRatio: 9 / 16,
-              crossAxisSpacing: 4,
-              mainAxisSpacing: 4,
+              crossAxisCount: _gridColumnCount,
+              childAspectRatio: _gridChildAspectRatio,
+              crossAxisSpacing: _gridSpacing,
+              mainAxisSpacing: _gridSpacing,
             ),
             itemCount: _items.length,
             itemBuilder:
-                (_, i) =>
-                    _GridTile(item: _items[i], onTap: () => _openStream(i)),
+                (_, i) => _GridTile(
+                  item: _items[i],
+                  isRecentlyWatched: _items[i].id == _currentPlayingItemId,
+                  onTap: () => _openStream(i),
+                ),
           ),
         ),
         if (_loading && _items.isNotEmpty)
@@ -285,8 +326,13 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
 
 class _GridTile extends StatelessWidget {
   final EmbyItem item;
+  final bool isRecentlyWatched;
   final VoidCallback onTap;
-  const _GridTile({required this.item, required this.onTap});
+  const _GridTile({
+    required this.item,
+    required this.isRecentlyWatched,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -305,6 +351,8 @@ class _GridTile extends StatelessWidget {
                   child: const Icon(Icons.movie),
                 ),
           ),
+          if (isRecentlyWatched)
+            const Positioned(top: 6, left: 6, child: _RecentlyWatchedBadge()),
           Positioned(
             bottom: 0,
             left: 0,
@@ -337,6 +385,32 @@ class _GridTile extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _RecentlyWatchedBadge extends StatelessWidget {
+  const _RecentlyWatchedBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.62),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
+      ),
+      child: const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        child: Text(
+          '刚刚看过',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       ),
     );
   }
