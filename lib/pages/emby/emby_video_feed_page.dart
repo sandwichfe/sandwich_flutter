@@ -24,6 +24,7 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
   int _requestId = 0;
   String? _currentPlayingItemId;
   int? _currentPlayingIndex;
+  final Map<String, Duration> _playbackPositions = {};
 
   @override
   void initState() {
@@ -118,14 +119,20 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
     if (_items.isEmpty || _streamOpen) return;
 
     final initialIndex = _validStreamIndex(index);
+    final initialItemId = _items[initialIndex].id;
     _streamOpen = true;
     _currentPlayingIndex = initialIndex;
-    _currentPlayingItemId = _items[initialIndex].id;
+    _currentPlayingItemId = initialItemId;
 
     final result = await Navigator.of(context).push<EmbyStreamResult>(
       MaterialPageRoute(
         builder:
-            (_) => EmbyStreamPage(items: _items, initialIndex: initialIndex),
+            (_) => EmbyStreamPage(
+              items: _items,
+              initialIndex: initialIndex,
+              initialPosition:
+                  _playbackPositions[initialItemId] ?? Duration.zero,
+            ),
       ),
     );
     _streamOpen = false;
@@ -140,6 +147,8 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
         if (result.currentIndex >= 0 &&
             result.currentIndex < result.items.length) {
           _currentPlayingItemId = result.items[result.currentIndex].id;
+          _playbackPositions[_currentPlayingItemId!] =
+              result.currentPosition;
         }
       });
     }

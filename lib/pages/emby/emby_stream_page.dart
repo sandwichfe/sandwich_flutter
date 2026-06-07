@@ -14,17 +14,24 @@ typedef _SeekRequestCallback =
 class EmbyStreamResult {
   final List<EmbyItem> items;
   final int currentIndex;
+  final Duration currentPosition;
 
-  const EmbyStreamResult({required this.items, required this.currentIndex});
+  const EmbyStreamResult({
+    required this.items,
+    required this.currentIndex,
+    this.currentPosition = Duration.zero,
+  });
 }
 
 class EmbyStreamPage extends StatefulWidget {
   final List<EmbyItem> items;
   final int initialIndex;
+  final Duration initialPosition;
   const EmbyStreamPage({
     super.key,
     required this.items,
     required this.initialIndex,
+    this.initialPosition = Duration.zero,
   });
 
   @override
@@ -75,7 +82,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
     );
     SystemChrome.setPreferredOrientations(const [DeviceOrientation.portraitUp]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    _play(_index);
+    _play(_index, position: widget.initialPosition);
   }
 
   @override
@@ -88,7 +95,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
     super.dispose();
   }
 
-  Future<void> _play(int index) async {
+  Future<void> _play(int index, {Duration position = Duration.zero}) async {
     final requestId = ++_playRequestId;
     final oldCtrl = _ctrl;
     if (oldCtrl != null) {
@@ -128,6 +135,10 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
       _isPlaying = true;
       _desiredPlaying = null;
     });
+    if (position > Duration.zero && ctrl.value.duration > Duration.zero) {
+      await ctrl.seekTo(_clampPosition(position, ctrl.value.duration));
+      if (!mounted || requestId != _playRequestId || _ctrl != ctrl) return;
+    }
     await ctrl.play();
     if (!mounted || requestId != _playRequestId || _ctrl != ctrl) return;
     setState(() => _isPlaying = ctrl.value.isPlaying);
@@ -212,7 +223,11 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
     if (!mounted) return;
     Navigator.pop(
       context,
-      EmbyStreamResult(items: _items, currentIndex: _index),
+      EmbyStreamResult(
+        items: _items,
+        currentIndex: _index,
+        currentPosition: _currentPosition,
+      ),
     );
   }
 
@@ -225,8 +240,18 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
     if (!mounted) return;
     Navigator.pop(
       context,
-      EmbyStreamResult(items: _items, currentIndex: _index),
+      EmbyStreamResult(
+        items: _items,
+        currentIndex: _index,
+        currentPosition: _currentPosition,
+      ),
     );
+  }
+
+  Duration get _currentPosition {
+    final ctrl = _ctrl;
+    if (ctrl == null || !ctrl.value.isInitialized) return Duration.zero;
+    return _clampPosition(ctrl.value.position, ctrl.value.duration);
   }
 
   double _visualDragOffset(double rawOffset) {
@@ -713,15 +738,6 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                               onPressed: _handleBackPressed,
                             ),
                             const Spacer(),
-                            IconButton(
-                              tooltip: '卡片页',
-                              icon: const Icon(
-                                Icons.grid_view,
-                                color: Colors.white,
-                              ),
-                              onPressed: _openGridPage,
-                            ),
-                            const SizedBox(width: 8),
                             if (_isFullscreen) ...[
                               IconButton(
                                 tooltip:
@@ -760,6 +776,15 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                             Text(
                               '${_index + 1} / ${_items.length}',
                               style: const TextStyle(color: Colors.white),
+                            ),
+                            const SizedBox(width: 8),
+                            IconButton(
+                              tooltip: '卡片页',
+                              icon: const Icon(
+                                Icons.grid_view,
+                                color: Colors.white,
+                              ),
+                              onPressed: _openGridPage,
                             ),
                             const SizedBox(width: 16),
                           ],
