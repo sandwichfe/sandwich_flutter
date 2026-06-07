@@ -89,6 +89,8 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
   bool _isPlaying = false;
   bool? _desiredPlaying;
   bool _isApplyingPlayState = false;
+  OverlayEntry? _toastOverlayEntry;
+  Timer? _toastTimer;
   _PlaybackOrientation _playbackOrientation = _PlaybackOrientation.portrait;
   _PlaybackMode _playbackMode = _PlaybackMode.sequential;
   int? _totalCount;
@@ -113,6 +115,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
   void dispose() {
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    _hideToast();
     _slideController.dispose();
     _ctrl?.removeListener(_handlePlaybackControllerChanged);
     _ctrl?.dispose();
@@ -421,6 +424,9 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
       _randomQueue.clear();
       _randomHistory.clear();
     });
+    if (_hasMoreItems) {
+      _showToast('\u6b63\u5728\u52a0\u8f7d\u89c6\u9891\u5217\u8868...');
+    }
     await _loadAllItems();
     if (mounted) _resetRandomQueue();
   }
@@ -446,6 +452,9 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
     if (mounted) _showPlaybackModeToast(nextMode);
 
     if (nextMode == _PlaybackMode.random) {
+      if (mounted && _hasMoreItems) {
+        _showToast('\u6b63\u5728\u52a0\u8f7d\u89c6\u9891\u5217\u8868...');
+      }
       await _loadAllItems();
       if (mounted) _resetRandomQueue();
     }
@@ -457,16 +466,66 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
             ? '\u5df2\u5207\u6362\u5230\u968f\u673a\u64ad\u653e'
             : '\u5df2\u5207\u6362\u5230\u987a\u5e8f\u64ad\u653e';
 
-    ScaffoldMessenger.of(context)
-      ..clearSnackBars()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(label),
-          duration: const Duration(milliseconds: 1200),
-          behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.fromLTRB(24, 0, 24, 96),
-        ),
-      );
+    _showToast(label);
+  }
+
+  void _showToast(String message) {
+    final overlay = Overlay.maybeOf(context);
+    if (overlay == null) return;
+
+    _hideToast();
+    final entry = OverlayEntry(
+      builder:
+          (context) => Positioned.fill(
+            child: IgnorePointer(
+              child: SafeArea(
+                child: Align(
+                  alignment: const Alignment(0, -0.28),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.78),
+                        borderRadius: BorderRadius.circular(22),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 18,
+                          vertical: 10,
+                        ),
+                        child: Text(
+                          message,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+    );
+
+    _toastOverlayEntry = entry;
+    overlay.insert(entry);
+    _toastTimer = Timer(const Duration(milliseconds: 1200), () {
+      if (_toastOverlayEntry == entry) {
+        _toastOverlayEntry = null;
+        _toastTimer = null;
+      }
+      entry.remove();
+    });
+  }
+
+  void _hideToast() {
+    _toastTimer?.cancel();
+    _toastTimer = null;
+    _toastOverlayEntry?.remove();
+    _toastOverlayEntry = null;
   }
 
   Widget _buildPlaybackModeButton() {
