@@ -80,6 +80,7 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
   }
 
   void _search() {
+    FocusScope.of(context).unfocus();
     final keyword = _searchCtrl.text.trim();
     if (keyword == _searchTerm) return;
     setState(() {
@@ -208,24 +209,41 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
   Widget _buildSearchField() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-      child: TextField(
-        controller: _searchCtrl,
-        textInputAction: TextInputAction.search,
-        decoration: InputDecoration(
-          hintText: '搜索视频',
-          prefixIcon: const Icon(Icons.search),
-          suffixIcon:
-              _searchCtrl.text.isEmpty
-                  ? null
-                  : IconButton(
-                    icon: const Icon(Icons.clear),
-                    onPressed: _clearSearch,
-                  ),
-          border: const OutlineInputBorder(),
-          isDense: true,
-        ),
-        onChanged: (_) => setState(() {}),
-        onSubmitted: (_) => _search(),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _searchCtrl,
+              textInputAction: TextInputAction.search,
+              decoration: InputDecoration(
+                hintText: '搜索视频',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon:
+                    _searchCtrl.text.isEmpty
+                        ? null
+                        : IconButton(
+                          tooltip: '清空',
+                          icon: const Icon(Icons.clear),
+                          onPressed: _clearSearch,
+                        ),
+                border: const OutlineInputBorder(),
+                isDense: true,
+              ),
+              onChanged: (_) => setState(() {}),
+              onSubmitted: (_) => _search(),
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            height: 48,
+            width: 48,
+            child: IconButton.outlined(
+              tooltip: '搜索',
+              icon: const Icon(Icons.search),
+              onPressed: _search,
+            ),
+          ),
+        ],
       ),
     );
   }

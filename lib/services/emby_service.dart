@@ -60,6 +60,15 @@ class EmbyService {
     return '$base$prefix$path';
   }
 
+  Uri _uri(String path, Map<String, String?> queryParameters) {
+    final params = <String, String>{};
+    for (final entry in queryParameters.entries) {
+      final value = entry.value;
+      if (value != null && value.isNotEmpty) params[entry.key] = value;
+    }
+    return Uri.parse(_url(path)).replace(queryParameters: params);
+  }
+
   Future<String> login(String server, String username, String password) async {
     config.server = server.endsWith('/') ? server.substring(0, server.length - 1) : server;
     if (config.deviceId.isEmpty) _generateDeviceId();
@@ -108,20 +117,21 @@ class EmbyService {
     String sortBy = 'DateCreated',
     String? searchTerm,
   }) async {
-    var url = _url(
-        '/Users/${config.userId}/Items?api_key=${config.token}'
-        '&Recursive=true'
-        '&IncludeItemTypes=Movie,Episode,Video,MusicVideo'
-        '&Fields=Overview,RunTimeTicks,UserData'
-        '&Limit=$limit&StartIndex=$startIndex'
-        '&SortBy=$sortBy&SortOrder=Descending');
-    if (parentId != null) url += '&ParentId=$parentId';
     final keyword = searchTerm?.trim();
-    if (keyword != null && keyword.isNotEmpty) {
-      url += '&SearchTerm=${Uri.encodeQueryComponent(keyword)}';
-    }
+    final uri = _uri('/Users/${config.userId}/Items', {
+      'api_key': config.token,
+      'Recursive': 'true',
+      'IncludeItemTypes': 'Movie,Episode,Video,MusicVideo',
+      'Fields': 'Overview,RunTimeTicks,UserData',
+      'Limit': '$limit',
+      'StartIndex': '$startIndex',
+      'SortBy': sortBy,
+      'SortOrder': 'Descending',
+      'ParentId': parentId,
+      'SearchTerm': keyword,
+    });
 
-    final resp = await http.get(Uri.parse(url), headers: _authHeader);
+    final resp = await http.get(uri, headers: _authHeader);
     if (resp.statusCode != 200) throw Exception('获取视频列表失败');
     final data = jsonDecode(resp.body);
     final items = (data['Items'] as List).map((e) => EmbyItem.fromJson(e)).toList();
