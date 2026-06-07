@@ -1090,32 +1090,36 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                     ),
                   if (_showControls && ctrl != null && !hideCenterControls)
                     Center(
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            iconSize: 40,
-                            icon: const _SeekButtonIcon(seconds: -15),
-                            onPressed: isSeeking ? null : () => _seek(-15),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.black.withValues(alpha: 0.42),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.22),
                           ),
-                          const SizedBox(width: 48),
-                          IconButton(
-                            iconSize: 56,
-                            icon: Icon(
-                              _isPlaying
-                                  ? Icons.pause_circle
-                                  : Icons.play_circle,
-                              color: Colors.white,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.30),
+                              blurRadius: 22,
+                              offset: const Offset(0, 10),
                             ),
-                            onPressed: isSeeking ? null : _togglePlay,
+                          ],
+                        ),
+                        child: IconButton(
+                          iconSize: 60,
+                          padding: const EdgeInsets.all(8),
+                          constraints: const BoxConstraints.tightFor(
+                            width: 80,
+                            height: 80,
                           ),
-                          const SizedBox(width: 48),
-                          IconButton(
-                            iconSize: 40,
-                            icon: const _SeekButtonIcon(seconds: 15),
-                            onPressed: isSeeking ? null : () => _seek(15),
+                          icon: Icon(
+                            _isPlaying
+                                ? Icons.pause_rounded
+                                : Icons.play_arrow_rounded,
+                            color: Colors.white,
                           ),
-                        ],
+                          onPressed: isSeeking ? null : _togglePlay,
+                        ),
                       ),
                     ),
                   if (isSeeking)
@@ -1213,44 +1217,6 @@ class _ProgressBar extends StatefulWidget {
 
   @override
   State<_ProgressBar> createState() => _ProgressBarState();
-}
-
-class _SeekButtonIcon extends StatelessWidget {
-  final int seconds;
-
-  const _SeekButtonIcon({required this.seconds});
-
-  @override
-  Widget build(BuildContext context) {
-    final isForward = seconds > 0;
-
-    return SizedBox(
-      width: 40,
-      height: 40,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Transform(
-            alignment: Alignment.center,
-            transform: Matrix4.identity()..scale(isForward ? -1.0 : 1.0, 1.0),
-            child: const Icon(Icons.replay, color: Colors.white, size: 36),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(top: 3),
-            child: Text(
-              '${isForward ? '+' : '-'}${seconds.abs()}',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 9,
-                height: 1,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _SeekFeedback extends StatelessWidget {
