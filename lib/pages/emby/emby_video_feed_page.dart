@@ -25,6 +25,7 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
   bool _loading = false;
   bool _openedInitialStream = false;
   bool _streamOpen = false;
+  bool _showBackToTop = false;
   String _searchTerm = '';
   int _requestId = 0;
   String? _currentPlayingItemId;
@@ -77,8 +78,15 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
   }
 
   void _onScroll() {
-    if (!_scrollCtrl.hasClients || _loading || _items.length >= _total) return;
+    if (!_scrollCtrl.hasClients) return;
+
     final position = _scrollCtrl.position;
+    final shouldShowBackToTop = position.pixels > 360;
+    if (shouldShowBackToTop != _showBackToTop) {
+      setState(() => _showBackToTop = shouldShowBackToTop);
+    }
+
+    if (_loading || _items.length >= _total) return;
     if (position.pixels >= position.maxScrollExtent - 300) {
       _load(startIndex: _items.length);
     }
@@ -238,12 +246,63 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
       floatingActionButton:
           _items.isEmpty
               ? null
-              : FloatingActionButton.small(
-                tooltip: '回到顶部',
-                onPressed: _scrollToTop,
-                child: const Icon(Icons.vertical_align_top),
+              : AnimatedScale(
+                scale: _showBackToTop ? 1 : 0.88,
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOutCubic,
+                child: AnimatedOpacity(
+                  opacity: _showBackToTop ? 1 : 0,
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOutCubic,
+                  child: IgnorePointer(
+                    ignoring: !_showBackToTop,
+                    child: _buildBackToTopButton(),
+                  ),
+                ),
               ),
       body: _buildBody(),
+    );
+  }
+
+  Widget _buildBackToTopButton() {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return SafeArea(
+      minimum: const EdgeInsets.only(right: 2, bottom: 4),
+      child: Tooltip(
+        message: '回到顶部',
+        child: Material(
+          color: colorScheme.surfaceContainerHigh,
+          elevation: 3,
+          shadowColor: colorScheme.shadow.withValues(alpha: 0.24),
+          shape: const StadiumBorder(),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: _scrollToTop,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.keyboard_arrow_up_rounded,
+                    size: 22,
+                    color: colorScheme.primary,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '顶部',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: colorScheme.onSurface,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
