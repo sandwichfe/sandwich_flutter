@@ -86,6 +86,7 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
 
       if (!mounted) return;
       final initialIndex = isRandomMode ? _random.nextInt(items.length) : 0;
+      setState(() => _openingLibraryId = null);
       await Navigator.of(context).push<EmbyStreamResult>(
         MaterialPageRoute(
           builder:
@@ -112,7 +113,9 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
         ).showSnackBar(SnackBar(content: Text('$e')));
       }
     } finally {
-      if (mounted) setState(() => _openingLibraryId = null);
+      if (mounted && _openingLibraryId == library.id) {
+        setState(() => _openingLibraryId = null);
+      }
     }
   }
 
