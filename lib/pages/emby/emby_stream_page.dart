@@ -443,11 +443,30 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
           ? _randomPlaybackModeValue
           : 'sequential',
     );
+    if (mounted) _showPlaybackModeToast(nextMode);
 
     if (nextMode == _PlaybackMode.random) {
       await _loadAllItems();
       if (mounted) _resetRandomQueue();
     }
+  }
+
+  void _showPlaybackModeToast(_PlaybackMode mode) {
+    final label =
+        mode == _PlaybackMode.random
+            ? '\u5df2\u5207\u6362\u5230\u968f\u673a\u64ad\u653e'
+            : '\u5df2\u5207\u6362\u5230\u987a\u5e8f\u64ad\u653e';
+
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(label),
+          duration: const Duration(milliseconds: 1200),
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.fromLTRB(24, 0, 24, 96),
+        ),
+      );
   }
 
   Widget _buildPlaybackModeButton() {
@@ -468,8 +487,8 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
               )
               : Icon(
                 _playbackMode == _PlaybackMode.random
-                    ? Icons.shuffle
-                    : Icons.format_list_numbered,
+                    ? Icons.shuffle_rounded
+                    : Icons.playlist_play_rounded,
                 color:
                     _playbackMode == _PlaybackMode.random
                         ? Colors.green
