@@ -1,25 +1,34 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 import '../../models/emby_models.dart';
 import '../../services/emby_service.dart';
 
 enum _PlaybackOrientation { portrait, landscape }
 
+enum _PlaybackMode { sequential, random }
+
 typedef _SeekRequestCallback =
     Future<void> Function(Duration target, {bool resumePlayback});
+
+typedef EmbyStreamPageLoader =
+    Future<({List<EmbyItem> items, int total})> Function(int startIndex);
 
 class EmbyStreamResult {
   final List<EmbyItem> items;
   final int currentIndex;
   final Duration currentPosition;
+  final int? totalCount;
 
   const EmbyStreamResult({
     required this.items,
     required this.currentIndex,
     this.currentPosition = Duration.zero,
+    this.totalCount,
   });
 }
 
@@ -27,11 +36,15 @@ class EmbyStreamPage extends StatefulWidget {
   final List<EmbyItem> items;
   final int initialIndex;
   final Duration initialPosition;
+  final int? totalCount;
+  final EmbyStreamPageLoader? onLoadMore;
   const EmbyStreamPage({
     super.key,
     required this.items,
     required this.initialIndex,
     this.initialPosition = Duration.zero,
+    this.totalCount,
+    this.onLoadMore,
   });
 
   @override
@@ -47,13 +60,20 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
   static const Duration _switchExitDuration = Duration(milliseconds: 320);
   static const Duration _seekTimeout = Duration(seconds: 8);
   static const Duration _endSeekSafetyMargin = Duration(seconds: 1);
+  static const String _playbackModeStorageKey = 'emby_playback_mode';
+  static const String _randomPlaybackModeValue = 'random';
 
   late int _index;
   late List<EmbyItem> _items;
   late final AnimationController _slideController;
+  final Random _random = Random();
+  final List<int> _randomQueue = [];
+  final List<int> _randomHistory = [];
   VideoPlayerController? _ctrl;
   bool _showControls = false;
   bool _isSwitchingVideo = false;
+  bool _isLoadingMoreItems = false;
+  bool _isAdvancingAfterEnd = false;
   double _rawDragOffsetY = 0;
   double _dragOffsetY = 0;
   double _rawDragOffsetX = 0;
@@ -70,18 +90,22 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
   bool? _desiredPlaying;
   bool _isApplyingPlayState = false;
   _PlaybackOrientation _playbackOrientation = _PlaybackOrientation.portrait;
+  _PlaybackMode _playbackMode = _PlaybackMode.sequential;
+  int? _totalCount;
 
   @override
   void initState() {
     super.initState();
     _index = widget.initialIndex;
     _items = List.of(widget.items);
+    _totalCount = widget.totalCount;
     _slideController = AnimationController(
       vsync: this,
       duration: _settleDuration,
     );
     SystemChrome.setPreferredOrientations(const [DeviceOrientation.portraitUp]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    _restorePlaybackMode();
     _play(_index, position: widget.initialPosition);
   }
 
@@ -157,6 +181,16 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
     if (_isPlaying != nextPlaying) {
       setState(() => _isPlaying = nextPlaying);
     }
+
+    final duration = ctrl.value.duration;
+    if (!_isAdvancingAfterEnd &&
+        !_isApplyingSeek &&
+        duration > Duration.zero &&
+        ctrl.value.position >= duration &&
+        !ctrl.value.isPlaying) {
+      _isAdvancingAfterEnd = true;
+      _switchToNext().whenComplete(() => _isAdvancingAfterEnd = false);
+    }
   }
 
   _PlaybackOrientation _orientationForVideoSize(Size size) {
@@ -227,6 +261,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
         items: _items,
         currentIndex: _index,
         currentPosition: _currentPosition,
+        totalCount: _totalCount,
       ),
     );
   }
@@ -244,6 +279,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
         items: _items,
         currentIndex: _index,
         currentPosition: _currentPosition,
+        totalCount: _totalCount,
       ),
     );
   }
@@ -255,11 +291,192 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
   }
 
   double _visualDragOffset(double rawOffset) {
-    if ((_index == 0 && rawOffset > 0) ||
-        (_index == _items.length - 1 && rawOffset < 0)) {
+    if ((_index == 0 && rawOffset > 0) || (!_canMoveForward && rawOffset < 0)) {
       return rawOffset * 0.28;
     }
     return rawOffset;
+  }
+
+  bool get _hasMoreItems {
+    final totalCount = _totalCount;
+    if (totalCount != null) return _items.length < totalCount;
+    return widget.onLoadMore != null;
+  }
+
+  bool get _canMoveForward =>
+      _playbackMode == _PlaybackMode.random ||
+      _index < _items.length - 1 ||
+      _hasMoreItems;
+
+  String get _countLabel {
+    final totalCount = _totalCount;
+    if (totalCount != null && totalCount > _items.length) {
+      return '${_index + 1} / ${_items.length} / $totalCount';
+    }
+    return '${_index + 1} / ${_items.length}';
+  }
+
+  Future<bool> _loadMoreItems() async {
+    final loader = widget.onLoadMore;
+    if (_isLoadingMoreItems || loader == null || !_hasMoreItems) return false;
+
+    setState(() => _isLoadingMoreItems = true);
+    try {
+      final result = await loader(_items.length);
+      if (!mounted) return false;
+
+      final knownIds = _items.map((e) => e.id).toSet();
+      final newItems =
+          result.items.where((item) => knownIds.add(item.id)).toList();
+      setState(() {
+        _items.addAll(newItems);
+        _totalCount = result.total;
+      });
+      return newItems.isNotEmpty;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$e')));
+      }
+      return false;
+    } finally {
+      if (mounted) setState(() => _isLoadingMoreItems = false);
+    }
+  }
+
+  Future<void> _loadAllItems() async {
+    while (mounted && _hasMoreItems) {
+      final loaded = await _loadMoreItems();
+      if (!loaded) return;
+    }
+  }
+
+  void _resetRandomQueue() {
+    _randomQueue
+      ..clear()
+      ..addAll(
+        List<int>.generate(_items.length, (i) => i).where((i) => i != _index),
+      )
+      ..shuffle(_random);
+  }
+
+  Future<int?> _nextIndex() async {
+    if (_playbackMode == _PlaybackMode.sequential) {
+      if (_index < _items.length - 1) return _index + 1;
+      final loaded = await _loadMoreItems();
+      if (loaded && _index < _items.length - 1) return _index + 1;
+      return null;
+    }
+
+    await _loadAllItems();
+    if (_items.length <= 1) return null;
+    if (_randomQueue.isEmpty) _resetRandomQueue();
+    if (_randomQueue.isEmpty) return null;
+    _randomHistory.add(_index);
+    return _randomQueue.removeLast();
+  }
+
+  Future<int?> _previousIndex() async {
+    if (_playbackMode == _PlaybackMode.sequential) {
+      return _index > 0 ? _index - 1 : null;
+    }
+
+    if (_randomHistory.isNotEmpty) return _randomHistory.removeLast();
+    await _loadAllItems();
+    if (_items.length <= 1) return null;
+    final candidates =
+        List<int>.generate(
+          _items.length,
+          (i) => i,
+        ).where((i) => i != _index).toList();
+    return candidates[_random.nextInt(candidates.length)];
+  }
+
+  Future<void> _switchToNext({double? exitOffset}) async {
+    final targetIndex = await _nextIndex();
+    if (targetIndex != null) {
+      await _switchTo(targetIndex, exitOffset: exitOffset);
+    } else if (exitOffset == null) {
+      await _animateDragTo(0);
+    }
+  }
+
+  Future<void> _switchToPrevious({double? exitOffset}) async {
+    final targetIndex = await _previousIndex();
+    if (targetIndex != null) {
+      await _switchTo(targetIndex, exitOffset: exitOffset);
+    } else if (exitOffset == null) {
+      await _animateDragTo(0);
+    }
+  }
+
+  Future<void> _restorePlaybackMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedMode = prefs.getString(_playbackModeStorageKey);
+    if (!mounted || savedMode != _randomPlaybackModeValue) return;
+
+    setState(() {
+      _playbackMode = _PlaybackMode.random;
+      _randomQueue.clear();
+      _randomHistory.clear();
+    });
+    await _loadAllItems();
+    if (mounted) _resetRandomQueue();
+  }
+
+  Future<void> _togglePlaybackMode() async {
+    final nextMode =
+        _playbackMode == _PlaybackMode.sequential
+            ? _PlaybackMode.random
+            : _PlaybackMode.sequential;
+
+    setState(() {
+      _playbackMode = nextMode;
+      _randomQueue.clear();
+      _randomHistory.clear();
+    });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _playbackModeStorageKey,
+      nextMode == _PlaybackMode.random
+          ? _randomPlaybackModeValue
+          : 'sequential',
+    );
+
+    if (nextMode == _PlaybackMode.random) {
+      await _loadAllItems();
+      if (mounted) _resetRandomQueue();
+    }
+  }
+
+  Widget _buildPlaybackModeButton() {
+    return IconButton(
+      tooltip:
+          _playbackMode == _PlaybackMode.random
+              ? '\u968f\u673a\u64ad\u653e'
+              : '\u987a\u5e8f\u64ad\u653e',
+      icon:
+          _isLoadingMoreItems
+              ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  color: Colors.white,
+                  strokeWidth: 2,
+                ),
+              )
+              : Icon(
+                _playbackMode == _PlaybackMode.random
+                    ? Icons.shuffle
+                    : Icons.format_list_numbered,
+                color:
+                    _playbackMode == _PlaybackMode.random
+                        ? Colors.green
+                        : Colors.white,
+              ),
+      onPressed: _isLoadingMoreItems ? null : _togglePlaybackMode,
+    );
   }
 
   Future<void> _animateDragTo(
@@ -317,13 +534,13 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
   }
 
   void _handleVerticalDragStart(DragStartDetails details) {
-    if (_isSwitchingVideo) return;
+    if (_isSwitchingVideo || _isLoadingMoreItems) return;
     _slideController.stop();
     _rawDragOffsetY = 0;
   }
 
   void _handleVerticalDragUpdate(DragUpdateDetails details) {
-    if (_isSwitchingVideo) return;
+    if (_isSwitchingVideo || _isLoadingMoreItems) return;
     setState(() {
       _rawDragOffsetY += details.delta.dy;
       _dragOffsetY = _visualDragOffset(_rawDragOffsetY);
@@ -331,22 +548,22 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
   }
 
   void _handleVerticalDragEnd(DragEndDetails details) {
-    if (_isSwitchingVideo) return;
+    if (_isSwitchingVideo || _isLoadingMoreItems) return;
 
     final height = MediaQuery.sizeOf(context).height;
     final velocity = details.primaryVelocity ?? 0;
     final distanceThreshold = height * 0.16;
     final shouldNext =
-        _index < _items.length - 1 &&
+        _canMoveForward &&
         (_rawDragOffsetY < -distanceThreshold || velocity < -_switchVelocity);
     final shouldPrev =
-        _index > 0 &&
+        (_playbackMode == _PlaybackMode.random || _index > 0) &&
         (_rawDragOffsetY > distanceThreshold || velocity > _switchVelocity);
 
     if (shouldNext) {
-      _switchTo(_index + 1, exitOffset: -height);
+      _switchToNext(exitOffset: -height);
     } else if (shouldPrev) {
-      _switchTo(_index - 1, exitOffset: height);
+      _switchToPrevious(exitOffset: height);
     } else {
       _rawDragOffsetY = 0;
       _animateDragTo(0);
@@ -354,7 +571,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
   }
 
   void _handleVerticalDragCancel() {
-    if (_isSwitchingVideo) return;
+    if (_isSwitchingVideo || _isLoadingMoreItems) return;
     _rawDragOffsetY = 0;
     _animateDragTo(0);
   }
@@ -690,6 +907,8 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            _buildPlaybackModeButton(),
+                            const SizedBox(height: 4),
                             Text(
                               item.name,
                               style: const TextStyle(
@@ -743,8 +962,8 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                                 tooltip:
                                     _playbackOrientation ==
                                             _PlaybackOrientation.landscape
-                                        ? '切换竖屏'
-                                        : '切换横屏',
+                                        ? '\u5207\u6362\u7ad6\u5c4f'
+                                        : '\u5207\u6362\u6a2a\u5c4f',
                                 icon: Icon(
                                   _playbackOrientation ==
                                           _PlaybackOrientation.landscape
@@ -756,7 +975,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                               ),
                               const SizedBox(width: 8),
                               IconButton(
-                                tooltip: '退出全屏',
+                                tooltip: '\u9000\u51fa\u5168\u5c4f',
                                 icon: const Icon(
                                   Icons.fullscreen_exit,
                                   color: Colors.white,
@@ -765,7 +984,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                               ),
                             ] else
                               IconButton(
-                                tooltip: '全屏播放',
+                                tooltip: '\u5168\u5c4f\u64ad\u653e',
                                 icon: const Icon(
                                   Icons.fullscreen,
                                   color: Colors.white,
@@ -774,12 +993,12 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                               ),
                             const SizedBox(width: 8),
                             Text(
-                              '${_index + 1} / ${_items.length}',
+                              _countLabel,
                               style: const TextStyle(color: Colors.white),
                             ),
                             const SizedBox(width: 8),
                             IconButton(
-                              tooltip: '卡片页',
+                              tooltip: '\u5361\u7247\u9875',
                               icon: const Icon(
                                 Icons.grid_view,
                                 color: Colors.white,
@@ -876,7 +1095,9 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                               onPressed: _toggleFavorite,
                             ),
                             Text(
-                              item.isFavorite ? '已收藏' : '收藏',
+                              item.isFavorite
+                                  ? '\u5df2\u6536\u85cf'
+                                  : '\u6536\u85cf',
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 11,

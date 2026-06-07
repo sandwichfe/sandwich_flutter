@@ -34,47 +34,84 @@ class _EmbyFavoritesPageState extends State<EmbyFavoritesPage> {
         _total = result.total;
       });
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$e')));
+      }
     } finally {
       setState(() => _loading = false);
     }
+  }
+
+  Future<void> _openStream(int index) async {
+    final result = await Navigator.of(context).push<EmbyStreamResult>(
+      MaterialPageRoute(
+        builder:
+            (_) => EmbyStreamPage(
+              items: _items,
+              initialIndex: index,
+              totalCount: _total,
+              onLoadMore:
+                  (startIndex) =>
+                      EmbyService().getFavorites(startIndex: startIndex),
+            ),
+      ),
+    );
+    if (!mounted || result == null) return;
+
+    setState(() {
+      for (final item in result.items) {
+        final i = _items.indexWhere((e) => e.id == item.id);
+        if (!item.isFavorite) {
+          if (i != -1) _items.removeAt(i);
+        } else if (i != -1) {
+          _items[i] = item;
+        } else {
+          _items.add(item);
+        }
+      }
+      _total = result.totalCount ?? _total;
+      if (_total < _items.length) _total = _items.length;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('我的收藏')),
-      body: _loading && _items.isEmpty
-          ? const Center(child: CircularProgressIndicator())
-          : _items.isEmpty
+      body:
+          _loading && _items.isEmpty
+              ? const Center(child: CircularProgressIndicator())
+              : _items.isEmpty
               ? const Center(child: Text('暂无收藏'))
               : Column(
-                  children: [
-                    Expanded(
-                      child: GridView.builder(
-                        padding: const EdgeInsets.all(4),
-                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 3,
-                          childAspectRatio: 9 / 16,
-                          crossAxisSpacing: 4,
-                          mainAxisSpacing: 4,
-                        ),
-                        itemCount: _items.length,
-                        itemBuilder: (_, i) => _FavTile(
-                          item: _items[i],
-                          onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                            builder: (_) => EmbyStreamPage(items: _items, initialIndex: i),
-                          )),
-                        ),
-                      ),
+                children: [
+                  Expanded(
+                    child: GridView.builder(
+                      padding: const EdgeInsets.all(4),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 3,
+                            childAspectRatio: 9 / 16,
+                            crossAxisSpacing: 4,
+                            mainAxisSpacing: 4,
+                          ),
+                      itemCount: _items.length,
+                      itemBuilder:
+                          (_, i) => _FavTile(
+                            item: _items[i],
+                            onTap: () => _openStream(i),
+                          ),
                     ),
-                    if (_items.length < _total)
-                      TextButton(
-                        onPressed: () => _load(startIndex: _items.length),
-                        child: Text('加载更多 (${_items.length}/$_total)'),
-                      ),
-                  ],
-                ),
+                  ),
+                  if (_items.length < _total)
+                    TextButton(
+                      onPressed: () => _load(startIndex: _items.length),
+                      child: Text('加载更多 (${_items.length}/$_total)'),
+                    ),
+                ],
+              ),
     );
   }
 }
@@ -92,22 +129,34 @@ class _FavTile extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          Image.network(thumb, fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Container(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                child: const Icon(Icons.movie),
-              )),
+          Image.network(
+            thumb,
+            fit: BoxFit.cover,
+            errorBuilder:
+                (_, __, ___) => Container(
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  child: const Icon(Icons.movie),
+                ),
+          ),
           Positioned(
-            bottom: 0, left: 0, right: 0,
+            bottom: 0,
+            left: 0,
+            right: 0,
             child: Container(
               padding: const EdgeInsets.all(4),
-              decoration: const BoxDecoration(gradient: LinearGradient(
-                begin: Alignment.bottomCenter, end: Alignment.topCenter,
-                colors: [Colors.black87, Colors.transparent],
-              )),
-              child: Text(item.name,
-                  style: const TextStyle(color: Colors.white, fontSize: 10),
-                  maxLines: 2, overflow: TextOverflow.ellipsis),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: [Colors.black87, Colors.transparent],
+                ),
+              ),
+              child: Text(
+                item.name,
+                style: const TextStyle(color: Colors.white, fontSize: 10),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ),
         ],

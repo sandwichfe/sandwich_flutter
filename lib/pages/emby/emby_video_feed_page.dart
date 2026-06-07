@@ -130,6 +130,14 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
             (_) => EmbyStreamPage(
               items: _items,
               initialIndex: initialIndex,
+              totalCount: _total,
+              onLoadMore:
+                  (startIndex) => EmbyService().getItems(
+                    parentId: widget.library.id,
+                    limit: _pageSize,
+                    startIndex: startIndex,
+                    searchTerm: _searchTerm,
+                  ),
               initialPosition:
                   _playbackPositions[initialItemId] ?? Duration.zero,
             ),
@@ -141,14 +149,18 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
       setState(() {
         for (final u in result.items) {
           final i = _items.indexWhere((e) => e.id == u.id);
-          if (i != -1) _items[i] = u;
+          if (i != -1) {
+            _items[i] = u;
+          } else {
+            _items.add(u);
+          }
         }
+        _total = result.totalCount ?? _total;
         _currentPlayingIndex = _validStreamIndex(result.currentIndex);
         if (result.currentIndex >= 0 &&
             result.currentIndex < result.items.length) {
           _currentPlayingItemId = result.items[result.currentIndex].id;
-          _playbackPositions[_currentPlayingItemId!] =
-              result.currentPosition;
+          _playbackPositions[_currentPlayingItemId!] = result.currentPosition;
         }
       });
     }
