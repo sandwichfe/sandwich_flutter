@@ -106,6 +106,7 @@ class EmbyService {
     int limit = 150,
     int startIndex = 0,
     String sortBy = 'DateCreated',
+    String? searchTerm,
   }) async {
     var url = _url(
         '/Users/${config.userId}/Items?api_key=${config.token}'
@@ -115,6 +116,10 @@ class EmbyService {
         '&Limit=$limit&StartIndex=$startIndex'
         '&SortBy=$sortBy&SortOrder=Descending');
     if (parentId != null) url += '&ParentId=$parentId';
+    final keyword = searchTerm?.trim();
+    if (keyword != null && keyword.isNotEmpty) {
+      url += '&SearchTerm=${Uri.encodeQueryComponent(keyword)}';
+    }
 
     final resp = await http.get(Uri.parse(url), headers: _authHeader);
     if (resp.statusCode != 200) throw Exception('获取视频列表失败');
