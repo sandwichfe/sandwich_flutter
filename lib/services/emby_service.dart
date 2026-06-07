@@ -49,13 +49,16 @@ class EmbyService {
   }
 
   Map<String, String> get _authHeader => {
-        'X-Emby-Authorization':
-            'Emby Client="EmbyX", Device="FlutterApp", DeviceId="${config.deviceId}", Version="1.0", Token="${config.token}"',
-        'Content-Type': 'application/json',
-      };
+    'X-Emby-Authorization':
+        'Emby Client="EmbyX", Device="FlutterApp", DeviceId="${config.deviceId}", Version="1.0", Token="${config.token}"',
+    'Content-Type': 'application/json',
+  };
 
   String _url(String path) {
-    final base = config.server.endsWith('/') ? config.server.substring(0, config.server.length - 1) : config.server;
+    final base =
+        config.server.endsWith('/')
+            ? config.server.substring(0, config.server.length - 1)
+            : config.server;
     final prefix = config.isJellyfin ? '' : '/emby';
     return '$base$prefix$path';
   }
@@ -70,15 +73,21 @@ class EmbyService {
   }
 
   Future<String> login(String server, String username, String password) async {
-    config.server = server.endsWith('/') ? server.substring(0, server.length - 1) : server;
+    config.server =
+        server.endsWith('/') ? server.substring(0, server.length - 1) : server;
     if (config.deviceId.isEmpty) _generateDeviceId();
 
     // Detect Jellyfin
     try {
-      final info = await http.get(Uri.parse('${config.server}/System/Info/Public'));
+      final info = await http.get(
+        Uri.parse('${config.server}/System/Info/Public'),
+      );
       if (info.statusCode == 200) {
         final body = jsonDecode(info.body);
-        config.isJellyfin = (body['ProductName'] ?? '').toString().toLowerCase().contains('jellyfin');
+        config.isJellyfin = (body['ProductName'] ?? '')
+            .toString()
+            .toLowerCase()
+            .contains('jellyfin');
       }
     } catch (_) {}
 
@@ -103,7 +112,9 @@ class EmbyService {
   }
 
   Future<List<EmbyLibrary>> getLibraries() async {
-    final url = _url('/Users/${config.userId}/Items?IncludeItemTypes=CollectionFolder&api_key=${config.token}');
+    final url = _url(
+      '/Users/${config.userId}/Items?IncludeItemTypes=CollectionFolder&api_key=${config.token}',
+    );
     final resp = await http.get(Uri.parse(url), headers: _authHeader);
     if (resp.statusCode != 200) throw Exception('获取媒体库失败');
     final data = jsonDecode(resp.body);
@@ -111,6 +122,33 @@ class EmbyService {
   }
 
   Future<({List<EmbyItem> items, int total})> getItems({
+    String? parentId,
+    int limit = 150,
+    int startIndex = 0,
+    String sortBy = 'DateCreated',
+    String? searchTerm,
+  }) async {
+    final keyword = searchTerm?.trim();
+    if (_shouldUseLocalSearch(keyword)) {
+      return _getItemsWithLocalSearch(
+        parentId: parentId,
+        limit: limit,
+        startIndex: startIndex,
+        sortBy: sortBy,
+        searchTerm: keyword!,
+      );
+    }
+
+    return _getItemsFromServer(
+      parentId: parentId,
+      limit: limit,
+      startIndex: startIndex,
+      sortBy: sortBy,
+      searchTerm: keyword,
+    );
+  }
+
+  Future<({List<EmbyItem> items, int total})> _getItemsFromServer({
     String? parentId,
     int limit = 150,
     int startIndex = 0,
@@ -134,12 +172,90 @@ class EmbyService {
     final resp = await http.get(uri, headers: _authHeader);
     if (resp.statusCode != 200) throw Exception('获取视频列表失败');
     final data = jsonDecode(resp.body);
-    final items = (data['Items'] as List).map((e) => EmbyItem.fromJson(e)).toList();
+    final items =
+        (data['Items'] as List).map((e) => EmbyItem.fromJson(e)).toList();
     return (items: items, total: data['TotalRecordCount'] as int);
   }
 
+  Future<({List<EmbyItem> items, int total})> _getItemsWithLocalSearch({
+    String? parentId,
+    int limit = 150,
+    int startIndex = 0,
+    String sortBy = 'DateCreated',
+    required String searchTerm,
+  }) async {
+    final allItems = <EmbyItem>[];
+    var nextIndex = 0;
+    var total = 0;
+    final fetchLimit = limit > 300 ? limit : 300;
+
+    do {
+      final result = await _getItemsFromServer(
+        parentId: parentId,
+        limit: fetchLimit,
+        startIndex: nextIndex,
+        sortBy: sortBy,
+      );
+      allItems.addAll(result.items);
+      total = result.total;
+      nextIndex = allItems.length;
+    } while (nextIndex < total);
+
+    final normalizedKeyword = _normalizeSearchText(searchTerm);
+    final filtered =
+        allItems.where((item) {
+          final searchable = _normalizeSearchText(
+            '${item.name} ${item.seriesName ?? ''} ${item.overview}',
+          );
+          return searchable.contains(normalizedKeyword);
+        }).toList();
+    final endIndex =
+        startIndex + limit > filtered.length
+            ? filtered.length
+            : startIndex + limit;
+
+    if (startIndex >= filtered.length) {
+      return (items: <EmbyItem>[], total: filtered.length);
+    }
+    return (
+      items: filtered.sublist(startIndex, endIndex),
+      total: filtered.length,
+    );
+  }
+
+  bool _shouldUseLocalSearch(String? searchTerm) =>
+      searchTerm != null && searchTerm.isNotEmpty && _containsCjk(searchTerm);
+
+  bool _containsCjk(String value) {
+    for (final rune in value.runes) {
+      if (_isCjkRune(rune)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool _isCjkRune(int rune) =>
+      (rune >= 0x3400 && rune <= 0x9fff) ||
+      (rune >= 0xf900 && rune <= 0xfaff) ||
+      (rune >= 0x20000 && rune <= 0x2ebef);
+
+  String _normalizeSearchText(String value) {
+    final buffer = StringBuffer();
+    for (final rune in value.toLowerCase().runes) {
+      final isAsciiLetterOrDigit =
+          (rune >= 0x30 && rune <= 0x39) || (rune >= 0x61 && rune <= 0x7a);
+      if (isAsciiLetterOrDigit || _isCjkRune(rune)) {
+        buffer.writeCharCode(rune);
+      }
+    }
+    return buffer.toString();
+  }
+
   Future<void> setFavorite(String itemId, {required bool favorite}) async {
-    final url = _url('/Users/${config.userId}/FavoriteItems/$itemId?api_key=${config.token}');
+    final url = _url(
+      '/Users/${config.userId}/FavoriteItems/$itemId?api_key=${config.token}',
+    );
     if (favorite) {
       await http.post(Uri.parse(url), headers: _authHeader);
     } else {
@@ -147,24 +263,31 @@ class EmbyService {
     }
   }
 
-  Future<({List<EmbyItem> items, int total})> getFavorites({int limit = 150, int startIndex = 0}) async {
-    var url = _url('/Users/${config.userId}/Items?api_key=${config.token}'
-        '&Recursive=true'
-        '&Filters=IsFavorite'
-        '&IncludeItemTypes=Movie,Episode,Video,MusicVideo'
-        '&Fields=Overview,RunTimeTicks,UserData'
-        '&Limit=$limit&StartIndex=$startIndex'
-        '&SortBy=DateCreated&SortOrder=Descending');
+  Future<({List<EmbyItem> items, int total})> getFavorites({
+    int limit = 150,
+    int startIndex = 0,
+  }) async {
+    var url = _url(
+      '/Users/${config.userId}/Items?api_key=${config.token}'
+      '&Recursive=true'
+      '&Filters=IsFavorite'
+      '&IncludeItemTypes=Movie,Episode,Video,MusicVideo'
+      '&Fields=Overview,RunTimeTicks,UserData'
+      '&Limit=$limit&StartIndex=$startIndex'
+      '&SortBy=DateCreated&SortOrder=Descending',
+    );
     final resp = await http.get(Uri.parse(url), headers: _authHeader);
     if (resp.statusCode != 200) throw Exception('获取收藏失败');
     final data = jsonDecode(resp.body);
-    final items = (data['Items'] as List).map((e) => EmbyItem.fromJson(e)).toList();
+    final items =
+        (data['Items'] as List).map((e) => EmbyItem.fromJson(e)).toList();
     return (items: items, total: data['TotalRecordCount'] as int);
   }
 
   String getStreamUrl(String itemId) =>
       _url('/Videos/$itemId/stream?api_key=${config.token}&static=true');
 
-  String getThumbnailUrl(String itemId) =>
-      _url('/Items/$itemId/Images/Primary?api_key=${config.token}&maxHeight=400');
+  String getThumbnailUrl(String itemId) => _url(
+    '/Items/$itemId/Images/Primary?api_key=${config.token}&maxHeight=400',
+  );
 }
