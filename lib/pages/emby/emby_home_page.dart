@@ -1,7 +1,11 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/emby_models.dart';
 import '../../services/emby_service.dart';
 import 'emby_login_page.dart';
+import 'emby_stream_page.dart';
 import 'emby_video_feed_page.dart';
 import 'emby_favorites_page.dart';
 
@@ -13,8 +17,12 @@ class EmbyHomePage extends StatefulWidget {
 }
 
 class _EmbyHomePageState extends State<EmbyHomePage> {
+  static const int _pageSize = 150;
+
   List<EmbyLibrary> _libraries = [];
+  final Random _random = Random();
   bool _loading = true;
+  String? _openingLibraryId;
 
   @override
   void initState() {
@@ -25,13 +33,19 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
   Future<void> _load() async {
     try {
       final libs = await EmbyService().getLibraries();
-      setState(() { _libraries = libs; });
+      setState(() {
+        _libraries = libs;
+      });
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$e')));
       }
     } finally {
-      setState(() { _loading = false; });
+      setState(() {
+        _loading = false;
+      });
     }
   }
 
@@ -44,12 +58,128 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
     }
   }
 
+  Future<void> _openLibrary(EmbyLibrary library) async {
+    if (_openingLibraryId != null) return;
+
+    setState(() => _openingLibraryId = library.id);
+    try {
+      final isRandomMode = await _isRandomPlaybackMode();
+      final result = await EmbyService().getItems(
+        parentId: library.id,
+        limit: _pageSize,
+      );
+      var items = result.items;
+      final total = result.total;
+      if (items.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('暂无视频')));
+        }
+        return;
+      }
+
+      if (isRandomMode && items.length < total) {
+        items = await _loadAllLibraryItems(library, items, total);
+      }
+
+      if (!mounted) return;
+      final initialIndex = isRandomMode ? _random.nextInt(items.length) : 0;
+      await Navigator.of(context).push<EmbyStreamResult>(
+        MaterialPageRoute(
+          builder:
+              (_) => EmbyStreamPage(
+                items: items,
+                initialIndex: initialIndex,
+                totalCount: total,
+                onLoadMore:
+                    (startIndex) => EmbyService().getItems(
+                      parentId: library.id,
+                      limit: _pageSize,
+                      startIndex: startIndex,
+                    ),
+                onOpenGridPage:
+                    (streamResult) =>
+                        _openGridPageFromStream(library, streamResult),
+              ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    } finally {
+      if (mounted) setState(() => _openingLibraryId = null);
+    }
+  }
+
+  Future<bool> _isRandomPlaybackMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(embyPlaybackModeStorageKey) ==
+        embyRandomPlaybackModeValue;
+  }
+
+  Future<List<EmbyItem>> _loadAllLibraryItems(
+    EmbyLibrary library,
+    List<EmbyItem> initialItems,
+    int total,
+  ) async {
+    final items = List<EmbyItem>.of(initialItems);
+    final knownIds = items.map((e) => e.id).toSet();
+
+    while (items.length < total) {
+      final result = await EmbyService().getItems(
+        parentId: library.id,
+        limit: _pageSize,
+        startIndex: items.length,
+      );
+      final newItems =
+          result.items.where((item) => knownIds.add(item.id)).toList();
+      if (newItems.isEmpty) break;
+      items.addAll(newItems);
+    }
+
+    return items;
+  }
+
+  Future<void> _openGridPageFromStream(
+    EmbyLibrary library,
+    EmbyStreamResult result,
+  ) async {
+    if (!mounted) return;
+
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder:
+            (_) => EmbyVideoFeedPage(
+              library: library,
+              initialItems: result.items,
+              initialTotalCount: result.totalCount,
+              initialPlayingIndex: result.currentIndex,
+              initialPlayingItemId:
+                  result.currentIndex >= 0 &&
+                          result.currentIndex < result.items.length
+                      ? result.items[result.currentIndex].id
+                      : null,
+              initialPlaybackPosition: result.currentPosition,
+              openInitialStream: false,
+            ),
+      ),
+    );
+  }
+
   IconData _libIcon(String type) {
     switch (type) {
-      case 'movies': return Icons.movie;
-      case 'tvshows': return Icons.tv;
-      case 'music': return Icons.music_note;
-      default: return Icons.folder;
+      case 'movies':
+        return Icons.movie;
+      case 'tvshows':
+        return Icons.tv;
+      case 'music':
+        return Icons.music_note;
+      default:
+        return Icons.folder;
     }
   }
 
@@ -62,31 +192,51 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
           IconButton(icon: const Icon(Icons.logout), onPressed: _logout),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _libraries.isEmpty
+      body:
+          _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _libraries.isEmpty
               ? const Center(child: Text('没有媒体库'))
               : ListView(
-                  children: [
-                    ListTile(
-                      leading: Icon(Icons.favorite, color: Colors.red.shade400),
-                      title: const Text('我的收藏'),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const EmbyFavoritesPage()),
-                      ),
-                    ),
-                    const Divider(height: 1),
-                    ..._libraries.map((lib) => ListTile(
-                      leading: Icon(_libIcon(lib.collectionType), color: Theme.of(context).colorScheme.primary),
+                children: [
+                  ListTile(
+                    leading: Icon(Icons.favorite, color: Colors.red.shade400),
+                    title: const Text('我的收藏'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap:
+                        () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const EmbyFavoritesPage(),
+                          ),
+                        ),
+                  ),
+                  const Divider(height: 1),
+                  ..._libraries.map((lib) {
+                    final opening = _openingLibraryId == lib.id;
+                    return ListTile(
+                      leading:
+                          opening
+                              ? const SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                              : Icon(
+                                _libIcon(lib.collectionType),
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
                       title: Text(lib.name),
                       trailing: const Icon(Icons.chevron_right),
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => EmbyVideoFeedPage(library: lib)),
-                      ),
-                    )),
-                  ],
-                ),
+                      onTap:
+                          _openingLibraryId == null
+                              ? () => _openLibrary(lib)
+                              : null,
+                    );
+                  }),
+                ],
+              ),
     );
   }
 }

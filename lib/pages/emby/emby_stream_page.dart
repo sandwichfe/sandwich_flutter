@@ -20,6 +20,9 @@ enum _PlaybackOrientation { portrait, landscape }
 
 enum _PlaybackMode { sequential, random }
 
+const String embyPlaybackModeStorageKey = 'emby_playback_mode';
+const String embyRandomPlaybackModeValue = 'random';
+
 typedef _SeekRequestCallback =
     Future<void> Function(Duration target, {bool resumePlayback});
 
@@ -72,9 +75,6 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
   static const Duration _switchExitDuration = Duration(milliseconds: 320);
   static const Duration _seekTimeout = Duration(seconds: 8);
   static const Duration _endSeekSafetyMargin = Duration(seconds: 1);
-  static const String _playbackModeStorageKey = 'emby_playback_mode';
-  static const String _randomPlaybackModeValue = 'random';
-
   late int _index;
   late List<EmbyItem> _items;
   late final AnimationController _slideController;

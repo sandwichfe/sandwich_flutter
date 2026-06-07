@@ -118,11 +118,8 @@ extension _EmbyStreamPlaylist on _EmbyStreamPageState {
 
   Future<void> _restorePlaybackMode() async {
     final prefs = await SharedPreferences.getInstance();
-    final savedMode = prefs.getString(
-      _EmbyStreamPageState._playbackModeStorageKey,
-    );
-    if (!mounted ||
-        savedMode != _EmbyStreamPageState._randomPlaybackModeValue) {
+    final savedMode = prefs.getString(embyPlaybackModeStorageKey);
+    if (!mounted || savedMode != embyRandomPlaybackModeValue) {
       return;
     }
 
@@ -151,9 +148,9 @@ extension _EmbyStreamPlaylist on _EmbyStreamPageState {
     });
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
-      _EmbyStreamPageState._playbackModeStorageKey,
+      embyPlaybackModeStorageKey,
       nextMode == _PlaybackMode.random
-          ? _EmbyStreamPageState._randomPlaybackModeValue
+          ? embyRandomPlaybackModeValue
           : 'sequential',
     );
     if (mounted) _showPlaybackModeToast(nextMode);
