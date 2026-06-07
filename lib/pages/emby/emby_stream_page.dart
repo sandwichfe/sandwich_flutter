@@ -132,6 +132,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
           _ctrl = null;
           _isPlaying = false;
           _desiredPlaying = null;
+          _showControls = false;
         });
         await WidgetsBinding.instance.endOfFrame;
       } else {
@@ -161,6 +162,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
       _ctrl = ctrl;
       _isPlaying = true;
       _desiredPlaying = null;
+      _showControls = false;
     });
     if (position > Duration.zero && ctrl.value.duration > Duration.zero) {
       await ctrl.seekTo(_clampPosition(position, ctrl.value.duration));
@@ -836,14 +838,26 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
     });
   }
 
-  void _togglePlay() {
+  void _pauseAndShowPlayButton() {
     final ctrl = _ctrl;
     if (ctrl == null || !ctrl.value.isInitialized) return;
 
-    final nextPlaying = !(_desiredPlaying ?? _isPlaying);
     setState(() {
-      _isPlaying = nextPlaying;
-      _desiredPlaying = nextPlaying;
+      _isPlaying = false;
+      _desiredPlaying = false;
+      _showControls = true;
+    });
+    _applyDesiredPlayState();
+  }
+
+  void _resumeFromPlayButton() {
+    final ctrl = _ctrl;
+    if (ctrl == null || !ctrl.value.isInitialized) return;
+
+    setState(() {
+      _isPlaying = true;
+      _desiredPlaying = true;
+      _showControls = false;
     });
     _applyDesiredPlayState();
   }
@@ -894,8 +908,6 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
       }
     }
   }
-
-  void _toggleControls() => setState(() => _showControls = !_showControls);
 
   void _handleProgressPlayingChanged(bool playing) {
     if (!mounted) return;
@@ -950,7 +962,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
             _showSeekHint(seconds);
           },
           onDoubleTap: () {},
-          onTap: _toggleControls,
+          onTap: _pauseAndShowPlayButton,
           child: ClipRect(
             child: Transform.translate(
               offset: Offset(0, _dragOffsetY),
@@ -1088,7 +1100,10 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                         ),
                       ),
                     ),
-                  if (_showControls && ctrl != null && !hideCenterControls)
+                  if (_showControls &&
+                      !_isPlaying &&
+                      ctrl != null &&
+                      !hideCenterControls)
                     Center(
                       child: DecoratedBox(
                         decoration: BoxDecoration(
@@ -1112,13 +1127,11 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                             width: 80,
                             height: 80,
                           ),
-                          icon: Icon(
-                            _isPlaying
-                                ? Icons.pause_rounded
-                                : Icons.play_arrow_rounded,
+                          icon: const Icon(
+                            Icons.play_arrow_rounded,
                             color: Colors.white,
                           ),
-                          onPressed: isSeeking ? null : _togglePlay,
+                          onPressed: isSeeking ? null : _resumeFromPlayButton,
                         ),
                       ),
                     ),
