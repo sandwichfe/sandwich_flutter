@@ -205,6 +205,15 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
     _scrollCtrl.jumpTo(safeOffset.toDouble());
   }
 
+  void _scrollToTop() {
+    if (!_scrollCtrl.hasClients) return;
+    _scrollCtrl.animateTo(
+      0,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
   @override
   void dispose() {
     _scrollCtrl.removeListener(_onScroll);
@@ -226,6 +235,14 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
           ),
         ],
       ),
+      floatingActionButton:
+          _items.isEmpty
+              ? null
+              : FloatingActionButton.small(
+                tooltip: '回到顶部',
+                onPressed: _scrollToTop,
+                child: const Icon(Icons.vertical_align_top),
+              ),
       body: _buildBody(),
     );
   }
@@ -291,6 +308,24 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
 
     return Column(
       children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+          child: Row(
+            children: [
+              Text(
+                '总视频数：$_total',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '已加载：${_items.length}',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
         Expanded(
           child: GridView.builder(
             controller: _scrollCtrl,
