@@ -5,7 +5,23 @@ import 'emby_stream_page.dart';
 
 class EmbyVideoFeedPage extends StatefulWidget {
   final EmbyLibrary library;
-  const EmbyVideoFeedPage({super.key, required this.library});
+  final List<EmbyItem>? initialItems;
+  final int? initialTotalCount;
+  final int? initialPlayingIndex;
+  final String? initialPlayingItemId;
+  final Duration? initialPlaybackPosition;
+  final bool openInitialStream;
+
+  const EmbyVideoFeedPage({
+    super.key,
+    required this.library,
+    this.initialItems,
+    this.initialTotalCount,
+    this.initialPlayingIndex,
+    this.initialPlayingItemId,
+    this.initialPlaybackPosition,
+    this.openInitialStream = true,
+  });
 
   @override
   State<EmbyVideoFeedPage> createState() => _EmbyVideoFeedPageState();
@@ -36,7 +52,38 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
   void initState() {
     super.initState();
     _scrollCtrl.addListener(_onScroll);
-    _load();
+    _seedInitialItems();
+    if (_items.isEmpty) {
+      _load();
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _scrollToCard(_currentPlayingItemId);
+      });
+    }
+  }
+
+  void _seedInitialItems() {
+    _openedInitialStream = !widget.openInitialStream;
+
+    final initialItems = widget.initialItems;
+    if (initialItems == null || initialItems.isEmpty) return;
+
+    _items.addAll(initialItems);
+    _total = widget.initialTotalCount ?? initialItems.length;
+    _currentPlayingIndex =
+        widget.initialPlayingIndex == null
+            ? null
+            : _validStreamIndex(widget.initialPlayingIndex!);
+    _currentPlayingItemId =
+        widget.initialPlayingItemId ??
+        (_currentPlayingIndex == null
+            ? null
+            : _items[_currentPlayingIndex!].id);
+    if (_currentPlayingItemId != null &&
+        widget.initialPlaybackPosition != null) {
+      _playbackPositions[_currentPlayingItemId!] =
+          widget.initialPlaybackPosition!;
+    }
   }
 
   Future<void> _load({int startIndex = 0, bool force = false}) async {
@@ -154,6 +201,7 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
                   ),
               initialPosition:
                   _playbackPositions[initialItemId] ?? Duration.zero,
+              onOpenGridPage: _openGridPageFromStream,
             ),
       ),
     );
@@ -183,6 +231,29 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
         if (mounted) _scrollToCard(scrollTargetItemId);
       });
     }
+  }
+
+  Future<void> _openGridPageFromStream(EmbyStreamResult result) async {
+    if (!mounted) return;
+
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder:
+            (_) => EmbyVideoFeedPage(
+              library: widget.library,
+              initialItems: result.items,
+              initialTotalCount: result.totalCount,
+              initialPlayingIndex: result.currentIndex,
+              initialPlayingItemId:
+                  result.currentIndex >= 0 &&
+                          result.currentIndex < result.items.length
+                      ? result.items[result.currentIndex].id
+                      : null,
+              initialPlaybackPosition: result.currentPosition,
+              openInitialStream: false,
+            ),
+      ),
+    );
   }
 
   void _scrollToCard(String? itemId) {

@@ -72,19 +72,51 @@ extension _EmbyStreamFullscreen on _EmbyStreamPageState {
       await _exitFullscreen();
     }
 
-    _popWithResult();
+    final opener = widget.onOpenGridPage;
+    if (opener == null) {
+      _popWithResult();
+      return;
+    }
+
+    final ctrl = _ctrl;
+    final shouldResume =
+        ctrl != null &&
+        ctrl.value.isInitialized &&
+        (_desiredPlaying ?? ctrl.value.isPlaying);
+    if (ctrl != null && ctrl.value.isInitialized && ctrl.value.isPlaying) {
+      await ctrl.pause();
+      if (mounted && _ctrl == ctrl) {
+        _updateState(() {
+          _isPlaying = false;
+          _desiredPlaying = null;
+        });
+      }
+    }
+
+    await opener(_streamResult);
+
+    if (!mounted || _ctrl != ctrl || !shouldResume) return;
+    await ctrl.play();
+    if (mounted && _ctrl == ctrl) {
+      _updateState(() {
+        _isPlaying = ctrl.value.isPlaying;
+        _desiredPlaying = null;
+        _showControls = false;
+      });
+    }
+  }
+
+  EmbyStreamResult get _streamResult {
+    return EmbyStreamResult(
+      items: _items,
+      currentIndex: _index,
+      currentPosition: _currentPosition,
+      totalCount: _totalCount,
+    );
   }
 
   void _popWithResult() {
     if (!mounted) return;
-    Navigator.pop(
-      context,
-      EmbyStreamResult(
-        items: _items,
-        currentIndex: _index,
-        currentPosition: _currentPosition,
-        totalCount: _totalCount,
-      ),
-    );
+    Navigator.pop(context, _streamResult);
   }
 }

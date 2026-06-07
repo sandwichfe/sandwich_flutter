@@ -25,6 +25,8 @@ typedef _SeekRequestCallback =
 
 typedef EmbyStreamPageLoader =
     Future<({List<EmbyItem> items, int total})> Function(int startIndex);
+typedef EmbyStreamGridPageOpener =
+    Future<void> Function(EmbyStreamResult result);
 
 class EmbyStreamResult {
   final List<EmbyItem> items;
@@ -46,6 +48,7 @@ class EmbyStreamPage extends StatefulWidget {
   final Duration initialPosition;
   final int? totalCount;
   final EmbyStreamPageLoader? onLoadMore;
+  final EmbyStreamGridPageOpener? onOpenGridPage;
   const EmbyStreamPage({
     super.key,
     required this.items,
@@ -53,6 +56,7 @@ class EmbyStreamPage extends StatefulWidget {
     this.initialPosition = Duration.zero,
     this.totalCount,
     this.onLoadMore,
+    this.onOpenGridPage,
   });
 
   @override
