@@ -4,7 +4,20 @@ import '../../services/emby_service.dart';
 import 'emby_stream_page.dart';
 
 class EmbyFavoritesPage extends StatefulWidget {
-  const EmbyFavoritesPage({super.key});
+  final List<EmbyItem>? initialItems;
+  final int? initialTotalCount;
+  final int? initialPlayingIndex;
+  final String? initialPlayingItemId;
+  final Duration? initialPlaybackPosition;
+
+  const EmbyFavoritesPage({
+    super.key,
+    this.initialItems,
+    this.initialTotalCount,
+    this.initialPlayingIndex,
+    this.initialPlayingItemId,
+    this.initialPlaybackPosition,
+  });
 
   @override
   State<EmbyFavoritesPage> createState() => _EmbyFavoritesPageState();
@@ -21,11 +34,40 @@ class _EmbyFavoritesPageState extends State<EmbyFavoritesPage> {
   int _total = 0;
   bool _loading = true;
   String? _recentlyWatchedItemId;
+  final Map<String, Duration> _playbackPositions = {};
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _seedInitialItems();
+    if (_items.isEmpty) {
+      _load();
+    } else {
+      _loading = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _scrollToCard(_recentlyWatchedItemId);
+      });
+    }
+  }
+
+  void _seedInitialItems() {
+    final initialItems = widget.initialItems;
+    if (initialItems == null || initialItems.isEmpty) return;
+
+    _items = List.of(initialItems);
+    _total = widget.initialTotalCount ?? initialItems.length;
+    final initialPlayingIndex =
+        widget.initialPlayingIndex == null
+            ? null
+            : _validStreamIndex(widget.initialPlayingIndex!);
+    _recentlyWatchedItemId =
+        widget.initialPlayingItemId ??
+        (initialPlayingIndex == null ? null : _items[initialPlayingIndex].id);
+    if (_recentlyWatchedItemId != null &&
+        widget.initialPlaybackPosition != null) {
+      _playbackPositions[_recentlyWatchedItemId!] =
+          widget.initialPlaybackPosition!;
+    }
   }
 
   Future<void> _load({int startIndex = 0}) async {
@@ -52,21 +94,53 @@ class _EmbyFavoritesPageState extends State<EmbyFavoritesPage> {
   }
 
   Future<void> _openStream(int index) async {
+    if (_items.isEmpty) return;
+
+    final initialIndex = _validStreamIndex(index);
+    final initialItemId = _items[initialIndex].id;
     final result = await Navigator.of(context).push<EmbyStreamResult>(
       MaterialPageRoute(
         builder:
             (_) => EmbyStreamPage(
               items: _items,
-              initialIndex: index,
+              initialIndex: initialIndex,
               totalCount: _total,
               onLoadMore:
                   (startIndex) =>
                       EmbyService().getFavorites(startIndex: startIndex),
+              initialPosition:
+                  _playbackPositions[initialItemId] ?? Duration.zero,
+              onOpenGridPage: _openGridPageFromStream,
             ),
       ),
     );
     if (!mounted || result == null) return;
 
+    _applyStreamResult(result);
+  }
+
+  Future<void> _openGridPageFromStream(EmbyStreamResult result) async {
+    if (!mounted) return;
+
+    await Navigator.of(context).push<EmbyStreamResult>(
+      MaterialPageRoute(
+        builder:
+            (_) => EmbyFavoritesPage(
+              initialItems: result.items,
+              initialTotalCount: result.totalCount,
+              initialPlayingIndex: result.currentIndex,
+              initialPlayingItemId:
+                  result.currentIndex >= 0 &&
+                          result.currentIndex < result.items.length
+                      ? result.items[result.currentIndex].id
+                      : null,
+              initialPlaybackPosition: result.currentPosition,
+            ),
+      ),
+    );
+  }
+
+  void _applyStreamResult(EmbyStreamResult result) {
     String? scrollTargetItemId;
     setState(() {
       for (final item in result.items) {
@@ -86,6 +160,7 @@ class _EmbyFavoritesPageState extends State<EmbyFavoritesPage> {
           result.items[result.currentIndex].isFavorite) {
         scrollTargetItemId = result.items[result.currentIndex].id;
         _recentlyWatchedItemId = scrollTargetItemId;
+        _playbackPositions[_recentlyWatchedItemId!] = result.currentPosition;
       } else {
         _recentlyWatchedItemId = null;
       }
@@ -93,6 +168,12 @@ class _EmbyFavoritesPageState extends State<EmbyFavoritesPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _scrollToCard(scrollTargetItemId);
     });
+  }
+
+  int _validStreamIndex(int index) {
+    if (_items.isEmpty || index < 0) return 0;
+    if (index >= _items.length) return _items.length - 1;
+    return index;
   }
 
   void _scrollToCard(String? itemId) {
