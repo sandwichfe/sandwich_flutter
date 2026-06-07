@@ -20,6 +20,7 @@ class _EmbyFavoritesPageState extends State<EmbyFavoritesPage> {
   final ScrollController _scrollCtrl = ScrollController();
   int _total = 0;
   bool _loading = true;
+  String? _recentlyWatchedItemId;
 
   @override
   void initState() {
@@ -84,6 +85,9 @@ class _EmbyFavoritesPageState extends State<EmbyFavoritesPage> {
           result.currentIndex < result.items.length &&
           result.items[result.currentIndex].isFavorite) {
         scrollTargetItemId = result.items[result.currentIndex].id;
+        _recentlyWatchedItemId = scrollTargetItemId;
+      } else {
+        _recentlyWatchedItemId = null;
       }
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -144,6 +148,8 @@ class _EmbyFavoritesPageState extends State<EmbyFavoritesPage> {
                       itemBuilder:
                           (_, i) => _FavTile(
                             item: _items[i],
+                            isRecentlyWatched:
+                                _items[i].id == _recentlyWatchedItemId,
                             onTap: () => _openStream(i),
                           ),
                     ),
@@ -161,8 +167,13 @@ class _EmbyFavoritesPageState extends State<EmbyFavoritesPage> {
 
 class _FavTile extends StatelessWidget {
   final EmbyItem item;
+  final bool isRecentlyWatched;
   final VoidCallback onTap;
-  const _FavTile({required this.item, required this.onTap});
+  const _FavTile({
+    required this.item,
+    required this.isRecentlyWatched,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -181,6 +192,8 @@ class _FavTile extends StatelessWidget {
                   child: const Icon(Icons.movie),
                 ),
           ),
+          if (isRecentlyWatched)
+            const Positioned(top: 6, left: 6, child: _RecentlyWatchedBadge()),
           Positioned(
             bottom: 0,
             left: 0,
@@ -203,6 +216,32 @@ class _FavTile extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _RecentlyWatchedBadge extends StatelessWidget {
+  const _RecentlyWatchedBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.62),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
+      ),
+      child: const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        child: Text(
+          '刚刚看过',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       ),
     );
   }
