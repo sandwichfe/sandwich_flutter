@@ -3,8 +3,6 @@ import '../../models/emby_models.dart';
 import '../../services/emby_service.dart';
 import 'emby_stream_page.dart';
 
-enum _ViewMode { stream, grid }
-
 class EmbyVideoFeedPage extends StatefulWidget {
   final EmbyLibrary library;
   const EmbyVideoFeedPage({super.key, required this.library});
@@ -19,10 +17,13 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
   final ScrollController _scrollCtrl = ScrollController();
   int _total = 0;
   bool _loading = false;
-  _ViewMode _viewMode = _ViewMode.stream;
+  bool _openedInitialStream = false;
+  bool _streamOpen = false;
   static const int _pageSize = 150;
   String _searchTerm = '';
   int _requestId = 0;
+  String? _currentPlayingItemId;
+  int? _currentPlayingIndex;
 
   @override
   void initState() {
@@ -34,6 +35,7 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
   Future<void> _load({int startIndex = 0, bool force = false}) async {
     if (_loading && !force) return;
     final requestId = ++_requestId;
+    var shouldOpenInitialStream = false;
     setState(() => _loading = true);
     try {
       final result = await EmbyService().getItems(
@@ -48,6 +50,10 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
         _items.addAll(result.items);
         _total = result.total;
       });
+      if (startIndex == 0 && !_openedInitialStream && _searchTerm.isEmpty) {
+        _openedInitialStream = true;
+        shouldOpenInitialStream = result.items.isNotEmpty;
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -56,6 +62,11 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
       }
     } finally {
       if (mounted && requestId == _requestId) setState(() => _loading = false);
+    }
+
+    if (shouldOpenInitialStream && mounted && requestId == _requestId) {
+      await WidgetsBinding.instance.endOfFrame;
+      if (mounted) await _openStream(0);
     }
   }
 
@@ -84,17 +95,51 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
     _search();
   }
 
+  int _validStreamIndex(int index) {
+    if (_items.isEmpty || index < 0) return 0;
+    if (index >= _items.length) return _items.length - 1;
+    return index;
+  }
+
+  int _resumeStreamIndex() {
+    final itemId = _currentPlayingItemId;
+    if (itemId != null) {
+      final index = _items.indexWhere((e) => e.id == itemId);
+      if (index != -1) return index;
+      return 0;
+    }
+    final index = _currentPlayingIndex;
+    return index == null ? 0 : _validStreamIndex(index);
+  }
+
+  Future<void> _openCurrentStream() => _openStream(_resumeStreamIndex());
+
   Future<void> _openStream(int index) async {
-    final updated = await Navigator.of(context).push<List<EmbyItem>>(
+    if (_items.isEmpty || _streamOpen) return;
+
+    final initialIndex = _validStreamIndex(index);
+    _streamOpen = true;
+    _currentPlayingIndex = initialIndex;
+    _currentPlayingItemId = _items[initialIndex].id;
+
+    final result = await Navigator.of(context).push<EmbyStreamResult>(
       MaterialPageRoute(
-        builder: (_) => EmbyStreamPage(items: _items, initialIndex: index),
+        builder:
+            (_) => EmbyStreamPage(items: _items, initialIndex: initialIndex),
       ),
     );
-    if (updated != null) {
+    _streamOpen = false;
+    if (!mounted) return;
+    if (result != null) {
       setState(() {
-        for (final u in updated) {
+        for (final u in result.items) {
           final i = _items.indexWhere((e) => e.id == u.id);
           if (i != -1) _items[i] = u;
+        }
+        _currentPlayingIndex = _validStreamIndex(result.currentIndex);
+        if (result.currentIndex >= 0 &&
+            result.currentIndex < result.items.length) {
+          _currentPlayingItemId = result.items[result.currentIndex].id;
         }
       });
     }
@@ -115,21 +160,9 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
         title: Text(widget.library.name),
         actions: [
           IconButton(
-            icon: Icon(
-              _viewMode == _ViewMode.stream
-                  ? Icons.grid_view
-                  : Icons.view_stream,
-            ),
-            onPressed:
-                () => setState(() {
-                  _viewMode =
-                      _viewMode == _ViewMode.stream
-                          ? _ViewMode.grid
-                          : _ViewMode.stream;
-                  if (_viewMode == _ViewMode.stream && _items.isNotEmpty) {
-                    _openStream(0);
-                  }
-                }),
+            tooltip: '继续播放',
+            icon: const Icon(Icons.view_stream),
+            onPressed: _items.isEmpty ? null : _openCurrentStream,
           ),
         ],
       ),
@@ -145,8 +178,6 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
           child:
               _loading && _items.isEmpty
                   ? const Center(child: CircularProgressIndicator())
-                  : _viewMode == _ViewMode.stream
-                  ? _buildStreamEntry()
                   : _buildGrid(),
         ),
       ],
@@ -178,21 +209,9 @@ class _EmbyVideoFeedPageState extends State<EmbyVideoFeedPage> {
     );
   }
 
-  Widget _buildStreamEntry() {
-    if (_items.isEmpty) return const Center(child: Text('没有视频'));
-    return Center(
-      child: ElevatedButton.icon(
-        style: ElevatedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
-        ),
-        icon: const Icon(Icons.play_arrow),
-        label: Text('播放 (${_items.length} 个视频)'),
-        onPressed: () => _openStream(0),
-      ),
-    );
-  }
-
   Widget _buildGrid() {
+    if (_items.isEmpty) return const Center(child: Text('暂无视频'));
+
     return Column(
       children: [
         Expanded(

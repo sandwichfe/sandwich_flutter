@@ -11,6 +11,13 @@ enum _PlaybackOrientation { portrait, landscape }
 typedef _SeekRequestCallback =
     Future<void> Function(Duration target, {bool resumePlayback});
 
+class EmbyStreamResult {
+  final List<EmbyItem> items;
+  final int currentIndex;
+
+  const EmbyStreamResult({required this.items, required this.currentIndex});
+}
+
 class EmbyStreamPage extends StatefulWidget {
   final List<EmbyItem> items;
   final int initialIndex;
@@ -203,7 +210,23 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
     }
 
     if (!mounted) return;
-    Navigator.pop(context, _items);
+    Navigator.pop(
+      context,
+      EmbyStreamResult(items: _items, currentIndex: _index),
+    );
+  }
+
+  Future<void> _openGridPage() async {
+    if (_isFullscreen ||
+        _playbackOrientation == _PlaybackOrientation.landscape) {
+      await _exitFullscreen();
+    }
+
+    if (!mounted) return;
+    Navigator.pop(
+      context,
+      EmbyStreamResult(items: _items, currentIndex: _index),
+    );
   }
 
   double _visualDragOffset(double rawOffset) {
@@ -690,6 +713,15 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                               onPressed: _handleBackPressed,
                             ),
                             const Spacer(),
+                            IconButton(
+                              tooltip: '卡片页',
+                              icon: const Icon(
+                                Icons.grid_view,
+                                color: Colors.white,
+                              ),
+                              onPressed: _openGridPage,
+                            ),
+                            const SizedBox(width: 8),
                             if (_isFullscreen) ...[
                               IconButton(
                                 tooltip:
