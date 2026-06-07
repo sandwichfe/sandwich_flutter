@@ -2,12 +2,13 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../../models/emby_models.dart';
 import '../../services/emby_service.dart';
+import 'emby_favorites_page.dart';
 import 'emby_login_page.dart';
 import 'emby_stream_page.dart';
 import 'emby_video_feed_page.dart';
-import 'emby_favorites_page.dart';
 
 class EmbyHomePage extends StatefulWidget {
   const EmbyHomePage({super.key});
@@ -183,60 +184,170 @@ class _EmbyHomePageState extends State<EmbyHomePage> {
     }
   }
 
+  EmbyLibrary? _openingLibrary() {
+    for (final library in _libraries) {
+      if (library.id == _openingLibraryId) return library;
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('媒体库'),
-        actions: [
-          IconButton(icon: const Icon(Icons.logout), onPressed: _logout),
-        ],
-      ),
-      body:
-          _loading
-              ? const Center(child: CircularProgressIndicator())
-              : _libraries.isEmpty
-              ? const Center(child: Text('没有媒体库'))
-              : ListView(
-                children: [
-                  ListTile(
-                    leading: Icon(Icons.favorite, color: Colors.red.shade400),
-                    title: const Text('我的收藏'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap:
-                        () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => const EmbyFavoritesPage(),
-                          ),
-                        ),
+    final openingLibrary = _openingLibrary();
+
+    return Stack(
+      children: [
+        Scaffold(
+          appBar: AppBar(
+            title: const Text('媒体库'),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.logout),
+                onPressed: _openingLibraryId == null ? _logout : null,
+              ),
+            ],
+          ),
+          body: _buildBody(),
+        ),
+        Positioned.fill(
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 180),
+            child:
+                openingLibrary == null
+                    ? const SizedBox.shrink()
+                    : _OpeningLibraryOverlay(
+                      key: ValueKey(openingLibrary.id),
+                      libraryName: openingLibrary.name,
+                    ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBody() {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_libraries.isEmpty) {
+      return const Center(child: Text('没有媒体库'));
+    }
+
+    return ListView(
+      children: [
+        ListTile(
+          leading: Icon(Icons.favorite, color: Colors.red.shade400),
+          title: const Text('我的收藏'),
+          trailing: const Icon(Icons.chevron_right),
+          enabled: _openingLibraryId == null,
+          onTap:
+              _openingLibraryId == null
+                  ? () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const EmbyFavoritesPage(),
+                    ),
+                  )
+                  : null,
+        ),
+        const Divider(height: 1),
+        ..._libraries.map((lib) {
+          final opening = _openingLibraryId == lib.id;
+          final colorScheme = Theme.of(context).colorScheme;
+
+          return ListTile(
+            leading: Icon(
+              _libIcon(lib.collectionType),
+              color: colorScheme.primary,
+            ),
+            title: Text(lib.name),
+            tileColor:
+                opening ? colorScheme.primary.withValues(alpha: 0.08) : null,
+            trailing:
+                opening
+                    ? Icon(
+                      Icons.hourglass_top_rounded,
+                      color: colorScheme.primary,
+                    )
+                    : const Icon(Icons.chevron_right),
+            onTap: _openingLibraryId == null ? () => _openLibrary(lib) : null,
+          );
+        }),
+      ],
+    );
+  }
+}
+
+class _OpeningLibraryOverlay extends StatelessWidget {
+  final String libraryName;
+
+  const _OpeningLibraryOverlay({super.key, required this.libraryName});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Material(
+      color: Colors.transparent,
+      child: AbsorbPointer(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: colorScheme.scrim.withValues(alpha: 0.42),
+          ),
+          child: Center(
+            child: Container(
+              width: 220,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 26),
+              decoration: BoxDecoration(
+                color: colorScheme.surface,
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.18),
+                    blurRadius: 28,
+                    offset: const Offset(0, 12),
                   ),
-                  const Divider(height: 1),
-                  ..._libraries.map((lib) {
-                    final opening = _openingLibraryId == lib.id;
-                    return ListTile(
-                      leading:
-                          opening
-                              ? const SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                              : Icon(
-                                _libIcon(lib.collectionType),
-                                color: Theme.of(context).colorScheme.primary,
-                              ),
-                      title: Text(lib.name),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap:
-                          _openingLibraryId == null
-                              ? () => _openLibrary(lib)
-                              : null,
-                    );
-                  }),
                 ],
               ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 52,
+                    height: 52,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 4,
+                      strokeCap: StrokeCap.round,
+                      color: colorScheme.primary,
+                      backgroundColor: colorScheme.primary.withValues(
+                        alpha: 0.12,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    '正在打开',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: colorScheme.onSurface,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    libraryName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
