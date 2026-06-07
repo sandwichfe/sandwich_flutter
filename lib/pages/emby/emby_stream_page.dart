@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
@@ -5,6 +7,9 @@ import '../../models/emby_models.dart';
 import '../../services/emby_service.dart';
 
 enum _PlaybackOrientation { portrait, landscape }
+
+typedef _SeekRequestCallback =
+    Future<void> Function(Duration target, {bool resumePlayback});
 
 class EmbyStreamPage extends StatefulWidget {
   final List<EmbyItem> items;
@@ -26,6 +31,8 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
   static const double _seekSwipeMinDistance = 18;
   static const Duration _settleDuration = Duration(milliseconds: 180);
   static const Duration _switchExitDuration = Duration(milliseconds: 320);
+  static const Duration _seekTimeout = Duration(seconds: 8);
+  static const Duration _endSeekSafetyMargin = Duration(seconds: 1);
 
   late int _index;
   late List<EmbyItem> _items;
@@ -43,6 +50,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
   Duration? _seekFeedbackTarget;
   bool _showSeekFeedback = false;
   bool _isSeekScrubbing = false;
+  bool _isApplyingSeek = false;
   bool _isFullscreen = false;
   bool _isPlaying = false;
   bool? _desiredPlaying;
@@ -305,7 +313,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
 
   void _handleHorizontalDragStart(DragStartDetails details) {
     final ctrl = _ctrl;
-    if (ctrl == null || !ctrl.value.isInitialized) return;
+    if (_isApplyingSeek || ctrl == null || !ctrl.value.isInitialized) return;
     _rawDragOffsetX = 0;
     _seekDragStartPosition = ctrl.value.position;
     setState(() {
@@ -318,7 +326,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
 
   void _handleHorizontalDragUpdate(DragUpdateDetails details) {
     final ctrl = _ctrl;
-    if (ctrl == null || !ctrl.value.isInitialized) return;
+    if (_isApplyingSeek || ctrl == null || !ctrl.value.isInitialized) return;
     _rawDragOffsetX += details.delta.dx;
     final seconds = _seekSwipeSecondsForOffset(_rawDragOffsetX);
     final target = _clampPosition(
@@ -334,6 +342,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
   }
 
   void _handleHorizontalDragEnd(DragEndDetails details) {
+    if (_isApplyingSeek) return;
     final ctrl = _ctrl;
     if (ctrl != null &&
         ctrl.value.isInitialized &&
@@ -343,7 +352,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
         _seekDragStartPosition + Duration(seconds: seconds),
         ctrl.value.duration,
       );
-      ctrl.seekTo(target);
+      _requestSeek(target);
       _showSeekHint(seconds, target: target);
     } else {
       _hideSeekHint();
@@ -353,6 +362,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
   }
 
   void _handleHorizontalDragCancel() {
+    if (_isApplyingSeek) return;
     _rawDragOffsetX = 0;
     _hideSeekHint();
   }
@@ -373,17 +383,76 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
 
   Duration _clampPosition(Duration position, Duration duration) {
     if (position.isNegative) return Duration.zero;
-    if (duration > Duration.zero && position > duration) return duration;
+    if (duration > Duration.zero) {
+      final maxSeekPosition =
+          duration > _endSeekSafetyMargin
+              ? duration - _endSeekSafetyMargin
+              : duration;
+      if (position > maxSeekPosition) return maxSeekPosition;
+    }
     return position;
   }
 
   void _seek(int seconds) {
     final ctrl = _ctrl;
-    if (ctrl == null) return;
+    if (_isApplyingSeek || ctrl == null || !ctrl.value.isInitialized) return;
     final duration = ctrl.value.duration;
     final pos = ctrl.value.position + Duration(seconds: seconds);
     final target = _clampPosition(pos, duration);
-    ctrl.seekTo(target);
+    _requestSeek(target);
+  }
+
+  Future<void> _requestSeek(
+    Duration target, {
+    bool resumePlayback = false,
+  }) async {
+    final ctrl = _ctrl;
+    if (_isApplyingSeek || ctrl == null || !ctrl.value.isInitialized) return;
+
+    final safeTarget = _clampPosition(target, ctrl.value.duration);
+    setState(() {
+      _isApplyingSeek = true;
+      _desiredPlaying = null;
+    });
+
+    try {
+      await ctrl.seekTo(safeTarget).timeout(_seekTimeout);
+      if (!mounted || _ctrl != ctrl) return;
+      if (resumePlayback && !ctrl.value.isPlaying) {
+        await ctrl.play().timeout(_seekTimeout);
+      }
+    } on TimeoutException {
+      // Network-backed progressive streams can hang while resolving a seek.
+    } catch (_) {
+      // ExoPlayer source errors are surfaced asynchronously; keep UI usable.
+    } finally {
+      if (mounted && _ctrl == ctrl) {
+        setState(() {
+          _isApplyingSeek = false;
+          _isPlaying = ctrl.value.isPlaying;
+          _desiredPlaying = null;
+        });
+      } else {
+        _isApplyingSeek = false;
+      }
+    }
+  }
+
+  void _handleProgressDragStart() {
+    if (!mounted || _isApplyingSeek) return;
+    setState(() {
+      _isSeekScrubbing = true;
+      _showSeekFeedback = false;
+    });
+  }
+
+  void _handleProgressDragEnd() {
+    if (!mounted) return;
+    setState(() {
+      _isSeekScrubbing = false;
+      _seekFeedbackSeconds = null;
+      _seekFeedbackTarget = null;
+    });
   }
 
   void _showSeekHint(int seconds, {Duration? target}) {
@@ -510,6 +579,8 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
   Widget build(BuildContext context) {
     final ctrl = _ctrl;
     final item = _items[_index];
+    final isSeeking = _isApplyingSeek;
+    final hideCenterControls = isSeeking || _isSeekScrubbing;
 
     return PopScope(
       canPop: false,
@@ -529,6 +600,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
           onHorizontalDragEnd: _handleHorizontalDragEnd,
           onHorizontalDragCancel: _handleHorizontalDragCancel,
           onDoubleTapDown: (d) {
+            if (isSeeking) return;
             final half = MediaQuery.of(context).size.width / 2;
             final seconds = d.localPosition.dx < half ? -15 : 15;
             _seek(seconds);
@@ -592,10 +664,11 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                             if (ctrl != null)
                               _ProgressBar(
                                 ctrl: ctrl,
-                                onDragStart: () {},
-                                onDragEnd: () {},
-                                onPlayingChanged:
-                                    _handleProgressPlayingChanged,
+                                enabled: !isSeeking,
+                                onDragStart: _handleProgressDragStart,
+                                onDragEnd: _handleProgressDragEnd,
+                                onSeekRequested: _requestSeek,
+                                onPlayingChanged: _handleProgressPlayingChanged,
                               ),
                           ],
                         ),
@@ -661,7 +734,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                         ),
                       ),
                     ),
-                  if (_showControls && ctrl != null)
+                  if (_showControls && ctrl != null && !hideCenterControls)
                     Center(
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -669,7 +742,7 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                           IconButton(
                             iconSize: 40,
                             icon: const _SeekButtonIcon(seconds: -15),
-                            onPressed: () => _seek(-15),
+                            onPressed: isSeeking ? null : () => _seek(-15),
                           ),
                           const SizedBox(width: 48),
                           IconButton(
@@ -680,15 +753,26 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
                                   : Icons.play_circle,
                               color: Colors.white,
                             ),
-                            onPressed: _togglePlay,
+                            onPressed: isSeeking ? null : _togglePlay,
                           ),
                           const SizedBox(width: 48),
                           IconButton(
                             iconSize: 40,
                             icon: const _SeekButtonIcon(seconds: 15),
-                            onPressed: () => _seek(15),
+                            onPressed: isSeeking ? null : () => _seek(15),
                           ),
                         ],
+                      ),
+                    ),
+                  if (isSeeking)
+                    const Center(
+                      child: SizedBox(
+                        width: 44,
+                        height: 44,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 3,
+                        ),
                       ),
                     ),
                   if (_seekFeedbackSeconds != null)
@@ -757,13 +841,17 @@ class _EmbyStreamPageState extends State<EmbyStreamPage>
 
 class _ProgressBar extends StatefulWidget {
   final VideoPlayerController ctrl;
+  final bool enabled;
   final VoidCallback onDragStart;
   final VoidCallback onDragEnd;
+  final _SeekRequestCallback onSeekRequested;
   final ValueChanged<bool> onPlayingChanged;
   const _ProgressBar({
     required this.ctrl,
+    required this.enabled,
     required this.onDragStart,
     required this.onDragEnd,
+    required this.onSeekRequested,
     required this.onPlayingChanged,
   });
 
@@ -927,6 +1015,7 @@ class _ProgressBarState extends State<_ProgressBar> {
     final dur = widget.ctrl.value.duration.inMilliseconds;
     final pos =
         _dragValue ?? widget.ctrl.value.position.inMilliseconds.toDouble();
+    final enabled = widget.enabled && dur > 0;
 
     return Row(
       children: [
@@ -941,9 +1030,7 @@ class _ProgressBarState extends State<_ProgressBar> {
               data: SliderTheme.of(context).copyWith(
                 trackHeight: 4,
                 thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 9),
-                overlayShape: const RoundSliderOverlayShape(
-                  overlayRadius: 22,
-                ),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 22),
                 activeTrackColor: Colors.green,
                 inactiveTrackColor: Colors.white30,
                 overlayColor: Colors.white.withValues(alpha: 0.14),
@@ -953,22 +1040,38 @@ class _ProgressBarState extends State<_ProgressBar> {
                 value: dur > 0 ? pos.clamp(0, dur.toDouble()) : 0,
                 min: 0,
                 max: dur > 0 ? dur.toDouble() : 1,
-                onChangeStart: (_) {
-                  _wasPlayingBeforeDrag = widget.ctrl.value.isPlaying;
-                  widget.onDragStart();
-                  widget.onPlayingChanged(false);
-                  widget.ctrl.pause();
-                },
-                onChanged: (v) => setState(() => _dragValue = v),
-                onChangeEnd: (v) async {
-                  await widget.ctrl.seekTo(Duration(milliseconds: v.toInt()));
-                  if (_wasPlayingBeforeDrag) {
-                    await widget.ctrl.play();
-                    widget.onPlayingChanged(true);
-                  }
-                  _dragValue = null;
-                  widget.onDragEnd();
-                },
+                onChangeStart:
+                    enabled
+                        ? (_) {
+                          _wasPlayingBeforeDrag = widget.ctrl.value.isPlaying;
+                          widget.onDragStart();
+                          widget.onPlayingChanged(false);
+                          unawaited(widget.ctrl.pause().catchError((_) {}));
+                        }
+                        : null,
+                onChanged:
+                    enabled ? (v) => setState(() => _dragValue = v) : null,
+                onChangeEnd:
+                    enabled
+                        ? (v) async {
+                          try {
+                            await widget.onSeekRequested(
+                              Duration(milliseconds: v.toInt()),
+                              resumePlayback: _wasPlayingBeforeDrag,
+                            );
+                            widget.onPlayingChanged(
+                              widget.ctrl.value.isPlaying,
+                            );
+                          } finally {
+                            if (mounted) {
+                              setState(() => _dragValue = null);
+                            } else {
+                              _dragValue = null;
+                            }
+                            widget.onDragEnd();
+                          }
+                        }
+                        : null,
               ),
             ),
           ),
