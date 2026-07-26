@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -231,6 +232,23 @@ class EmbyPcService {
     '/emby/Videos/$itemId/stream',
     {'api_key': accessToken, 'static': 'true'},
   ).toString();
+
+  // Emby 预先生成的 BIF 文件包含进度条缩略图，加载失败时由播放器降级为普通进度条。
+  Future<Uint8List?> getBifPreview(String itemId, {int width = 320}) async {
+    try {
+      final response = await http.get(
+        _uri('/emby/Videos/$itemId/index.bif', {
+          'api_key': accessToken,
+          'Width': '$width',
+        }),
+        headers: _tokenHeader,
+      );
+      if (response.statusCode != 200 || response.bodyBytes.isEmpty) return null;
+      return response.bodyBytes;
+    } catch (_) {
+      return null;
+    }
+  }
 
   // 播放器周期性上报位置，Emby 才能在下次打开时计算“继续播放”。
   Future<void> reportPlayback({
