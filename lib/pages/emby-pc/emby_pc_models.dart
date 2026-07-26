@@ -1,0 +1,296 @@
+// Emby 桌面端模型保留服务端字段含义，避免页面层重复解析 JSON。
+class EmbyPcItem {
+  final String id;
+  final String name;
+  final String type;
+  final String overview;
+  final String? role;
+  final int? productionYear;
+  final double? communityRating;
+  final int runTimeTicks;
+  final String officialRating;
+  final int? childCount;
+  final int? width;
+  final int? height;
+  final String path;
+  final String premiereDate;
+  final String dateCreated;
+  final bool isFavorite;
+  final bool played;
+  final int playbackPositionTicks;
+  final List<String> genres;
+  final List<String> tags;
+  final List<EmbyPcNamedItem> studios;
+  final List<EmbyPcPerson> people;
+  final List<EmbyPcMediaSource> mediaSources;
+  final List<EmbyPcChapter> chapters;
+  final Map<String, dynamic> imageTags;
+  final String primaryImageTag;
+  final List<String> backdropImageTags;
+  final List<String> screenshotImageTags;
+
+  const EmbyPcItem({
+    required this.id,
+    required this.name,
+    this.type = '',
+    this.overview = '',
+    this.role,
+    this.productionYear,
+    this.communityRating,
+    this.runTimeTicks = 0,
+    this.officialRating = '',
+    this.childCount,
+    this.width,
+    this.height,
+    this.path = '',
+    this.premiereDate = '',
+    this.dateCreated = '',
+    this.isFavorite = false,
+    this.played = false,
+    this.playbackPositionTicks = 0,
+    this.genres = const [],
+    this.tags = const [],
+    this.studios = const [],
+    this.people = const [],
+    this.mediaSources = const [],
+    this.chapters = const [],
+    this.imageTags = const {},
+    this.primaryImageTag = '',
+    this.backdropImageTags = const [],
+    this.screenshotImageTags = const [],
+  });
+
+  factory EmbyPcItem.fromJson(Map<String, dynamic> json) {
+    final userData = _map(json['UserData']);
+    return EmbyPcItem(
+      id: _text(json['Id']),
+      name: _text(json['Name']),
+      type: _text(json['Type']),
+      overview: _text(json['Overview']),
+      role: json['Role']?.toString(),
+      productionYear: _integerOrNull(json['ProductionYear']),
+      communityRating: _doubleOrNull(json['CommunityRating']),
+      runTimeTicks: _integer(json['RunTimeTicks']),
+      officialRating: _text(json['OfficialRating']),
+      childCount: _integerOrNull(json['ChildCount']),
+      width: _integerOrNull(json['Width']),
+      height: _integerOrNull(json['Height']),
+      path: _text(json['Path']),
+      premiereDate: _text(json['PremiereDate']),
+      dateCreated: _text(json['DateCreated']),
+      isFavorite: userData['IsFavorite'] == true,
+      played: userData['Played'] == true,
+      playbackPositionTicks: _integer(userData['PlaybackPositionTicks']),
+      genres: _strings(json['Genres']),
+      tags: _strings(json['Tags']),
+      studios: _maps(json['Studios']).map(EmbyPcNamedItem.fromJson).toList(),
+      people: _maps(json['People']).map(EmbyPcPerson.fromJson).toList(),
+      mediaSources:
+          _maps(json['MediaSources']).map(EmbyPcMediaSource.fromJson).toList(),
+      chapters: _maps(json['Chapters']).map(EmbyPcChapter.fromJson).toList(),
+      imageTags: _map(json['ImageTags']),
+      primaryImageTag: _text(json['PrimaryImageTag']),
+      backdropImageTags: _strings(json['BackdropImageTags']),
+      screenshotImageTags: _strings(json['ScreenshotImageTags']),
+    );
+  }
+
+  EmbyPcItem copyWith({bool? isFavorite}) => EmbyPcItem(
+    id: id,
+    name: name,
+    type: type,
+    overview: overview,
+    role: role,
+    productionYear: productionYear,
+    communityRating: communityRating,
+    runTimeTicks: runTimeTicks,
+    officialRating: officialRating,
+    childCount: childCount,
+    width: width,
+    height: height,
+    path: path,
+    premiereDate: premiereDate,
+    dateCreated: dateCreated,
+    isFavorite: isFavorite ?? this.isFavorite,
+    played: played,
+    playbackPositionTicks: playbackPositionTicks,
+    genres: genres,
+    tags: tags,
+    studios: studios,
+    people: people,
+    mediaSources: mediaSources,
+    chapters: chapters,
+    imageTags: imageTags,
+    primaryImageTag: primaryImageTag,
+    backdropImageTags: backdropImageTags,
+    screenshotImageTags: screenshotImageTags,
+  );
+
+  bool get hasPrimaryImage => primaryImageTag.isNotEmpty || imageTags['Primary'] != null;
+  bool get hasBackdropImage => backdropImageTags.isNotEmpty;
+  Duration get duration => Duration(microseconds: runTimeTicks ~/ 10);
+
+  String get runtimeLabel {
+    if (runTimeTicks <= 0) return '';
+    final minutes = duration.inMinutes;
+    final hours = minutes ~/ 60;
+    return hours > 0 ? '${hours}h ${minutes % 60}m' : '${minutes}m';
+  }
+}
+
+class EmbyPcPerson {
+  final String id;
+  final String name;
+  final String role;
+  final String type;
+
+  const EmbyPcPerson({
+    required this.id,
+    required this.name,
+    this.role = '',
+    this.type = '',
+  });
+
+  factory EmbyPcPerson.fromJson(Map<String, dynamic> json) => EmbyPcPerson(
+    id: _text(json['Id']),
+    name: _text(json['Name']),
+    role: _text(json['Role']),
+    type: _text(json['Type']),
+  );
+}
+
+class EmbyPcNamedItem {
+  final String id;
+  final String name;
+
+  const EmbyPcNamedItem({required this.id, required this.name});
+
+  factory EmbyPcNamedItem.fromJson(Map<String, dynamic> json) =>
+      EmbyPcNamedItem(id: _text(json['Id']), name: _text(json['Name']));
+}
+
+class EmbyPcChapter {
+  final String name;
+  final int startPositionTicks;
+  final int index;
+  final String imageTag;
+
+  const EmbyPcChapter({
+    required this.name,
+    required this.startPositionTicks,
+    required this.index,
+    this.imageTag = '',
+  });
+
+  factory EmbyPcChapter.fromJson(Map<String, dynamic> json) => EmbyPcChapter(
+    name: _text(json['Name']),
+    startPositionTicks: _integer(json['StartPositionTicks']),
+    index: _integer(json['ChapterIndex']),
+    imageTag: _text(json['ImageTag']),
+  );
+}
+
+class EmbyPcMediaSource {
+  final String id;
+  final String path;
+  final String container;
+  final int size;
+  final int bitrate;
+  final int runTimeTicks;
+  final List<EmbyPcMediaStream> streams;
+
+  const EmbyPcMediaSource({
+    required this.id,
+    this.path = '',
+    this.container = '',
+    this.size = 0,
+    this.bitrate = 0,
+    this.runTimeTicks = 0,
+    this.streams = const [],
+  });
+
+  factory EmbyPcMediaSource.fromJson(Map<String, dynamic> json) =>
+      EmbyPcMediaSource(
+        id: _text(json['Id']),
+        path: _text(json['Path']),
+        container: _text(json['Container']),
+        size: _integer(json['Size']),
+        bitrate: _integer(json['Bitrate']),
+        runTimeTicks: _integer(json['RunTimeTicks']),
+        streams:
+            _maps(json['MediaStreams'])
+                .map(EmbyPcMediaStream.fromJson)
+                .toList(),
+      );
+}
+
+class EmbyPcMediaStream {
+  final String type;
+  final String title;
+  final String codec;
+  final String language;
+  final int? width;
+  final int? height;
+  final int? bitrate;
+  final int? channels;
+
+  const EmbyPcMediaStream({
+    required this.type,
+    required this.title,
+    required this.codec,
+    required this.language,
+    this.width,
+    this.height,
+    this.bitrate,
+    this.channels,
+  });
+
+  factory EmbyPcMediaStream.fromJson(Map<String, dynamic> json) =>
+      EmbyPcMediaStream(
+        type: _text(json['Type']),
+        title: _text(json['DisplayTitle']).isNotEmpty
+            ? _text(json['DisplayTitle'])
+            : _text(json['Title']),
+        codec: _text(json['Codec']),
+        language: _text(json['Language']),
+        width: _integerOrNull(json['Width']),
+        height: _integerOrNull(json['Height']),
+        bitrate: _integerOrNull(json['BitRate']),
+        channels: _integerOrNull(json['Channels']),
+      );
+}
+
+class EmbyPcPage {
+  final List<EmbyPcItem> items;
+  final int total;
+
+  const EmbyPcPage({required this.items, required this.total});
+
+  factory EmbyPcPage.fromJson(Map<String, dynamic> json) {
+    final items = _maps(json['Items']).map(EmbyPcItem.fromJson).toList();
+    return EmbyPcPage(
+      items: items,
+      total: _integerOrNull(json['TotalRecordCount']) ?? items.length,
+    );
+  }
+}
+
+Map<String, dynamic> _map(dynamic value) =>
+    value is Map ? Map<String, dynamic>.from(value) : <String, dynamic>{};
+
+List<Map<String, dynamic>> _maps(dynamic value) => value is List
+    ? value.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList()
+    : <Map<String, dynamic>>[];
+
+List<String> _strings(dynamic value) =>
+    value is List ? value.map((item) => item.toString()).toList() : const [];
+
+String _text(dynamic value) => value?.toString() ?? '';
+
+int _integer(dynamic value) => _integerOrNull(value) ?? 0;
+
+int? _integerOrNull(dynamic value) =>
+    value is num ? value.toInt() : int.tryParse(value?.toString() ?? '');
+
+double? _doubleOrNull(dynamic value) =>
+    value is num ? value.toDouble() : double.tryParse(value?.toString() ?? '');

@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'emby/emby_login_page.dart';
-import 'emby/emby_home_page.dart';
+import 'emby-pc/emby_pc_page.dart';
 import 'scanner/scanner_home_page.dart';
 import 'settings_page.dart';
-import '../services/emby_service.dart';
 
 class LauncherPage extends StatelessWidget {
   const LauncherPage({super.key});
@@ -56,10 +54,9 @@ class LauncherPage extends StatelessWidget {
                   title: 'Emby 播放器',
                   subtitle: '连接 Emby 服务器，浏览并播放媒体',
                   color: Colors.green,
+                  // 桌面端入口统一交给 EmbyPcEntryPage，负责会话恢复与登录分流。
                   onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => EmbyService().isLoggedIn ? const EmbyHomePage() : const EmbyLoginPage(),
-                    ),
+                    MaterialPageRoute(builder: (_) => const EmbyPcEntryPage()),
                   ),
                 ),
                 const SizedBox(height: 16),
