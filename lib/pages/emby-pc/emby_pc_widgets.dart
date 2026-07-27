@@ -194,21 +194,69 @@ class _ImagePlaceholder extends StatelessWidget {
   const _ImagePlaceholder({required this.color, this.loading = false});
 
   @override
-  Widget build(BuildContext context) => ColoredBox(
-    color: color,
-    child: Center(
-      child: loading
-          ? const SizedBox.square(
-              dimension: 24,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : Icon(
-              Icons.movie_outlined,
-              size: 42,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-    ),
-  );
+  Widget build(BuildContext context) {
+    // 图片加载期间使用低对比度呼吸骨架，避免列表中同时出现多个转圈动画。
+    if (loading) return _ImageLoadingSkeleton(color: color);
+    return ColoredBox(
+      color: color,
+      child: Center(
+        child: Icon(
+          Icons.movie_outlined,
+          size: 42,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+}
+
+class _ImageLoadingSkeleton extends StatefulWidget {
+  final Color color;
+
+  const _ImageLoadingSkeleton({required this.color});
+
+  @override
+  State<_ImageLoadingSkeleton> createState() => _ImageLoadingSkeletonState();
+}
+
+class _ImageLoadingSkeletonState extends State<_ImageLoadingSkeleton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    // 缓慢往返改变骨架明暗，保持加载反馈柔和且不过度抢眼。
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final highlightColor = Color.alphaBlend(
+      colors.onSurface.withOpacity(0.06),
+      widget.color,
+    );
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) => ColoredBox(
+        color: Color.lerp(
+          widget.color,
+          highlightColor,
+          Curves.easeInOut.transform(_controller.value),
+        )!,
+      ),
+    );
+  }
 }
 
 class _MediaBadge extends StatelessWidget {
