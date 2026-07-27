@@ -78,12 +78,8 @@ class _WindowsTitleBarState extends State<WindowsTitleBar>
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    // 在主题表面色中加入极轻的品牌色，保持克制但不显得单调。
-    final titleBarColor = Color.alphaBlend(
-      colors.primary.withAlpha(isDark ? 10 : 6),
-      colors.surface,
-    );
+    // 标题栏与下方内容统一使用表面色，避免出现背景色断层。
+    final titleBarColor = colors.surface;
 
     return ColoredBox(
       color: colors.surface,
@@ -120,83 +116,73 @@ class _TitleBar extends StatelessWidget {
 
     return Material(
       color: color,
-      child: DecoratedBox(
-        // 细分隔线让标题栏与内容层次清晰，同时避免厚重边框。
-        decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(
-              color: colors.outlineVariant.withAlpha(isDark ? 70 : 90),
-              width: 0.5,
-            ),
-          ),
-        ),
-        child: SizedBox(
-          height: 44,
-          child: Row(
-            children: [
-              Expanded(
-                // 拖动区只覆盖标题部分，不会拦截右侧窗口按钮。
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onPanStart: (_) => windowManager.startDragging(),
-                  onDoubleTap: onToggleMaximize,
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 14, right: 12),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 24,
-                          height: 24,
-                          decoration: BoxDecoration(
-                            color: colors.primary.withAlpha(isDark ? 38 : 28),
-                            borderRadius: BorderRadius.circular(7),
-                          ),
-                          child: Icon(
-                            Icons.play_arrow_rounded,
-                            size: 17,
-                            color: colors.primary,
+      // 不绘制底部分隔线，让标题栏直接融入下方内容。
+      child: SizedBox(
+        height: 44,
+        child: Row(
+          children: [
+            Expanded(
+              // 拖动区只覆盖标题部分，不会拦截右侧窗口按钮。
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onPanStart: (_) => windowManager.startDragging(),
+                onDoubleTap: onToggleMaximize,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 14, right: 12),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 24,
+                        height: 24,
+                        decoration: BoxDecoration(
+                          color: colors.primary.withAlpha(isDark ? 38 : 28),
+                          borderRadius: BorderRadius.circular(7),
+                        ),
+                        child: Icon(
+                          Icons.play_arrow_rounded,
+                          size: 17,
+                          color: colors.primary,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          '媒体中心',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: colors.onSurface,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.2,
                           ),
                         ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            '媒体中心',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: colors.onSurface,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 0.2,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ),
-              _WindowButton(
-                tooltip: '最小化',
-                icon: Icons.remove_rounded,
-                onPressed: windowManager.minimize,
-              ),
-              _WindowButton(
-                tooltip: isMaximized ? '还原' : '最大化',
-                icon: isMaximized
-                    ? Icons.filter_none_rounded
-                    : Icons.crop_square_rounded,
-                iconSize: isMaximized ? 14 : 13,
-                onPressed: onToggleMaximize,
-              ),
-              _WindowButton(
-                tooltip: '关闭',
-                icon: Icons.close_rounded,
-                isClose: true,
-                onPressed: windowManager.close,
-              ),
-            ],
-          ),
+            ),
+            _WindowButton(
+              tooltip: '最小化',
+              icon: Icons.remove_rounded,
+              onPressed: windowManager.minimize,
+            ),
+            _WindowButton(
+              tooltip: isMaximized ? '还原' : '最大化',
+              icon: isMaximized
+                  ? Icons.filter_none_rounded
+                  : Icons.crop_square_rounded,
+              iconSize: isMaximized ? 14 : 13,
+              onPressed: onToggleMaximize,
+            ),
+            _WindowButton(
+              tooltip: '关闭',
+              icon: Icons.close_rounded,
+              isClose: true,
+              onPressed: windowManager.close,
+            ),
+          ],
         ),
       ),
     );
