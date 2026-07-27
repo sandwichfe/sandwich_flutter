@@ -95,70 +95,77 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
               ? _DetailError(message: _error, onRetry: _loadDetail)
               : detail == null
                   ? const Center(child: Text('没有可显示的媒体详情'))
-                  : CustomScrollView(
-                      slivers: [
-                        SliverAppBar(
-                          pinned: true,
-                          expandedHeight: 300,
-                          title: Text(detail.name),
-                          flexibleSpace: FlexibleSpaceBar(
-                            background: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                EmbyPcNetworkImage(
-                                  url: detail.hasBackdropImage
-                                      ? EmbyPcService.instance.imageUrl(
-                                          detail.id,
-                                          type: 'Backdrop',
-                                          maxWidth: 1400,
-                                        )
-                                      : '',
-                                ),
-                                DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      begin: Alignment.topCenter,
-                                      end: Alignment.bottomCenter,
-                                      colors: [
-                                        Colors.black.withOpacity(0.12),
-                                        colors.surface.withOpacity(0.96),
-                                      ],
-                                    ),
-                                  ),
-                                ),
+                  : Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        // 将媒体图片铺满页面作为固定背景，优先展示更适合宽屏的背景图。
+                        EmbyPcNetworkImage(
+                          url: detail.hasBackdropImage
+                              ? EmbyPcService.instance.imageUrl(
+                                  detail.id,
+                                  type: 'Backdrop',
+                                  maxWidth: 1600,
+                                )
+                              : detail.hasPrimaryImage
+                                  ? EmbyPcService.instance.imageUrl(
+                                      detail.id,
+                                      maxWidth: 1000,
+                                    )
+                                  : '',
+                        ),
+                        // 使用主题色渐变压暗图片，保证浅色和深色主题下的正文都清晰可读。
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                colors.surface.withOpacity(0.58),
+                                colors.surface.withOpacity(0.86),
+                                colors.surface.withOpacity(0.98),
                               ],
+                              stops: const [0, 0.48, 1],
                             ),
                           ),
                         ),
-                        SliverToBoxAdapter(
-                          child: Center(
-                            child: ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 1180),
-                              child: Padding(
-                                padding: const EdgeInsets.all(24),
-                                child: _DetailContent(
-                                  detail: detail,
-                                  similar: _similar,
-                                  favoriteBusy: _favoriteBusy,
-                                  onFavorite: _toggleFavorite,
-                                  onPlay: _play,
-                                  onOpenSimilar: (item) => Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) => EmbyPcDetailPage(item: item),
-                                    ),
-                                  ),
-                                  onOpenPerson: (person) => Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) => EmbyPcPersonPage(
-                                        personId: person.id,
-                                        personName: person.name,
+                        CustomScrollView(
+                          slivers: [
+                            SliverAppBar(
+                              pinned: true,
+                              backgroundColor: colors.surface.withOpacity(0.78),
+                              title: Text(detail.name),
+                            ),
+                            SliverToBoxAdapter(
+                              child: Center(
+                                child: ConstrainedBox(
+                                  constraints: const BoxConstraints(maxWidth: 1180),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(24),
+                                    child: _DetailContent(
+                                      detail: detail,
+                                      similar: _similar,
+                                      favoriteBusy: _favoriteBusy,
+                                      onFavorite: _toggleFavorite,
+                                      onPlay: _play,
+                                      onOpenSimilar: (item) => Navigator.of(context).push(
+                                        MaterialPageRoute(
+                                          builder: (_) => EmbyPcDetailPage(item: item),
+                                        ),
+                                      ),
+                                      onOpenPerson: (person) => Navigator.of(context).push(
+                                        MaterialPageRoute(
+                                          builder: (_) => EmbyPcPersonPage(
+                                            personId: person.id,
+                                            personName: person.name,
+                                          ),
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
+                          ],
                         ),
                       ],
                     ),
@@ -189,8 +196,13 @@ class _DetailContent extends StatelessWidget {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       final wide = constraints.maxWidth >= 760;
-      final summary = _Summary(detail: detail, onFavorite: onFavorite,
-        favoriteBusy: favoriteBusy, onPlay: onPlay);
+      final summary = _Summary(
+        detail: detail,
+        onFavorite: onFavorite,
+        favoriteBusy: favoriteBusy,
+        onPlay: onPlay,
+      );
+      // Primary 竖版海报保留在标题旁，和页面背景使用的 Backdrop 区分展示。
       final poster = SizedBox(
         width: wide ? 230 : 180,
         child: AspectRatio(
@@ -208,6 +220,7 @@ class _DetailContent extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // 宽屏时海报位于标题左侧，窄屏时保持原有的上下排列。
           if (wide)
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
