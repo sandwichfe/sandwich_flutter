@@ -143,12 +143,17 @@ class EmbyPcPerson {
   final String name;
   final String role;
   final String type;
+  // 人物图片标签用于在演职人员卡片中判断是否请求头像。
+  final String primaryImageTag;
+  final Map<String, dynamic> imageTags;
 
   const EmbyPcPerson({
     required this.id,
     required this.name,
     this.role = '',
     this.type = '',
+    this.primaryImageTag = '',
+    this.imageTags = const {},
   });
 
   factory EmbyPcPerson.fromJson(Map<String, dynamic> json) => EmbyPcPerson(
@@ -156,7 +161,12 @@ class EmbyPcPerson {
     name: _text(json['Name']),
     role: _text(json['Role']),
     type: _text(json['Type']),
+    primaryImageTag: _text(json['PrimaryImageTag']),
+    imageTags: _map(json['ImageTags']),
   );
+
+  bool get hasPrimaryImage =>
+      primaryImageTag.isNotEmpty || imageTags['Primary'] != null;
 }
 
 class EmbyPcNamedItem {
@@ -229,20 +239,53 @@ class EmbyPcMediaStream {
   final String title;
   final String codec;
   final String language;
+  // 保留 Emby 返回的流详情字段，供视频与音频信息卡片逐项展示。
+  final String codecTag;
+  final String profile;
+  final int? level;
   final int? width;
   final int? height;
+  final String aspectRatio;
+  final bool? isInterlaced;
+  final double? averageFrameRate;
+  final double? realFrameRate;
   final int? bitrate;
+  final int? bitDepth;
+  final String pixelFormat;
+  final int? refFrames;
+  final String colorPrimaries;
+  final String colorSpace;
+  final String colorTransfer;
+  final String channelLayout;
   final int? channels;
+  final int? sampleRate;
+  final bool? isDefault;
 
   const EmbyPcMediaStream({
     required this.type,
     required this.title,
     required this.codec,
     required this.language,
+    this.codecTag = '',
+    this.profile = '',
+    this.level,
     this.width,
     this.height,
+    this.aspectRatio = '',
+    this.isInterlaced,
+    this.averageFrameRate,
+    this.realFrameRate,
     this.bitrate,
+    this.bitDepth,
+    this.pixelFormat = '',
+    this.refFrames,
+    this.colorPrimaries = '',
+    this.colorSpace = '',
+    this.colorTransfer = '',
+    this.channelLayout = '',
     this.channels,
+    this.sampleRate,
+    this.isDefault,
   });
 
   factory EmbyPcMediaStream.fromJson(Map<String, dynamic> json) =>
@@ -253,10 +296,26 @@ class EmbyPcMediaStream {
             : _text(json['Title']),
         codec: _text(json['Codec']),
         language: _text(json['Language']),
+        codecTag: _text(json['CodecTag']),
+        profile: _text(json['Profile']),
+        level: _integerOrNull(json['Level']),
         width: _integerOrNull(json['Width']),
         height: _integerOrNull(json['Height']),
+        aspectRatio: _text(json['AspectRatio']),
+        isInterlaced: _booleanOrNull(json['IsInterlaced']),
+        averageFrameRate: _doubleOrNull(json['AverageFrameRate']),
+        realFrameRate: _doubleOrNull(json['RealFrameRate']),
         bitrate: _integerOrNull(json['BitRate']),
+        bitDepth: _integerOrNull(json['BitDepth']),
+        pixelFormat: _text(json['PixelFormat']),
+        refFrames: _integerOrNull(json['RefFrames']),
+        colorPrimaries: _text(json['ColorPrimaries']),
+        colorSpace: _text(json['ColorSpace']),
+        colorTransfer: _text(json['ColorTransfer']),
+        channelLayout: _text(json['ChannelLayout']),
         channels: _integerOrNull(json['Channels']),
+        sampleRate: _integerOrNull(json['SampleRate']),
+        isDefault: _booleanOrNull(json['IsDefault']),
       );
 }
 
@@ -294,3 +353,10 @@ int? _integerOrNull(dynamic value) =>
 
 double? _doubleOrNull(dynamic value) =>
     value is num ? value.toDouble() : double.tryParse(value?.toString() ?? '');
+
+bool? _booleanOrNull(dynamic value) {
+  if (value is bool) return value;
+  if (value?.toString().toLowerCase() == 'true') return true;
+  if (value?.toString().toLowerCase() == 'false') return false;
+  return null;
+}
