@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -36,7 +37,7 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
   Duration _duration = Duration.zero;
   double _aspectRatio = 16 / 9;
   Timer? _progressTimer;
-  _BifPreviewData? _previewData;
+  late final _ThumbnailPreviewController _thumbnailPreviewController;
 
   @override
   void initState() {
@@ -49,6 +50,8 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
     }
     _player = Player();
     _videoController = VideoController(_player);
+    // 缩略图数据与控制层状态分离，后续可在这里接入其他 Emby 预览来源。
+    _thumbnailPreviewController = _ThumbnailPreviewController();
     _listenToPlayerState();
     _initializePlayer();
   }
@@ -145,7 +148,7 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
     try {
       final previewData = _BifPreviewData.parse(bytes);
       if (mounted) {
-        setState(() => _previewData = previewData);
+        setState(() => _thumbnailPreviewController.updateData(previewData));
       }
     } catch (_) {
       // BIF 缺失或格式异常只关闭进度预览，不影响当前视频播放。
@@ -183,7 +186,7 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
       unawaited(subscription.cancel());
     }
     unawaited(_player.dispose());
-    _previewData = null;
+    _thumbnailPreviewController.clear();
     super.dispose();
   }
 
@@ -196,40 +199,52 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
         foregroundColor: Colors.white,
         title: Text(widget.item.name, overflow: TextOverflow.ellipsis),
       ),
-      body: Center(
-        child:
-            _loading
-                ? const CircularProgressIndicator()
-                : _error.isNotEmpty
-                ? _PlayerMessage(icon: Icons.error_outline, text: _error)
-                : !_playerReady
-                ? const _PlayerMessage(
+      body:
+          _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _error.isNotEmpty
+              ? Center(
+                child: _PlayerMessage(
+                  icon: Icons.error_outline,
+                  text: _error,
+                ),
+              )
+              : !_playerReady
+              ? const Center(
+                child: _PlayerMessage(
                   icon: Icons.videocam_off_outlined,
                   text: '播放器不可用',
-                )
-                : Column(
-                  children: [
-                    Expanded(
-                      child: Center(
-                        child: AspectRatio(
-                          aspectRatio: _aspectRatio,
-                          child: Video(controller: _videoController),
-                        ),
-                      ),
-                    ),
-                    _PlayerControls(
-                      player: _player,
-                      position: _position,
-                      duration: _duration,
-                      isPlaying: _isPlaying,
-                      previewData: _previewData,
-                      muted: _muted,
-                      onTogglePlay: _togglePlay,
-                      onToggleMute: _toggleMute,
-                    ),
-                  ],
                 ),
-      ),
+              )
+              : SizedBox.expand(
+                // Fill the available player area while keeping the video
+                // content at its original aspect ratio.
+                child: Video(
+                  controller: _videoController,
+                  aspectRatio: _aspectRatio,
+                  fit: BoxFit.contain,
+                  // Flutter 字幕上移到控制区上方，避免与进度条和操作按钮重叠。
+                  subtitleViewConfiguration: const SubtitleViewConfiguration(
+                    padding: EdgeInsets.fromLTRB(24, 0, 24, 104),
+                  ),
+                  // Render the custom controls inside Video as its only
+                  // control layer instead of stacking a second outer bar.
+                  // 控制层自身占满播放器，再在内部固定到底部，避免 Align 的松约束
+                  // 让进度条、预览框在不同窗口比例下出现错位。
+                  controls:
+                      (_) => _PlayerControls(
+                        player: _player,
+                        position: _position,
+                        duration: _duration,
+                        isPlaying: _isPlaying,
+                        thumbnailPreviewController:
+                            _thumbnailPreviewController,
+                        muted: _muted,
+                        onTogglePlay: _togglePlay,
+                        onToggleMute: _toggleMute,
+                      ),
+                ),
+              ),
     );
   }
 }
@@ -324,12 +339,57 @@ class _BifPreviewData {
   }
 }
 
-class _PlayerControls extends StatefulWidget {
+class _ThumbnailPreviewFrame {
+  final int index;
+  final Uint8List imageBytes;
+
+  const _ThumbnailPreviewFrame({
+    required this.index,
+    required this.imageBytes,
+  });
+}
+
+class _ThumbnailPreviewController {
+  final Map<int, Uint8List> _frameCache = {};
+  _BifPreviewData? _previewData;
+  int _revision = 0;
+
+  bool get isAvailable => _previewData != null;
+  int get revision => _revision;
+
+  // 当前先使用已加载的 BIF；以后接入 Trickplay 时仍由该控制器统一提供图片。
+  void updateData(_BifPreviewData previewData) {
+    _previewData = previewData;
+    _frameCache.clear();
+    _revision += 1;
+  }
+
+  _ThumbnailPreviewFrame? getThumbnailAt(Duration position) {
+    final previewData = _previewData;
+    if (previewData == null) return null;
+
+    final index = previewData.findFrameIndex(position.inMilliseconds);
+    // 同一缩略帧复用字节视图，避免播放器频繁刷新时重复解析图片。
+    final imageBytes = _frameCache.putIfAbsent(
+      index,
+      () => previewData.frameBytes(index),
+    );
+    return _ThumbnailPreviewFrame(index: index, imageBytes: imageBytes);
+  }
+
+  void clear() {
+    _previewData = null;
+    _frameCache.clear();
+    _revision += 1;
+  }
+}
+
+class _PlayerControls extends StatelessWidget {
   final Player player;
   final Duration position;
   final Duration duration;
   final bool isPlaying;
-  final _BifPreviewData? previewData;
+  final _ThumbnailPreviewController thumbnailPreviewController;
   final bool muted;
   final VoidCallback onTogglePlay;
   final VoidCallback onToggleMute;
@@ -339,52 +399,187 @@ class _PlayerControls extends StatefulWidget {
     required this.position,
     required this.duration,
     required this.isPlaying,
-    required this.previewData,
+    required this.thumbnailPreviewController,
     required this.muted,
     required this.onTogglePlay,
     required this.onToggleMute,
   });
 
   @override
-  State<_PlayerControls> createState() => _PlayerControlsState();
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // 渐变只负责增强工具可读性，不拦截视频区域的鼠标与触摸事件。
+        const Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: 160,
+          child: IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.transparent, Color(0xD9000000)],
+                ),
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: SafeArea(
+            top: false,
+            minimum: const EdgeInsets.only(bottom: 8),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final compact = constraints.maxWidth < 520;
+                final horizontalPadding = compact ? 8.0 : 20.0;
+                final timeText =
+                    constraints.maxWidth < 380
+                        ? _formatDuration(position)
+                        : '${_formatDuration(position)} / '
+                            '${_formatDuration(duration)}';
+                return Padding(
+                  padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _PreviewTimelineBar(
+                        position: position,
+                        duration: duration,
+                        thumbnailController: thumbnailPreviewController,
+                        onSeek: (value) => unawaited(player.seek(value)),
+                      ),
+                      Row(
+                        children: [
+                          IconButton(
+                            tooltip: isPlaying ? '暂停' : '播放',
+                            color: Colors.white,
+                            visualDensity: VisualDensity.compact,
+                            onPressed: onTogglePlay,
+                            icon: Icon(
+                              isPlaying
+                                  ? Icons.pause_rounded
+                                  : Icons.play_arrow_rounded,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              timeText,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: Colors.white70),
+                            ),
+                          ),
+                          const Spacer(),
+                          // 倍速、字幕、全屏等后续能力统一添加到右侧操作区。
+                          IconButton(
+                            tooltip: muted ? '取消静音' : '静音',
+                            color: Colors.white,
+                            visualDensity: VisualDensity.compact,
+                            onPressed: onToggleMute,
+                            icon: Icon(
+                              muted
+                                  ? Icons.volume_off_rounded
+                                  : Icons.volume_up_rounded,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _formatDuration(Duration value) {
+    final hours = value.inHours;
+    final minutes = value.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = value.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return hours > 0 ? '$hours:$minutes:$seconds' : '$minutes:$seconds';
+  }
 }
 
-class _PlayerControlsState extends State<_PlayerControls> {
+class _PreviewTimelineBar extends StatefulWidget {
+  final Duration position;
+  final Duration duration;
+  final ValueChanged<Duration> onSeek;
+  final _ThumbnailPreviewController thumbnailController;
+
+  const _PreviewTimelineBar({
+    required this.position,
+    required this.duration,
+    required this.onSeek,
+    required this.thumbnailController,
+  });
+
+  @override
+  State<_PreviewTimelineBar> createState() => _PreviewTimelineBarState();
+}
+
+class _PreviewTimelineBarState extends State<_PreviewTimelineBar> {
   static const _sliderHorizontalInset = 24.0;
 
   bool _previewVisible = false;
   double _previewRatio = 0;
   int _activeFrameIndex = -1;
   Uint8List? _activeFrameBytes;
+  late int _controllerRevision;
+
+  // Web 与桌面端使用 hover，移动端继续由 Slider 的拖动回调触发预览。
+  bool get _supportsHoverPreview {
+    if (kIsWeb) return true;
+    return defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.macOS ||
+        defaultTargetPlatform == TargetPlatform.linux;
+  }
 
   @override
-  void didUpdateWidget(covariant _PlayerControls oldWidget) {
+  void initState() {
+    super.initState();
+    _controllerRevision = widget.thumbnailController.revision;
+  }
+
+  @override
+  void didUpdateWidget(covariant _PreviewTimelineBar oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.previewData != widget.previewData) {
+    if (_controllerRevision != widget.thumbnailController.revision) {
+      _controllerRevision = widget.thumbnailController.revision;
+      _previewVisible = false;
       _activeFrameIndex = -1;
       _activeFrameBytes = null;
-      if (widget.previewData == null) _previewVisible = false;
     }
   }
 
   void _showPreview(double ratio) {
-    final previewData = widget.previewData;
-    final duration = widget.duration;
-    if (previewData == null || duration <= Duration.zero) return;
+    if (!widget.thumbnailController.isAvailable ||
+        widget.duration <= Duration.zero) {
+      return;
+    }
 
     final safeRatio = ratio.clamp(0.0, 1.0).toDouble();
-    final targetMs = (duration.inMilliseconds * safeRatio).round();
-    final frameIndex = previewData.findFrameIndex(targetMs);
-    // 同一缩略帧复用字节视图，避免播放器频繁刷新时重复解析图片。
-    final frameBytes =
-        frameIndex == _activeFrameIndex
-            ? _activeFrameBytes
-            : previewData.frameBytes(frameIndex);
+    final previewPosition = Duration(
+      milliseconds: (widget.duration.inMilliseconds * safeRatio).round(),
+    );
+    final preview = widget.thumbnailController.getThumbnailAt(previewPosition);
+    if (preview == null) return;
+
     setState(() {
       _previewVisible = true;
       _previewRatio = safeRatio;
-      _activeFrameIndex = frameIndex;
-      _activeFrameBytes = frameBytes;
+      _activeFrameIndex = preview.index;
+      _activeFrameBytes = preview.imageBytes;
     });
   }
 
@@ -411,97 +606,64 @@ class _PlayerControlsState extends State<_PlayerControls> {
 
   @override
   Widget build(BuildContext context) {
-    final position = widget.position;
-    final duration = widget.duration;
     final max =
-        duration.inMilliseconds.toDouble().clamp(1, double.infinity).toDouble();
-    final current = position.inMilliseconds.toDouble().clamp(0, max).toDouble();
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 10, 20, 18),
-        child: Row(
-          children: [
-            IconButton(
-              tooltip: widget.isPlaying ? '暂停' : '播放',
-              color: Colors.white,
-              onPressed: widget.onTogglePlay,
-              icon: Icon(
-                widget.isPlaying
-                    ? Icons.pause_rounded
-                    : Icons.play_arrow_rounded,
-              ),
-            ),
-            Expanded(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final width = constraints.maxWidth;
-                  final previewWidth = math.min(240.0, width);
-                  final previewPosition = Duration(
-                    milliseconds:
-                        (duration.inMilliseconds * _previewRatio).round(),
-                  );
-                  return MouseRegion(
-                    onHover:
-                        (event) => _showPreview(
-                          _pointerRatio(event.localPosition.dx, width),
-                        ),
-                    onExit: (_) => _hidePreview(),
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Slider(
-                          value: current,
-                          max: max,
-                          onChangeStart: (value) => _showPreview(value / max),
-                          onChanged: (value) {
-                            _showPreview(value / max);
-                            unawaited(
-                              widget.player.seek(
-                                Duration(milliseconds: value.round()),
-                              ),
-                            );
-                          },
-                          onChangeEnd: (_) => _hidePreview(),
-                        ),
-                        if (_previewVisible &&
-                            _activeFrameBytes != null &&
-                            previewWidth > 0)
-                          Positioned(
-                            left: _previewLeft(width, previewWidth),
-                            bottom: 52,
-                            child: IgnorePointer(
-                              child: _ProgressPreview(
-                                width: previewWidth,
-                                imageBytes: _activeFrameBytes!,
-                                timeText: _formatDuration(previewPosition),
-                                frameIndex: _activeFrameIndex,
-                              ),
-                            ),
-                          ),
-                      ],
+        widget.duration.inMilliseconds
+            .toDouble()
+            .clamp(1, double.infinity)
+            .toDouble();
+    final current =
+        widget.position.inMilliseconds.toDouble().clamp(0, max).toDouble();
+    return SizedBox(
+      height: 44,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+          final previewWidth = math.min(220.0, width);
+          final previewPosition = Duration(
+            milliseconds:
+                (widget.duration.inMilliseconds * _previewRatio).round(),
+          );
+          return MouseRegion(
+            onHover:
+                _supportsHoverPreview
+                    ? (event) => _showPreview(
+                      _pointerRatio(event.localPosition.dx, width),
+                    )
+                    : null,
+            onExit: _supportsHoverPreview ? (_) => _hidePreview() : null,
+            child: Stack(
+              clipBehavior: Clip.none,
+              alignment: Alignment.center,
+              children: [
+                Slider(
+                  value: current,
+                  max: max,
+                  onChangeStart: (value) => _showPreview(value / max),
+                  onChanged: (value) {
+                    _showPreview(value / max);
+                    widget.onSeek(Duration(milliseconds: value.round()));
+                  },
+                  onChangeEnd: (_) => _hidePreview(),
+                ),
+                if (_previewVisible &&
+                    _activeFrameBytes != null &&
+                    previewWidth > 0)
+                  Positioned(
+                    left: _previewLeft(width, previewWidth),
+                    bottom: 48,
+                    child: IgnorePointer(
+                      child: _ProgressPreview(
+                        width: previewWidth,
+                        imageBytes: _activeFrameBytes!,
+                        timeText: _formatDuration(previewPosition),
+                        frameIndex: _activeFrameIndex,
+                      ),
                     ),
-                  );
-                },
-              ),
+                  ),
+              ],
             ),
-            Text(
-              '${_formatDuration(position)} / ${_formatDuration(duration)}',
-              style: const TextStyle(color: Colors.white70),
-            ),
-            const SizedBox(width: 8),
-            IconButton(
-              tooltip: widget.muted ? '取消静音' : '静音',
-              color: Colors.white,
-              onPressed: widget.onToggleMute,
-              icon: Icon(
-                widget.muted
-                    ? Icons.volume_off_rounded
-                    : Icons.volume_up_rounded,
-              ),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
