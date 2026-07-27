@@ -449,6 +449,55 @@ class _PlayerControls extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
+        // 点击视频画面切换播放状态；底部控制栏位于该层上方，仍可独立响应操作。
+        Positioned.fill(
+          child: Semantics(
+            button: true,
+            label: isPlaying ? '暂停' : '播放',
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: onTogglePlay,
+                child: Center(
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 180),
+                    switchInCurve: Curves.easeOut,
+                    switchOutCurve: Curves.easeIn,
+                    child:
+                        isPlaying
+                            ? const SizedBox.shrink(key: ValueKey('playing'))
+                            : Container(
+                              key: const ValueKey('paused'),
+                              width: 72,
+                              height: 72,
+                              decoration: BoxDecoration(
+                                // 半透明白色按钮兼顾不同亮度视频画面的可读性。
+                                color: const Color(0x2EFFFFFF),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: const Color(0xB3FFFFFF),
+                                ),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Colors.black38,
+                                    blurRadius: 24,
+                                    offset: Offset(0, 8),
+                                  ),
+                                ],
+                              ),
+                              child: const Icon(
+                                Icons.play_arrow_rounded,
+                                color: Colors.white,
+                                size: 46,
+                              ),
+                            ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
         // 渐变只负责增强工具可读性，不拦截视频区域的鼠标与触摸事件。
         const Positioned(
           left: 0,
