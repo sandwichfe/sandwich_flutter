@@ -72,7 +72,6 @@ class _EmbyPcPersonPageState extends State<EmbyPcPersonPage> {
   @override
   Widget build(BuildContext context) {
     final person = _person;
-    final colors = Theme.of(context).colorScheme;
     return Scaffold(
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -82,37 +81,11 @@ class _EmbyPcPersonPageState extends State<EmbyPcPersonPage> {
                   ? const Center(child: Text('没有可显示的人物资料'))
                   : CustomScrollView(
                       slivers: [
+                        // 人物页只保留普通吸顶标题栏，不再展示顶部横向背景图。
                         SliverAppBar(
                           pinned: true,
-                          expandedHeight: 250,
-                          title: Text(person.name.isEmpty ? widget.personName : person.name),
-                          flexibleSpace: FlexibleSpaceBar(
-                            background: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                EmbyPcNetworkImage(
-                                  url: person.hasBackdropImage
-                                      ? EmbyPcService.instance.imageUrl(
-                                          person.id,
-                                          type: 'Backdrop',
-                                          maxWidth: 1400,
-                                        )
-                                      : '',
-                                ),
-                                DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      begin: Alignment.topCenter,
-                                      end: Alignment.bottomCenter,
-                                      colors: [
-                                        Colors.black.withOpacity(0.1),
-                                        colors.surface.withOpacity(0.96),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
+                          title: Text(
+                            person.name.isEmpty ? widget.personName : person.name,
                           ),
                         ),
                         SliverToBoxAdapter(
@@ -160,74 +133,146 @@ class _PersonContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
+      final colors = Theme.of(context).colorScheme;
+      final useWideHero = constraints.maxWidth >= 680;
+      // 宽屏使用参考页面的大头像，窄屏缩小头像以避免摘要文字溢出。
+      final posterWidth = useWideHero
+          ? 268.0
+          : constraints.maxWidth < 180
+              ? constraints.maxWidth
+              : 180.0;
       final poster = SizedBox(
-        width: 180,
+        width: posterWidth,
         child: AspectRatio(
           aspectRatio: 2 / 3,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: EmbyPcNetworkImage(
-              url: person.hasPrimaryImage
-                  ? EmbyPcService.instance.imageUrl(person.id, maxWidth: 420)
-                  : '',
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              boxShadow: [
+                BoxShadow(
+                  color: colors.shadow.withOpacity(0.12),
+                  blurRadius: 34,
+                  offset: const Offset(0, 14),
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: EmbyPcNetworkImage(
+                url: person.hasPrimaryImage
+                    ? EmbyPcService.instance.imageUrl(person.id, maxWidth: 520)
+                    : '',
+              ),
             ),
           ),
         ),
       );
+      final facts = _personFacts(person);
       final biography = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            person.name,
-            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+            person.name.isEmpty ? '人物详情' : person.name,
+            style: Theme.of(context).textTheme.headlineLarge?.copyWith(
               fontWeight: FontWeight.w700,
             ),
           ),
-          const SizedBox(height: 16),
+          if (facts.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 14,
+              runSpacing: 10,
+              children: facts
+                  .map(
+                    (fact) => Text(
+                      fact,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: colors.onSurfaceVariant,
+                      ),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ],
+          const SizedBox(height: 20),
+          Tooltip(
+            message: person.isFavorite ? '取消收藏' : '收藏演员',
+            child: SizedBox.square(
+              dimension: 56,
+              child: OutlinedButton(
+                onPressed: favoriteBusy ? null : onFavorite,
+                style: OutlinedButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                child: favoriteBusy
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Icon(
+                        person.isFavorite
+                            ? Icons.favorite_rounded
+                            : Icons.favorite_border_rounded,
+                        color: person.isFavorite ? colors.error : null,
+                        size: 28,
+                      ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 28),
           Text(
             person.overview.isEmpty ? '暂无简介' : person.overview,
-            style: const TextStyle(height: 1.65),
-          ),
-          if (person.genres.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            Text('相关类型：${person.genres.join('、')}'),
-          ],
-          const SizedBox(height: 18),
-          OutlinedButton.icon(
-            onPressed: favoriteBusy ? null : onFavorite,
-            icon: favoriteBusy
-                ? const SizedBox.square(
-                    dimension: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Icon(
-                    person.isFavorite
-                        ? Icons.favorite_rounded
-                        : Icons.favorite_border_rounded,
-                  ),
-            label: Text(person.isFavorite ? '已收藏' : '收藏演员'),
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.72),
           ),
         ],
       );
+      final infoCards = _personInfoCards(context, person);
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (constraints.maxWidth >= 680)
+          if (useWideHero)
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: [poster, const SizedBox(width: 28), Expanded(child: biography)],
+              children: [
+                poster,
+                const SizedBox(width: 30),
+                Expanded(child: biography),
+              ],
             )
           else ...[
             Center(child: poster),
             const SizedBox(height: 22),
             biography,
           ],
-          const SizedBox(height: 32),
-          Text(
-            '参演作品  ${items.length}',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w700,
+          if (infoCards.isNotEmpty) ...[
+            const SizedBox(height: 32),
+            _SectionTitle(icon: Icons.person_outline, title: '人物信息'),
+            const SizedBox(height: 14),
+            // 人物信息卡片在桌面端双列展示，窄屏自动切换为单列。
+            LayoutBuilder(
+              builder: (context, infoConstraints) {
+                const spacing = 14.0;
+                final cardWidth = infoConstraints.maxWidth >= 560
+                    ? (infoConstraints.maxWidth - spacing) / 2
+                    : infoConstraints.maxWidth;
+                return Wrap(
+                  spacing: spacing,
+                  runSpacing: spacing,
+                  children: infoCards
+                      .map((card) => SizedBox(width: cardWidth, child: card))
+                      .toList(),
+                );
+              },
             ),
+          ],
+          const SizedBox(height: 32),
+          _SectionTitle(
+            icon: Icons.movie_outlined,
+            title: '参演作品',
+            trailing: '${items.length}',
           ),
           const SizedBox(height: 14),
           if (items.isEmpty)
@@ -257,12 +302,192 @@ class _PersonContent extends StatelessWidget {
     },
   );
 
+  // 摘要字段沿用 Vue 人物页的顺序，空值不占据布局空间。
+  List<String> _personFacts(EmbyPcItem person) => [
+    if (person.type.isNotEmpty) '类型：${_typeLabel(person.type)}',
+    if (person.sortName.isNotEmpty) '排序名：${person.sortName}',
+    if (person.premiereDate.isNotEmpty) '首映日期：${_formatDate(person.premiereDate)}',
+    if (person.dateCreated.isNotEmpty) '添加日期：${_formatDate(person.dateCreated)}',
+  ];
+
+  // 流派等已有资料与新增外部资料统一使用相同的信息卡片样式。
+  List<Widget> _personInfoCards(BuildContext context, EmbyPcItem person) {
+    final cards = <Widget>[];
+    if (person.genres.isNotEmpty) {
+      cards.add(
+        _PersonInfoCard(
+          icon: Icons.image_outlined,
+          title: '流派',
+          children: [Text(person.genres.join('、'))],
+        ),
+      );
+    }
+    if (person.tags.isNotEmpty) {
+      cards.add(
+        _PersonInfoCard(
+          icon: Icons.sell_outlined,
+          title: '标签',
+          children: [Text(person.tags.join('、'))],
+        ),
+      );
+    }
+    final studioNames = person.studios
+        .map((studio) => studio.name)
+        .where((name) => name.isNotEmpty)
+        .toList();
+    if (studioNames.isNotEmpty) {
+      cards.add(
+        _PersonInfoCard(
+          icon: Icons.videocam_outlined,
+          title: '工作室',
+          children: [Text(studioNames.join('、'))],
+        ),
+      );
+    }
+    if (person.providerIds.isNotEmpty) {
+      cards.add(
+        _PersonInfoCard(
+          icon: Icons.calendar_month_outlined,
+          title: '外部编号',
+          children: person.providerIds.entries
+              .map((entry) => Text('${entry.key}：${entry.value}'))
+              .toList(),
+        ),
+      );
+    }
+    final externalUrls = person.externalUrls.where(
+      (external) => external.url.isNotEmpty,
+    );
+    if (externalUrls.isNotEmpty) {
+      cards.add(
+        _PersonInfoCard(
+          icon: Icons.link,
+          title: '外部链接',
+          // 当前项目未引入 URL 启动依赖，先以可选择文本展示并通过提示显示完整地址。
+          children: externalUrls
+              .map(
+                (external) => Tooltip(
+                  message: external.url,
+                  child: SelectableText(
+                    external.name.isEmpty ? external.url : external.name,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                ),
+              )
+              .toList(),
+        ),
+      );
+    }
+    return cards;
+  }
+
+  String _typeLabel(String type) => switch (type) {
+    'Movie' => '电影',
+    'Series' => '剧集',
+    'Video' => '视频',
+    'Episode' => '单集',
+    'Person' => '人物',
+    _ => type,
+  };
+
+  String _formatDate(String value) {
+    final date = DateTime.tryParse(value);
+    if (date == null) return value;
+    final month = date.month.toString().padLeft(2, '0');
+    final day = date.day.toString().padLeft(2, '0');
+    return '${date.year}/$month/$day';
+  }
+
   int _columnCount(double width) {
     if (width >= 1050) return 6;
     if (width >= 780) return 5;
     if (width >= 560) return 4;
     if (width >= 360) return 3;
     return 2;
+  }
+}
+
+// 人物信息和作品区域复用一致的图标标题样式。
+class _SectionTitle extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String trailing;
+
+  const _SectionTitle({
+    required this.icon,
+    required this.title,
+    this.trailing = '',
+  });
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Icon(icon, size: 22),
+      const SizedBox(width: 8),
+      Text(
+        title,
+        style: Theme.of(
+          context,
+        ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+      ),
+      if (trailing.isNotEmpty) ...[
+        const SizedBox(width: 8),
+        Text(trailing, style: Theme.of(context).textTheme.bodySmall),
+      ],
+    ],
+  );
+}
+
+// 卡片视觉沿用参考页面的浅边框、圆角和紧凑内容间距。
+class _PersonInfoCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final List<Widget> children;
+
+  const _PersonInfoCard({
+    required this.icon,
+    required this.title,
+    required this.children,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        border: Border.all(color: colors.outlineVariant.withOpacity(0.7)),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18),
+              const SizedBox(width: 8),
+              Text(title, style: Theme.of(context).textTheme.titleSmall),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ...children.expand((child) => [
+            DefaultTextStyle(
+              style: (
+                Theme.of(context).textTheme.bodyMedium ?? const TextStyle()
+              ).copyWith(
+                color: colors.onSurfaceVariant,
+                height: 1.5,
+              ),
+              child: child,
+            ),
+            const SizedBox(height: 6),
+          ]),
+        ],
+      ),
+    );
   }
 }
 

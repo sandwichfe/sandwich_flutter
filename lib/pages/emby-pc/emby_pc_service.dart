@@ -162,8 +162,10 @@ class EmbyPcService {
   }
 
   Future<EmbyPcItem> getPersonDetail(String personId) async {
+    // 人物页需要外部编号、外部链接和摘要信息，统一随详情接口返回。
     const fields =
-        'Overview,Genres,Tags,Studios,PremiereDate,DateCreated,BackdropImageTags';
+        'Overview,Genres,Tags,Studios,PremiereDate,DateCreated,SortName,'
+        'ProviderIds,ExternalUrls';
     return EmbyPcItem.fromJson(
       await _get('/emby/Users/$userId/Items/$personId', query: {
         'Fields': fields,

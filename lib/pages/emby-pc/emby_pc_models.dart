@@ -2,6 +2,8 @@
 class EmbyPcItem {
   final String id;
   final String name;
+  // 排序名用于人物页摘要，缺失时由页面自动隐藏。
+  final String sortName;
   final String type;
   final String overview;
   final String? role;
@@ -24,6 +26,9 @@ class EmbyPcItem {
   final List<EmbyPcPerson> people;
   final List<EmbyPcMediaSource> mediaSources;
   final List<EmbyPcChapter> chapters;
+  // 外部编号和链接来自人物详情接口，也保留在通用条目模型中统一解析。
+  final Map<String, String> providerIds;
+  final List<EmbyPcExternalUrl> externalUrls;
   final Map<String, dynamic> imageTags;
   final String primaryImageTag;
   final List<String> backdropImageTags;
@@ -32,6 +37,7 @@ class EmbyPcItem {
   const EmbyPcItem({
     required this.id,
     required this.name,
+    this.sortName = '',
     this.type = '',
     this.overview = '',
     this.role,
@@ -54,6 +60,8 @@ class EmbyPcItem {
     this.people = const [],
     this.mediaSources = const [],
     this.chapters = const [],
+    this.providerIds = const {},
+    this.externalUrls = const [],
     this.imageTags = const {},
     this.primaryImageTag = '',
     this.backdropImageTags = const [],
@@ -65,6 +73,7 @@ class EmbyPcItem {
     return EmbyPcItem(
       id: _text(json['Id']),
       name: _text(json['Name']),
+      sortName: _text(json['SortName']),
       type: _text(json['Type']),
       overview: _text(json['Overview']),
       role: json['Role']?.toString(),
@@ -88,6 +97,9 @@ class EmbyPcItem {
       mediaSources:
           _maps(json['MediaSources']).map(EmbyPcMediaSource.fromJson).toList(),
       chapters: _maps(json['Chapters']).map(EmbyPcChapter.fromJson).toList(),
+      providerIds: _stringMap(json['ProviderIds']),
+      externalUrls:
+          _maps(json['ExternalUrls']).map(EmbyPcExternalUrl.fromJson).toList(),
       imageTags: _map(json['ImageTags']),
       primaryImageTag: _text(json['PrimaryImageTag']),
       backdropImageTags: _strings(json['BackdropImageTags']),
@@ -98,6 +110,7 @@ class EmbyPcItem {
   EmbyPcItem copyWith({bool? isFavorite}) => EmbyPcItem(
     id: id,
     name: name,
+    sortName: sortName,
     type: type,
     overview: overview,
     role: role,
@@ -120,6 +133,8 @@ class EmbyPcItem {
     people: people,
     mediaSources: mediaSources,
     chapters: chapters,
+    providerIds: providerIds,
+    externalUrls: externalUrls,
     imageTags: imageTags,
     primaryImageTag: primaryImageTag,
     backdropImageTags: backdropImageTags,
@@ -136,6 +151,17 @@ class EmbyPcItem {
     final hours = minutes ~/ 60;
     return hours > 0 ? '${hours}h ${minutes % 60}m' : '${minutes}m';
   }
+}
+
+// Emby 外部链接保留名称和地址，页面可在名称缺失时使用 URL 兜底显示。
+class EmbyPcExternalUrl {
+  final String name;
+  final String url;
+
+  const EmbyPcExternalUrl({this.name = '', this.url = ''});
+
+  factory EmbyPcExternalUrl.fromJson(Map<String, dynamic> json) =>
+      EmbyPcExternalUrl(name: _text(json['Name']), url: _text(json['Url']));
 }
 
 class EmbyPcPerson {
@@ -336,6 +362,12 @@ class EmbyPcPage {
 
 Map<String, dynamic> _map(dynamic value) =>
     value is Map ? Map<String, dynamic>.from(value) : <String, dynamic>{};
+
+// ProviderIds 的值应为字符串，空值在模型层过滤，避免页面重复清洗。
+Map<String, String> _stringMap(dynamic value) => {
+  for (final entry in _map(value).entries)
+    if (_text(entry.value).isNotEmpty) entry.key: _text(entry.value),
+};
 
 List<Map<String, dynamic>> _maps(dynamic value) => value is List
     ? value.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList()
