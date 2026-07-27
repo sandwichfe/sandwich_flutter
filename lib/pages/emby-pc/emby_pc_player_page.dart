@@ -3,7 +3,8 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:video_player/video_player.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 
 import 'emby_pc_models.dart';
 import 'emby_pc_service.dart';
@@ -23,44 +24,107 @@ class EmbyPcPlayerPage extends StatefulWidget {
 }
 
 class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
-  VideoPlayerController? _controller;
+  late final Player _player;
+  late final VideoController _videoController;
+  final List<StreamSubscription<dynamic>> _playerSubscriptions = [];
   bool _loading = true;
   bool _muted = false;
   String _error = '';
+  bool _playerReady = false;
+  bool _isPlaying = false;
+  Duration _position = Duration.zero;
+  Duration _duration = Duration.zero;
+  double _aspectRatio = 16 / 9;
   Timer? _progressTimer;
   _BifPreviewData? _previewData;
 
   @override
   void initState() {
     super.initState();
+    // Use Emby's known dimensions while the native decoder is still loading.
+    if (widget.item.width != null &&
+        widget.item.height != null &&
+        widget.item.height! > 0) {
+      _aspectRatio = widget.item.width! / widget.item.height!;
+    }
+    _player = Player();
+    _videoController = VideoController(_player);
+    _listenToPlayerState();
     _initializePlayer();
+  }
+
+  // Keep the Flutter controls synchronized with media_kit's event streams.
+  void _listenToPlayerState() {
+    _playerSubscriptions.add(
+      _player.stream.playing.listen((playing) {
+        if (mounted) setState(() => _isPlaying = playing);
+      }),
+    );
+    _playerSubscriptions.add(
+      _player.stream.position.listen((position) {
+        if (mounted) setState(() => _position = position);
+      }),
+    );
+    _playerSubscriptions.add(
+      _player.stream.duration.listen((duration) {
+        if (mounted) setState(() => _duration = duration);
+      }),
+    );
+    _playerSubscriptions.add(
+      _player.stream.videoParams.listen((params) {
+        final aspect =
+            params.aspect ??
+            (params.dw != null && params.dh != null && params.dh! > 0
+                ? params.dw! / params.dh!
+                : null);
+        if (mounted && aspect != null && aspect > 0) {
+          setState(() => _aspectRatio = aspect);
+        }
+      }),
+    );
+    _playerSubscriptions.add(
+      _player.stream.error.listen((message) {
+        if (message.isEmpty || !mounted) return;
+        setState(() {
+          _loading = false;
+          _playerReady = false;
+          _error = '视频加载失败: $message';
+        });
+      }),
+    );
   }
 
   // 章节和继续播放都换算为 Emby ticks 后从指定位置起播。
   Future<void> _initializePlayer() async {
     try {
-      final controller = VideoPlayerController.networkUrl(
-        Uri.parse(EmbyPcService.instance.streamUrl(widget.item.id)),
+      final start = Duration(microseconds: widget.startPositionTicks ~/ 10);
+      final hasKnownDuration = widget.item.duration > Duration.zero;
+      final startPosition =
+          start > Duration.zero &&
+                  (!hasKnownDuration || start < widget.item.duration)
+              ? start
+              : null;
+      final media = Media(
+        EmbyPcService.instance.streamUrl(widget.item.id),
+        start: startPosition,
       );
-      await controller.initialize();
+      await _player.open(media);
       if (!mounted) {
-        await controller.dispose();
+        await _player.dispose();
         return;
       }
-      final start = Duration(microseconds: widget.startPositionTicks ~/ 10);
-      if (start > Duration.zero && start < controller.value.duration) {
-        await controller.seekTo(start);
-      }
-      await controller.play();
-      controller.addListener(_refreshPlayerState);
+      if (_error.isNotEmpty) return;
       _progressTimer = Timer.periodic(
         const Duration(seconds: 10),
-        (_) => _reportProgress('/Sessions/Playing/Progress', controller),
+        (_) => _reportProgress('/Sessions/Playing/Progress'),
       );
-      _reportProgress('/Sessions/Playing', controller);
+      _reportProgress('/Sessions/Playing');
       setState(() {
-        _controller = controller;
         _loading = false;
+        _playerReady = true;
+        _isPlaying = _player.state.playing;
+        _position = _player.state.position;
+        _duration = _player.state.duration;
       });
       // 预览图独立异步加载，避免 BIF 不可用时阻塞视频起播。
       unawaited(_loadBifPreview());
@@ -88,51 +152,43 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
     }
   }
 
-  void _refreshPlayerState() {
-    if (mounted) setState(() {});
-  }
-
-  void _reportProgress(String eventPath, VideoPlayerController controller) {
-    final ticks = controller.value.position.inMicroseconds * 10;
+  void _reportProgress(String eventPath) {
+    final ticks = _player.state.position.inMicroseconds * 10;
     EmbyPcService.instance.reportPlayback(
       itemId: widget.item.id,
       eventPath: eventPath,
       positionTicks: ticks,
-      paused: !controller.value.isPlaying,
+      paused: !_player.state.playing,
     );
   }
 
   Future<void> _togglePlay() async {
-    final controller = _controller;
-    if (controller == null) return;
-    controller.value.isPlaying ? await controller.pause() : await controller.play();
-    _reportProgress('/Sessions/Playing/Progress', controller);
+    if (!_playerReady) return;
+    _isPlaying ? await _player.pause() : await _player.play();
+    _reportProgress('/Sessions/Playing/Progress');
   }
 
   Future<void> _toggleMute() async {
-    final controller = _controller;
-    if (controller == null) return;
+    if (!_playerReady) return;
     _muted = !_muted;
-    await controller.setVolume(_muted ? 0 : 1);
+    await _player.setVolume(_muted ? 0.0 : 100.0);
     if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
-    final controller = _controller;
-    if (controller != null) {
-      _reportProgress('/Sessions/Playing/Stopped', controller);
-    }
+    if (_playerReady) _reportProgress('/Sessions/Playing/Stopped');
     _progressTimer?.cancel();
-    _controller?.removeListener(_refreshPlayerState);
-    _controller?.dispose();
+    for (final subscription in _playerSubscriptions) {
+      unawaited(subscription.cancel());
+    }
+    unawaited(_player.dispose());
     _previewData = null;
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final controller = _controller;
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -141,36 +197,38 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
         title: Text(widget.item.name, overflow: TextOverflow.ellipsis),
       ),
       body: Center(
-        child: _loading
-            ? const CircularProgressIndicator()
-            : _error.isNotEmpty
+        child:
+            _loading
+                ? const CircularProgressIndicator()
+                : _error.isNotEmpty
                 ? _PlayerMessage(icon: Icons.error_outline, text: _error)
-                : controller == null
-                    ? const _PlayerMessage(
-                        icon: Icons.videocam_off_outlined,
-                        text: '播放器不可用',
-                      )
-                    : Column(
-                        children: [
-                          Expanded(
-                            child: Center(
-                              child: AspectRatio(
-                                aspectRatio: controller.value.aspectRatio > 0
-                                    ? controller.value.aspectRatio
-                                    : 16 / 9,
-                                child: VideoPlayer(controller),
-                              ),
-                            ),
-                          ),
-                          _PlayerControls(
-                            controller: controller,
-                            previewData: _previewData,
-                            muted: _muted,
-                            onTogglePlay: _togglePlay,
-                            onToggleMute: _toggleMute,
-                          ),
-                        ],
+                : !_playerReady
+                ? const _PlayerMessage(
+                  icon: Icons.videocam_off_outlined,
+                  text: '播放器不可用',
+                )
+                : Column(
+                  children: [
+                    Expanded(
+                      child: Center(
+                        child: AspectRatio(
+                          aspectRatio: _aspectRatio,
+                          child: Video(controller: _videoController),
+                        ),
                       ),
+                    ),
+                    _PlayerControls(
+                      player: _player,
+                      position: _position,
+                      duration: _duration,
+                      isPlaying: _isPlaying,
+                      previewData: _previewData,
+                      muted: _muted,
+                      onTogglePlay: _togglePlay,
+                      onToggleMute: _toggleMute,
+                    ),
+                  ],
+                ),
       ),
     );
   }
@@ -208,7 +266,8 @@ class _BifPreviewData {
     final view = ByteData.sublistView(bytes);
     final declaredFrameCount = view.getUint32(12, Endian.little);
     final declaredMultiplier = view.getUint32(16, Endian.little);
-    final timestampMultiplier = declaredMultiplier == 0 ? 1000 : declaredMultiplier;
+    final timestampMultiplier =
+        declaredMultiplier == 0 ? 1000 : declaredMultiplier;
     final maxFrameCount = math.max(
       0,
       ((bytes.length - headerLength) ~/ indexEntryLength) - 1,
@@ -266,14 +325,20 @@ class _BifPreviewData {
 }
 
 class _PlayerControls extends StatefulWidget {
-  final VideoPlayerController controller;
+  final Player player;
+  final Duration position;
+  final Duration duration;
+  final bool isPlaying;
   final _BifPreviewData? previewData;
   final bool muted;
   final VoidCallback onTogglePlay;
   final VoidCallback onToggleMute;
 
   const _PlayerControls({
-    required this.controller,
+    required this.player,
+    required this.position,
+    required this.duration,
+    required this.isPlaying,
     required this.previewData,
     required this.muted,
     required this.onTogglePlay,
@@ -304,16 +369,17 @@ class _PlayerControlsState extends State<_PlayerControls> {
 
   void _showPreview(double ratio) {
     final previewData = widget.previewData;
-    final duration = widget.controller.value.duration;
+    final duration = widget.duration;
     if (previewData == null || duration <= Duration.zero) return;
 
     final safeRatio = ratio.clamp(0.0, 1.0).toDouble();
     final targetMs = (duration.inMilliseconds * safeRatio).round();
     final frameIndex = previewData.findFrameIndex(targetMs);
     // 同一缩略帧复用字节视图，避免播放器频繁刷新时重复解析图片。
-    final frameBytes = frameIndex == _activeFrameIndex
-        ? _activeFrameBytes
-        : previewData.frameBytes(frameIndex);
+    final frameBytes =
+        frameIndex == _activeFrameIndex
+            ? _activeFrameBytes
+            : previewData.frameBytes(frameIndex);
     setState(() {
       _previewVisible = true;
       _previewRatio = safeRatio;
@@ -327,17 +393,15 @@ class _PlayerControlsState extends State<_PlayerControls> {
   }
 
   double _pointerRatio(double localX, double width) {
-    final inset = width > _sliderHorizontalInset * 2
-        ? _sliderHorizontalInset
-        : 0.0;
+    final inset =
+        width > _sliderHorizontalInset * 2 ? _sliderHorizontalInset : 0.0;
     final trackWidth = math.max(1.0, width - inset * 2);
     return ((localX - inset) / trackWidth).clamp(0.0, 1.0).toDouble();
   }
 
   double _previewLeft(double width, double previewWidth) {
-    final inset = width > _sliderHorizontalInset * 2
-        ? _sliderHorizontalInset
-        : 0.0;
+    final inset =
+        width > _sliderHorizontalInset * 2 ? _sliderHorizontalInset : 0.0;
     final trackWidth = math.max(0.0, width - inset * 2);
     final center = inset + trackWidth * _previewRatio;
     return (center - previewWidth / 2)
@@ -347,9 +411,10 @@ class _PlayerControlsState extends State<_PlayerControls> {
 
   @override
   Widget build(BuildContext context) {
-    final position = widget.controller.value.position;
-    final duration = widget.controller.value.duration;
-    final max = duration.inMilliseconds.toDouble().clamp(1, double.infinity).toDouble();
+    final position = widget.position;
+    final duration = widget.duration;
+    final max =
+        duration.inMilliseconds.toDouble().clamp(1, double.infinity).toDouble();
     final current = position.inMilliseconds.toDouble().clamp(0, max).toDouble();
     return SafeArea(
       top: false,
@@ -358,11 +423,11 @@ class _PlayerControlsState extends State<_PlayerControls> {
         child: Row(
           children: [
             IconButton(
-              tooltip: widget.controller.value.isPlaying ? '暂停' : '播放',
+              tooltip: widget.isPlaying ? '暂停' : '播放',
               color: Colors.white,
               onPressed: widget.onTogglePlay,
               icon: Icon(
-                widget.controller.value.isPlaying
+                widget.isPlaying
                     ? Icons.pause_rounded
                     : Icons.play_arrow_rounded,
               ),
@@ -373,12 +438,14 @@ class _PlayerControlsState extends State<_PlayerControls> {
                   final width = constraints.maxWidth;
                   final previewWidth = math.min(240.0, width);
                   final previewPosition = Duration(
-                    milliseconds: (duration.inMilliseconds * _previewRatio).round(),
+                    milliseconds:
+                        (duration.inMilliseconds * _previewRatio).round(),
                   );
                   return MouseRegion(
-                    onHover: (event) => _showPreview(
-                      _pointerRatio(event.localPosition.dx, width),
-                    ),
+                    onHover:
+                        (event) => _showPreview(
+                          _pointerRatio(event.localPosition.dx, width),
+                        ),
                     onExit: (_) => _hidePreview(),
                     child: Stack(
                       clipBehavior: Clip.none,
@@ -390,7 +457,7 @@ class _PlayerControlsState extends State<_PlayerControls> {
                           onChanged: (value) {
                             _showPreview(value / max);
                             unawaited(
-                              widget.controller.seekTo(
+                              widget.player.seek(
                                 Duration(milliseconds: value.round()),
                               ),
                             );
@@ -468,11 +535,7 @@ class _ProgressPreview extends StatelessWidget {
       borderRadius: BorderRadius.circular(6),
       border: Border.all(color: Colors.white24),
       boxShadow: const [
-        BoxShadow(
-          color: Colors.black54,
-          blurRadius: 18,
-          offset: Offset(0, 8),
-        ),
+        BoxShadow(color: Colors.black54, blurRadius: 18, offset: Offset(0, 8)),
       ],
     ),
     child: ClipRRect(
@@ -487,12 +550,16 @@ class _ProgressPreview extends StatelessWidget {
               key: ValueKey(frameIndex),
               fit: BoxFit.cover,
               gaplessPlayback: true,
-              errorBuilder: (_, _, _) => const ColoredBox(
-                color: Color(0xFF111111),
-                child: Center(
-                  child: Icon(Icons.broken_image_outlined, color: Colors.white38),
-                ),
-              ),
+              errorBuilder:
+                  (_, _, _) => const ColoredBox(
+                    color: Color(0xFF111111),
+                    child: Center(
+                      child: Icon(
+                        Icons.broken_image_outlined,
+                        color: Colors.white38,
+                      ),
+                    ),
+                  ),
             ),
           ),
           Positioned(

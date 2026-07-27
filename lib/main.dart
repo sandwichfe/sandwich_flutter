@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:media_kit/media_kit.dart';
 
 import 'pages/launcher_page.dart';
 import 'services/emby_service.dart';
@@ -8,6 +9,8 @@ import 'utils/theme_manager.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Initialize media_kit before creating any Player or VideoController.
+  MediaKit.ensureInitialized();
 
   await StorageUtil.init();
   await EmbyService().loadFromStorage();
