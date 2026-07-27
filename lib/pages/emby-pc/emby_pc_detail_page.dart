@@ -1447,7 +1447,7 @@ class _Summary extends StatelessWidget {
   }
 }
 
-// 分区标题可按需携带图标，未传入时保持其它详情区块的原有样式。
+// 分区标题可按需携带图标，并使用适合 Windows 中文界面的系统 UI 字体。
 class _SectionTitle extends StatelessWidget {
   final String title;
   final IconData? icon;
@@ -1465,7 +1465,9 @@ class _SectionTitle extends StatelessWidget {
       Text(
         title,
         style: Theme.of(context).textTheme.titleLarge?.copyWith(
-          fontWeight: FontWeight.w700,
+          // 微软雅黑 UI 是 Windows 主流中文桌面产品常用的清晰无衬线字体。
+          fontFamily: 'Microsoft YaHei UI',
+          fontWeight: FontWeight.w600,
         ),
       ),
     ],
