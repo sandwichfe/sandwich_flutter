@@ -470,7 +470,14 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                   children: [
                     const Padding(
                       padding: EdgeInsets.fromLTRB(10, 10, 10, 8),
-                      child: Text('媒体库', style: TextStyle(fontWeight: FontWeight.w700)),
+                      child: Text(
+                        '媒体库',
+                        // 侧栏分组标题使用清晰的 Windows 中文 UI 字体。
+                        style: TextStyle(
+                          fontFamily: 'Microsoft YaHei UI',
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
                     ..._libraries.map(
                       (library) => _SidebarButton(
@@ -484,7 +491,14 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                     const Divider(height: 28),
                     const Padding(
                       padding: EdgeInsets.fromLTRB(10, 0, 10, 8),
-                      child: Text('我喜欢的', style: TextStyle(fontWeight: FontWeight.w700)),
+                      child: Text(
+                        '我喜欢的',
+                        // 与媒体库分组保持一致的字体和字重。
+                        style: TextStyle(
+                          fontFamily: 'Microsoft YaHei UI',
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
                     _SidebarButton(
                       icon: Icons.movie_outlined,

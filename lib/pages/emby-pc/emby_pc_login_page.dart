@@ -115,7 +115,11 @@ class _EmbyPcLoginPageState extends State<EmbyPcLoginPage> {
                                 Text(
                                   'Emby',
                                   style: Theme.of(context).textTheme.headlineSmall
-                                      ?.copyWith(fontWeight: FontWeight.w700),
+                                      ?.copyWith(
+                                        // 登录页品牌标题与桌面端其它标题保持统一字体。
+                                        fontFamily: 'Microsoft YaHei UI',
+                                        fontWeight: FontWeight.w600,
+                                      ),
                                 ),
                               ],
                             ),

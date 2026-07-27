@@ -1178,6 +1178,7 @@ class _StreamCard extends StatelessWidget {
   }
 }
 
+// 信息卡片标题与页面分区标题使用一致的 Windows 中文 UI 字体。
 class _CardTitle extends StatelessWidget {
   final String title;
   final IconData icon;
@@ -1192,7 +1193,11 @@ class _CardTitle extends StatelessWidget {
       Expanded(
         child: Text(
           title,
-          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+          style: const TextStyle(
+            fontFamily: 'Microsoft YaHei UI',
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
     ],
@@ -1403,7 +1408,9 @@ class _Summary extends StatelessWidget {
         Text(
           detail.name,
           style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-            fontWeight: FontWeight.w700,
+            // 媒体主标题沿用分区标题的字体，保持详情页视觉统一。
+            fontFamily: 'Microsoft YaHei UI',
+            fontWeight: FontWeight.w600,
           ),
         ),
         if (meta.isNotEmpty) ...[

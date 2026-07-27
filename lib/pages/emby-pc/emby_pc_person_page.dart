@@ -174,7 +174,9 @@ class _PersonContent extends StatelessWidget {
           Text(
             person.name.isEmpty ? '人物详情' : person.name,
             style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-              fontWeight: FontWeight.w700,
+              // 人物主标题与详情页其它标题保持统一字体。
+              fontFamily: 'Microsoft YaHei UI',
+              fontWeight: FontWeight.w600,
             ),
           ),
           if (facts.isNotEmpty) ...[
@@ -409,7 +411,7 @@ class _PersonContent extends StatelessWidget {
   }
 }
 
-// 人物信息和作品区域复用一致的图标标题样式。
+// 人物信息和作品区域复用一致的图标标题及 Windows 中文 UI 字体。
 class _SectionTitle extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -430,7 +432,10 @@ class _SectionTitle extends StatelessWidget {
         title,
         style: Theme.of(
           context,
-        ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+        ).textTheme.titleLarge?.copyWith(
+          fontFamily: 'Microsoft YaHei UI',
+          fontWeight: FontWeight.w600,
+        ),
       ),
       if (trailing.isNotEmpty) ...[
         const SizedBox(width: 8),
