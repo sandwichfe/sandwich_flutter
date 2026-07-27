@@ -216,36 +216,34 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
                   text: '播放器不可用',
                 ),
               )
-              : Center(
-                // 让画面、字幕和控制层共享同一宽高比区域，避免控制条宽于实际视频画面。
-                child: AspectRatio(
+              : SizedBox.expand(
+                // 播放器视口铺满页面，画面在视口内保持比例，控制层始终吸附视口底部。
+                child: Video(
+                  controller: _videoController,
                   aspectRatio: _aspectRatio,
-                  child: Video(
-                    controller: _videoController,
-                    aspectRatio: _aspectRatio,
-                    fit: BoxFit.contain,
-                    // Flutter 字幕上移到控制区上方，避免与进度条和操作按钮重叠。
-                    subtitleViewConfiguration:
-                        const SubtitleViewConfiguration(
-                          padding: EdgeInsets.fromLTRB(24, 0, 24, 104),
-                        ),
-                    // Render the custom controls inside Video as its only
-                    // control layer instead of stacking a second outer bar.
-                    // 控制层自身占满播放器，再在内部固定到底部，避免 Align 的松约束
-                    // 让进度条、预览框在不同窗口比例下出现错位。
-                    controls:
-                        (_) => _PlayerControls(
-                          player: _player,
-                          position: _position,
-                          duration: _duration,
-                          isPlaying: _isPlaying,
-                          thumbnailPreviewController:
-                              _thumbnailPreviewController,
-                          muted: _muted,
-                          onTogglePlay: _togglePlay,
-                          onToggleMute: _toggleMute,
-                        ),
+                  fit: BoxFit.contain,
+                  // 仅将画面在剩余黑边中轻微上移，控制栏仍固定在播放器底部。
+                  alignment: const Alignment(0, -0.22),
+                  // Flutter 字幕上移到控制区上方，避免与进度条和操作按钮重叠。
+                  subtitleViewConfiguration: const SubtitleViewConfiguration(
+                    padding: EdgeInsets.fromLTRB(24, 0, 24, 104),
                   ),
+                  // Render the custom controls inside Video as its only
+                  // control layer instead of stacking a second outer bar.
+                  // 控制层自身占满播放器，再在内部固定到底部，避免 Align 的松约束
+                  // 让进度条、预览框在不同窗口比例下出现错位。
+                  controls:
+                      (_) => _PlayerControls(
+                        player: _player,
+                        position: _position,
+                        duration: _duration,
+                        isPlaying: _isPlaying,
+                        thumbnailPreviewController:
+                            _thumbnailPreviewController,
+                        muted: _muted,
+                        onTogglePlay: _togglePlay,
+                        onToggleMute: _toggleMute,
+                      ),
                 ),
               ),
     );
