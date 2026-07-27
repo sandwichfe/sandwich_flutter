@@ -1177,16 +1177,20 @@ class _SidebarButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 3),
-    child: ListTile(
-      dense: true,
-      selected: active,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-      leading: Icon(icon),
-      title: Text(title, overflow: TextOverflow.ellipsis),
-      trailing: loading
-          ? const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2))
-          : Text(count == null ? '-' : '$count'),
-      onTap: onPressed,
+    // 为列表项提供独立的绘制层，避免外层侧栏背景遮挡选中效果和点击水波纹。
+    child: Material(
+      type: MaterialType.transparency,
+      child: ListTile(
+        dense: true,
+        selected: active,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        leading: Icon(icon),
+        title: Text(title, overflow: TextOverflow.ellipsis),
+        trailing: loading
+            ? const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2))
+            : Text(count == null ? '-' : '$count'),
+        onTap: onPressed,
+      ),
     ),
   );
 }

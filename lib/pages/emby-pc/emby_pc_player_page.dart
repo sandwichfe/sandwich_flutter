@@ -444,6 +444,16 @@ class _PlayerControls extends StatelessWidget {
     required this.onVolumeChanged,
   });
 
+  Future<void> _toggleFullscreen(BuildContext context) async {
+    // Flutter Tooltip 使用 OverlayPortal；等待退出动画结束后再改变窗口尺寸。
+    final tooltipWasVisible = Tooltip.dismissAllToolTips();
+    if (tooltipWasVisible) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    if (context.mounted) await toggleFullscreen(context);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Stack(
@@ -590,7 +600,7 @@ class _PlayerControls extends StatelessWidget {
                                 color: Colors.white,
                                 visualDensity: VisualDensity.compact,
                                 onPressed:
-                                    () => unawaited(toggleFullscreen(context)),
+                                    () => unawaited(_toggleFullscreen(context)),
                                 icon: Icon(
                                   isFullscreen(context)
                                       ? Icons.fullscreen_exit_rounded
@@ -641,9 +651,9 @@ class _VolumeControl extends StatefulWidget {
 
 class _VolumeControlState extends State<_VolumeControl> {
   final LayerLink _volumeLayerLink = LayerLink();
-  final OverlayPortalController _overlayController =
-      OverlayPortalController();
+  OverlayEntry? _volumeOverlayEntry;
   Timer? _hideTimer;
+  bool _overlayRefreshScheduled = false;
 
   IconData get _volumeIcon {
     if (widget.muted || widget.volume <= 0) return Icons.volume_off_rounded;
@@ -653,103 +663,135 @@ class _VolumeControlState extends State<_VolumeControl> {
 
   void _showVolumeSlider() {
     _hideTimer?.cancel();
-    _overlayController.show();
+    if (_volumeOverlayEntry != null) return;
+
+    // 使用普通 OverlayEntry 避免全屏切换期间 OverlayPortal 缓存旧窗口尺寸。
+    final entry = OverlayEntry(builder: _buildVolumeOverlay);
+    _volumeOverlayEntry = entry;
+    Overlay.of(context).insert(entry);
   }
 
   void _scheduleHideVolumeSlider() {
     _hideTimer?.cancel();
     // 给鼠标从按钮移动到上方浮层预留少量时间，避免经过间隙时闪退。
     _hideTimer = Timer(const Duration(milliseconds: 160), () {
-      if (mounted) _overlayController.hide();
+      if (mounted) _hideVolumeSlider();
     });
+  }
+
+  void _hideVolumeSlider() {
+    final entry = _volumeOverlayEntry;
+    if (entry == null) return;
+    _volumeOverlayEntry = null;
+    entry.remove();
+    entry.dispose();
+  }
+
+  void _scheduleVolumeOverlayRefresh() {
+    if (_overlayRefreshScheduled || _volumeOverlayEntry == null) return;
+    _overlayRefreshScheduled = true;
+    // didUpdateWidget 位于 build 阶段，延迟刷新可避免此时直接标记 Overlay 为脏。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _overlayRefreshScheduled = false;
+      final entry = _volumeOverlayEntry;
+      if (!mounted || entry == null) return;
+      entry.markNeedsBuild();
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _VolumeControl oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 音量或紧凑布局变化时，同步刷新独立 Overlay 中的滑条内容。
+    _scheduleVolumeOverlayRefresh();
   }
 
   @override
   void dispose() {
     _hideTimer?.cancel();
+    _hideVolumeSlider();
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildVolumeOverlay(BuildContext context) {
     final popupHeight = widget.compact ? 116.0 : 132.0;
     final volumeValue =
         (widget.muted ? 0.0 : widget.volume).clamp(0.0, 100.0).toDouble();
-    return OverlayPortal(
-      controller: _overlayController,
-      overlayChildBuilder:
-          (context) => UnconstrainedBox(
-            alignment: Alignment.topLeft,
-            // Overlay 会下发全屏紧约束，先解除约束才能保持音量浮层的小尺寸。
-            child: CompositedTransformFollower(
-              link: _volumeLayerLink,
-              showWhenUnlinked: false,
-              targetAnchor: Alignment.topCenter,
-              followerAnchor: Alignment.bottomCenter,
-              offset: const Offset(0, -4),
-              child: MouseRegion(
-                onEnter: (_) => _showVolumeSlider(),
-                onExit: (_) => _scheduleHideVolumeSlider(),
-                child: Material(
-                  color: Colors.transparent,
-                  child: Container(
-                    width: 44,
-                    height: popupHeight,
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    decoration: BoxDecoration(
-                      color: const Color(0xEB111111),
-                      borderRadius: BorderRadius.circular(22),
-                      border: Border.all(color: Colors.white12),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Colors.black54,
-                          blurRadius: 16,
-                          offset: Offset(0, 6),
-                        ),
-                      ],
+    return UnconstrainedBox(
+      alignment: Alignment.topLeft,
+      // 解除 Overlay 的全屏紧约束，让音量浮层保持自身尺寸。
+      child: CompositedTransformFollower(
+        link: _volumeLayerLink,
+        showWhenUnlinked: false,
+        targetAnchor: Alignment.topCenter,
+        followerAnchor: Alignment.bottomCenter,
+        offset: const Offset(0, -4),
+        child: MouseRegion(
+          onEnter: (_) => _showVolumeSlider(),
+          onExit: (_) => _scheduleHideVolumeSlider(),
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              width: 44,
+              height: popupHeight,
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xEB111111),
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: Colors.white12),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Colors.black54,
+                    blurRadius: 16,
+                    offset: Offset(0, 6),
+                  ),
+                ],
+              ),
+              // 旋转横向 Slider，使音量从下到上递增并保留原生拖动手感。
+              child: RotatedBox(
+                quarterTurns: 3,
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 2.5,
+                    activeTrackColor: Colors.white,
+                    inactiveTrackColor: Colors.white24,
+                    thumbColor: Colors.white,
+                    thumbShape: const RoundSliderThumbShape(
+                      enabledThumbRadius: 4.5,
+                      elevation: 0,
+                      pressedElevation: 0,
                     ),
-                    // 旋转横向 Slider，使音量从下到上递增并保留原生拖动手感。
-                    child: RotatedBox(
-                      quarterTurns: 3,
-                      child: SliderTheme(
-                        data: SliderTheme.of(context).copyWith(
-                          trackHeight: 2.5,
-                          activeTrackColor: Colors.white,
-                          inactiveTrackColor: Colors.white24,
-                          thumbColor: Colors.white,
-                          thumbShape: const RoundSliderThumbShape(
-                            enabledThumbRadius: 4.5,
-                            elevation: 0,
-                            pressedElevation: 0,
-                          ),
-                          overlayShape: SliderComponentShape.noOverlay,
-                        ),
-                        child: Slider(
-                          value: volumeValue,
-                          max: 100,
-                          onChanged: widget.onVolumeChanged,
-                        ),
-                      ),
-                    ),
+                    overlayShape: SliderComponentShape.noOverlay,
+                  ),
+                  child: Slider(
+                    value: volumeValue,
+                    max: 100,
+                    onChanged: widget.onVolumeChanged,
                   ),
                 ),
               ),
             ),
           ),
-      child: CompositedTransformTarget(
-        link: _volumeLayerLink,
-        child: MouseRegion(
-          onEnter: (_) => _showVolumeSlider(),
-          onExit: (_) => _scheduleHideVolumeSlider(),
-          child: Semantics(
-            button: true,
-            label: widget.muted ? '取消静音' : '静音',
-            child: IconButton(
-              color: Colors.white,
-              visualDensity: VisualDensity.compact,
-              onPressed: widget.onToggleMute,
-              icon: Icon(_volumeIcon),
-            ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return CompositedTransformTarget(
+      link: _volumeLayerLink,
+      child: MouseRegion(
+        onEnter: (_) => _showVolumeSlider(),
+        onExit: (_) => _scheduleHideVolumeSlider(),
+        child: Semantics(
+          button: true,
+          label: widget.muted ? '取消静音' : '静音',
+          child: IconButton(
+            color: Colors.white,
+            visualDensity: VisualDensity.compact,
+            onPressed: widget.onToggleMute,
+            icon: Icon(_volumeIcon),
           ),
         ),
       ),
