@@ -629,53 +629,57 @@ class _VolumeControlState extends State<_VolumeControl> {
     return OverlayPortal(
       controller: _overlayController,
       overlayChildBuilder:
-          (context) => CompositedTransformFollower(
-            link: _volumeLayerLink,
-            showWhenUnlinked: false,
-            targetAnchor: Alignment.topCenter,
-            followerAnchor: Alignment.bottomCenter,
-            offset: const Offset(0, -4),
-            child: MouseRegion(
-              onEnter: (_) => _showVolumeSlider(),
-              onExit: (_) => _scheduleHideVolumeSlider(),
-              child: Material(
-                color: Colors.transparent,
-                child: Container(
-                  width: 44,
-                  height: popupHeight,
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  decoration: BoxDecoration(
-                    color: const Color(0xEB111111),
-                    borderRadius: BorderRadius.circular(22),
-                    border: Border.all(color: Colors.white12),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Colors.black54,
-                        blurRadius: 16,
-                        offset: Offset(0, 6),
-                      ),
-                    ],
-                  ),
-                  // 旋转横向 Slider，使音量从下到上递增并保留原生拖动手感。
-                  child: RotatedBox(
-                    quarterTurns: 3,
-                    child: SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        trackHeight: 2.5,
-                        activeTrackColor: Colors.white,
-                        inactiveTrackColor: Colors.white24,
-                        thumbColor: Colors.white,
-                        thumbShape: const RoundSliderThumbShape(
-                          enabledThumbRadius: 4.5,
-                          elevation: 0,
-                          pressedElevation: 0,
+          (context) => UnconstrainedBox(
+            alignment: Alignment.topLeft,
+            // Overlay 会下发全屏紧约束，先解除约束才能保持音量浮层的小尺寸。
+            child: CompositedTransformFollower(
+              link: _volumeLayerLink,
+              showWhenUnlinked: false,
+              targetAnchor: Alignment.topCenter,
+              followerAnchor: Alignment.bottomCenter,
+              offset: const Offset(0, -4),
+              child: MouseRegion(
+                onEnter: (_) => _showVolumeSlider(),
+                onExit: (_) => _scheduleHideVolumeSlider(),
+                child: Material(
+                  color: Colors.transparent,
+                  child: Container(
+                    width: 44,
+                    height: popupHeight,
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xEB111111),
+                      borderRadius: BorderRadius.circular(22),
+                      border: Border.all(color: Colors.white12),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Colors.black54,
+                          blurRadius: 16,
+                          offset: Offset(0, 6),
                         ),
-                        overlayShape: SliderComponentShape.noOverlay,
-                      ),
-                      child: Slider(
-                        value: volumeValue,
-                        max: 100,
-                        onChanged: widget.onVolumeChanged,
+                      ],
+                    ),
+                    // 旋转横向 Slider，使音量从下到上递增并保留原生拖动手感。
+                    child: RotatedBox(
+                      quarterTurns: 3,
+                      child: SliderTheme(
+                        data: SliderTheme.of(context).copyWith(
+                          trackHeight: 2.5,
+                          activeTrackColor: Colors.white,
+                          inactiveTrackColor: Colors.white24,
+                          thumbColor: Colors.white,
+                          thumbShape: const RoundSliderThumbShape(
+                            enabledThumbRadius: 4.5,
+                            elevation: 0,
+                            pressedElevation: 0,
+                          ),
+                          overlayShape: SliderComponentShape.noOverlay,
+                        ),
+                        child: Slider(
+                          value: volumeValue,
+                          max: 100,
+                          onChanged: widget.onVolumeChanged,
+                        ),
                       ),
                     ),
                   ),
