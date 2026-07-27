@@ -834,6 +834,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     };
     final availableWidth = MediaQuery.sizeOf(context).width - 24;
     final panelWidth = availableWidth > 420 ? 420.0 : availableWidth;
+    // 菜单内容左右各保留 14 像素内边距，选项宽度直接使用剩余空间计算。
+    final contentWidth = panelWidth - 28;
     final showAdvancedFilters = _view != 'favorite-movies' && _view != 'favorite-people';
 
     // 多组低频筛选集中放入弹出面板，选中后仍按原逻辑立即刷新列表。
@@ -856,6 +858,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                     title: '类型',
                     options: itemTypes,
                     selected: _itemType,
+                    availableWidth: contentWidth,
                     onSelected: (value) {
                       if (value == _itemType) return;
                       setState(() => _itemType = value);
@@ -867,6 +870,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                       title: '播放状态',
                       options: statuses,
                       selected: _statusFilter,
+                      availableWidth: contentWidth,
                       onSelected: (value) {
                         if (value == _statusFilter) return;
                         setState(() => _statusFilter = value);
@@ -877,6 +881,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                       title: '收藏偏好',
                       options: marks,
                       selected: _markFilter,
+                      availableWidth: contentWidth,
                       onSelected: (value) {
                         if (value == _markFilter) return;
                         setState(() => _markFilter = value);
@@ -887,6 +892,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                       title: '视频类型',
                       options: videoTypes,
                       selected: _videoType,
+                      availableWidth: contentWidth,
                       onSelected: (value) {
                         if (value == _videoType) return;
                         setState(() => _videoType = value);
@@ -951,6 +957,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     const orderOptions = {'Descending': '降序', 'Ascending': '升序'};
     final availableWidth = MediaQuery.sizeOf(context).width - 24;
     final panelWidth = availableWidth > 460 ? 460.0 : availableWidth;
+    // 菜单内容左右各保留 14 像素内边距，选项宽度直接使用剩余空间计算。
+    final contentWidth = panelWidth - 28;
 
     return MenuAnchor(
       style: MenuStyle(
@@ -969,6 +977,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                   title: '排序字段',
                   options: sortOptions,
                   selected: _sortBy,
+                  availableWidth: contentWidth,
                   columns: panelWidth >= 400 ? 3 : 2,
                   onSelected: (value) {
                     if (value == _sortBy) return;
@@ -980,6 +989,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                   title: '顺序',
                   options: orderOptions,
                   selected: _sortOrder,
+                  availableWidth: contentWidth,
                   onSelected: (value) {
                     if (value == _sortOrder) return;
                     setState(() => _sortOrder = value);
@@ -1004,6 +1014,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     const layoutOptions = {'backdrop': '背景图', 'poster': '海报'};
     final availableWidth = MediaQuery.sizeOf(context).width - 24;
     final panelWidth = availableWidth > 260 ? 260.0 : availableWidth;
+    // 菜单内容左右各保留 14 像素内边距，选项宽度直接使用剩余空间计算。
+    final contentWidth = panelWidth - 28;
     return MenuAnchor(
       controller: _layoutMenuController,
       style: MenuStyle(
@@ -1018,6 +1030,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
             child: _buildQueryOptionGrid(
               options: layoutOptions,
               selected: _imageStyle,
+              availableWidth: contentWidth,
               onSelected: (value) {
                 if (value == _imageStyle) return;
                 _layoutMenuController.close();
@@ -1041,6 +1054,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     required String title,
     required Map<String, String> options,
     required String selected,
+    required double availableWidth,
     required ValueChanged<String> onSelected,
     int columns = 2,
   }) => Padding(
@@ -1053,6 +1067,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         _buildQueryOptionGrid(
           options: options,
           selected: selected,
+          availableWidth: availableWidth,
           onSelected: onSelected,
           columns: columns,
         ),
@@ -1063,53 +1078,53 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   Widget _buildQueryOptionGrid({
     required Map<String, String> options,
     required String selected,
+    required double availableWidth,
     required ValueChanged<String> onSelected,
     int columns = 2,
-  }) => LayoutBuilder(
-    builder: (context, constraints) {
-      const spacing = 8.0;
-      final itemWidth = (constraints.maxWidth - spacing * (columns - 1)) / columns;
-      final colors = Theme.of(context).colorScheme;
-      return Wrap(
-        spacing: spacing,
-        runSpacing: spacing,
-        children: options.entries.map((entry) {
-          final active = entry.key == selected;
-          return SizedBox(
-            width: itemWidth,
-            child: OutlinedButton(
-              onPressed: _loading ? null : () => onSelected(entry.key),
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size(0, 36),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                alignment: Alignment.centerLeft,
-                foregroundColor: active ? colors.primary : colors.onSurface,
-                backgroundColor: active ? colors.primaryContainer.withValues(alpha: 0.45) : null,
-                side: BorderSide(color: active ? colors.primary : colors.outlineVariant),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      entry.value,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 13),
-                    ),
-                  ),
-                  if (active) ...[
-                    const SizedBox(width: 6),
-                    const Icon(Icons.check, size: 16),
-                  ],
-                ],
-              ),
+  }) {
+    const spacing = 8.0;
+    // 避免在 MenuAnchor 的 IntrinsicWidth 测量期间使用 LayoutBuilder。
+    final itemWidth = (availableWidth - spacing * (columns - 1)) / columns;
+    final colors = Theme.of(context).colorScheme;
+    return Wrap(
+      spacing: spacing,
+      runSpacing: spacing,
+      children: options.entries.map((entry) {
+        final active = entry.key == selected;
+        return SizedBox(
+          width: itemWidth,
+          child: OutlinedButton(
+            onPressed: _loading ? null : () => onSelected(entry.key),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(0, 36),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              alignment: Alignment.centerLeft,
+              foregroundColor: active ? colors.primary : colors.onSurface,
+              backgroundColor: active ? colors.primaryContainer.withValues(alpha: 0.45) : null,
+              side: BorderSide(color: active ? colors.primary : colors.outlineVariant),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
-          );
-        }).toList(),
-      );
-    },
-  );
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    entry.value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                ),
+                if (active) ...[
+                  const SizedBox(width: 6),
+                  const Icon(Icons.check, size: 16),
+                ],
+              ],
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
 
   Widget _buildQueryPill({
     required String label,
