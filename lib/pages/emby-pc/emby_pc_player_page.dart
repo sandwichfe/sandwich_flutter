@@ -30,6 +30,8 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
   final List<StreamSubscription<dynamic>> _playerSubscriptions = [];
   bool _loading = true;
   bool _muted = false;
+  double _volume = 100.0;
+  double _volumeBeforeMute = 100.0;
   String _error = '';
   bool _playerReady = false;
   bool _isPlaying = false;
@@ -71,6 +73,18 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
     _playerSubscriptions.add(
       _player.stream.duration.listen((duration) {
         if (mounted) setState(() => _duration = duration);
+      }),
+    );
+    // 音量状态由播放器事件统一回写，保证按钮、滑条和底层实际音量一致。
+    _playerSubscriptions.add(
+      _player.stream.volume.listen((volume) {
+        if (!mounted) return;
+        final safeVolume = volume.clamp(0.0, 100.0).toDouble();
+        setState(() {
+          _volume = safeVolume;
+          _muted = safeVolume <= 0;
+          if (safeVolume > 0) _volumeBeforeMute = safeVolume;
+        });
       }),
     );
     _playerSubscriptions.add(
@@ -173,9 +187,26 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
 
   Future<void> _toggleMute() async {
     if (!_playerReady) return;
-    _muted = !_muted;
-    await _player.setVolume(_muted ? 0.0 : 100.0);
-    if (mounted) setState(() {});
+    // 取消静音时恢复用户最近一次设置的音量，不强制跳回满音量。
+    final targetVolume = _muted ? _volumeBeforeMute : 0.0;
+    setState(() {
+      if (!_muted && _volume > 0) _volumeBeforeMute = _volume;
+      _volume = targetVolume;
+      _muted = targetVolume <= 0;
+    });
+    await _player.setVolume(targetVolume);
+  }
+
+  Future<void> _setVolume(double volume) async {
+    if (!_playerReady) return;
+    final safeVolume = volume.clamp(0.0, 100.0).toDouble();
+    // 拖动到零时同步显示静音，重新增大音量时恢复对应音量图标。
+    setState(() {
+      _volume = safeVolume;
+      _muted = safeVolume <= 0;
+      if (safeVolume > 0) _volumeBeforeMute = safeVolume;
+    });
+    await _player.setVolume(safeVolume);
   }
 
   @override
@@ -241,8 +272,11 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
                         thumbnailPreviewController:
                             _thumbnailPreviewController,
                         muted: _muted,
+                        volume: _volume,
                         onTogglePlay: _togglePlay,
                         onToggleMute: _toggleMute,
+                        onVolumeChanged:
+                            (value) => unawaited(_setVolume(value)),
                       ),
                 ),
               ),
@@ -392,8 +426,10 @@ class _PlayerControls extends StatelessWidget {
   final bool isPlaying;
   final _ThumbnailPreviewController thumbnailPreviewController;
   final bool muted;
+  final double volume;
   final VoidCallback onTogglePlay;
   final VoidCallback onToggleMute;
+  final ValueChanged<double> onVolumeChanged;
 
   const _PlayerControls({
     required this.player,
@@ -402,8 +438,10 @@ class _PlayerControls extends StatelessWidget {
     required this.isPlaying,
     required this.thumbnailPreviewController,
     required this.muted,
+    required this.volume,
     required this.onTogglePlay,
     required this.onToggleMute,
+    required this.onVolumeChanged,
   });
 
   @override
@@ -439,24 +477,30 @@ class _PlayerControls extends StatelessWidget {
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final compact = constraints.maxWidth < 520;
-                final horizontalPadding = compact ? 8.0 : 20.0;
+                final horizontalPadding = compact ? 4.0 : 8.0;
                 final timeText =
                     constraints.maxWidth < 380
                         ? _formatDuration(position)
                         : '${_formatDuration(position)} / '
                             '${_formatDuration(duration)}';
-                return Padding(
-                  padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _PreviewTimelineBar(
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // 时间轴只保留极窄的窗口边距，下方按钮继续使用舒适的操作间距。
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      child: _PreviewTimelineBar(
                         position: position,
                         duration: duration,
                         thumbnailController: thumbnailPreviewController,
                         onSeek: (value) => unawaited(player.seek(value)),
                       ),
-                      Row(
+                    ),
+                    Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: horizontalPadding,
+                      ),
+                      child: Row(
                         children: [
                           IconButton(
                             tooltip: isPlaying ? '暂停' : '播放',
@@ -479,35 +523,37 @@ class _PlayerControls extends StatelessWidget {
                             ),
                           ),
                           const Spacer(),
-                          // 声音和全屏等播放器能力统一放在右侧操作区。
-                          IconButton(
-                            tooltip: muted ? '取消静音' : '静音',
-                            color: Colors.white,
-                            visualDensity: VisualDensity.compact,
-                            onPressed: onToggleMute,
-                            icon: Icon(
-                              muted
-                                  ? Icons.volume_off_rounded
-                                  : Icons.volume_up_rounded,
-                            ),
-                          ),
-                          // 使用播放器自带的全屏路由，并同步桌面端的原生窗口状态。
-                          IconButton(
-                            tooltip: isFullscreen(context) ? '退出全屏' : '全屏',
-                            color: Colors.white,
-                            visualDensity: VisualDensity.compact,
-                            onPressed:
-                                () => unawaited(toggleFullscreen(context)),
-                            icon: Icon(
-                              isFullscreen(context)
-                                  ? Icons.fullscreen_exit_rounded
-                                  : Icons.fullscreen_rounded,
-                            ),
+                          // 右侧操作区保持贴右；音量悬浮后向左展开，不挤动全屏按钮。
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _VolumeControl(
+                                volume: volume,
+                                muted: muted,
+                                compact: compact,
+                                onToggleMute: onToggleMute,
+                                onVolumeChanged: onVolumeChanged,
+                              ),
+                              // 使用播放器自带的全屏路由，并同步桌面端的原生窗口状态。
+                              IconButton(
+                                tooltip:
+                                    isFullscreen(context) ? '退出全屏' : '全屏',
+                                color: Colors.white,
+                                visualDensity: VisualDensity.compact,
+                                onPressed:
+                                    () => unawaited(toggleFullscreen(context)),
+                                icon: Icon(
+                                  isFullscreen(context)
+                                      ? Icons.fullscreen_exit_rounded
+                                      : Icons.fullscreen_rounded,
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 );
               },
             ),
@@ -522,6 +568,98 @@ class _PlayerControls extends StatelessWidget {
     final minutes = value.inMinutes.remainder(60).toString().padLeft(2, '0');
     final seconds = value.inSeconds.remainder(60).toString().padLeft(2, '0');
     return hours > 0 ? '$hours:$minutes:$seconds' : '$minutes:$seconds';
+  }
+}
+
+class _VolumeControl extends StatefulWidget {
+  final double volume;
+  final bool muted;
+  final bool compact;
+  final VoidCallback onToggleMute;
+  final ValueChanged<double> onVolumeChanged;
+
+  const _VolumeControl({
+    required this.volume,
+    required this.muted,
+    required this.compact,
+    required this.onToggleMute,
+    required this.onVolumeChanged,
+  });
+
+  @override
+  State<_VolumeControl> createState() => _VolumeControlState();
+}
+
+class _VolumeControlState extends State<_VolumeControl> {
+  bool _hovering = false;
+
+  IconData get _volumeIcon {
+    if (widget.muted || widget.volume <= 0) return Icons.volume_off_rounded;
+    if (widget.volume < 50) return Icons.volume_down_rounded;
+    return Icons.volume_up_rounded;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sliderWidth = widget.compact ? 68.0 : 84.0;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOutCubic,
+        width: 48 + (_hovering ? sliderWidth : 0),
+        height: 48,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            // 桌面端悬浮时向左展开音量条，按钮位置保持不动。
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              curve: Curves.easeOutCubic,
+              width: _hovering ? sliderWidth : 0,
+              child: ClipRect(
+                child: OverflowBox(
+                  alignment: Alignment.centerRight,
+                  minWidth: sliderWidth,
+                  maxWidth: sliderWidth,
+                  child: SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      trackHeight: 2,
+                      activeTrackColor: Colors.white,
+                      inactiveTrackColor: Colors.white30,
+                      thumbColor: Colors.white,
+                      thumbShape: const RoundSliderThumbShape(
+                        enabledThumbRadius: 4,
+                        elevation: 0,
+                        pressedElevation: 0,
+                      ),
+                      overlayShape: SliderComponentShape.noOverlay,
+                    ),
+                    child: Slider(
+                      value:
+                          (widget.muted ? 0.0 : widget.volume).clamp(
+                            0.0,
+                            100.0,
+                          ).toDouble(),
+                      max: 100,
+                      onChanged: widget.onVolumeChanged,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            IconButton(
+              tooltip: widget.muted ? '取消静音' : '静音',
+              color: Colors.white,
+              visualDensity: VisualDensity.compact,
+              onPressed: widget.onToggleMute,
+              icon: Icon(_volumeIcon),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -543,7 +681,8 @@ class _PreviewTimelineBar extends StatefulWidget {
 }
 
 class _PreviewTimelineBarState extends State<_PreviewTimelineBar> {
-  static const _sliderHorizontalInset = 24.0;
+  // 无涟漪的小尺寸滑块只需为圆点半径预留空间，使轨道接近铺满窗口。
+  static const _sliderHorizontalInset = 4.5;
 
   bool _previewVisible = false;
   double _previewRatio = 0;
@@ -628,7 +767,7 @@ class _PreviewTimelineBarState extends State<_PreviewTimelineBar> {
     final current =
         widget.position.inMilliseconds.toDouble().clamp(0, max).toDouble();
     return SizedBox(
-      height: 44,
+      height: 34,
       child: LayoutBuilder(
         builder: (context, constraints) {
           final width = constraints.maxWidth;
@@ -649,22 +788,51 @@ class _PreviewTimelineBarState extends State<_PreviewTimelineBar> {
               clipBehavior: Clip.none,
               alignment: Alignment.center,
               children: [
-                Slider(
-                  value: current,
-                  max: max,
-                  onChangeStart: (value) => _showPreview(value / max),
-                  onChanged: (value) {
-                    _showPreview(value / max);
-                    widget.onSeek(Duration(milliseconds: value.round()));
-                  },
-                  onChangeEnd: (_) => _hidePreview(),
+                SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    // 细轨道、小圆点和低对比未播放区，保持克制的桌面播放器观感。
+                    trackHeight: 2.5,
+                    activeTrackColor: Colors.white,
+                    inactiveTrackColor: Colors.white30,
+                    disabledActiveTrackColor: Colors.white38,
+                    disabledInactiveTrackColor: Colors.white12,
+                    thumbColor: Colors.white,
+                    thumbShape: const RoundSliderThumbShape(
+                      enabledThumbRadius: 4.5,
+                      disabledThumbRadius: 0,
+                      elevation: 0,
+                      pressedElevation: 0,
+                    ),
+                    overlayShape: SliderComponentShape.noOverlay,
+                  ),
+                  child: Slider(
+                    value: current,
+                    max: max,
+                    onChangeStart:
+                        widget.duration > Duration.zero
+                            ? (value) => _showPreview(value / max)
+                            : null,
+                    onChanged:
+                        widget.duration > Duration.zero
+                            ? (value) {
+                              _showPreview(value / max);
+                              widget.onSeek(
+                                Duration(milliseconds: value.round()),
+                              );
+                            }
+                            : null,
+                    onChangeEnd:
+                        widget.duration > Duration.zero
+                            ? (_) => _hidePreview()
+                            : null,
+                  ),
                 ),
                 if (_previewVisible &&
                     _activeFrameBytes != null &&
                     previewWidth > 0)
                   Positioned(
                     left: _previewLeft(width, previewWidth),
-                    bottom: 48,
+                    bottom: 38,
                     child: IgnorePointer(
                       child: _ProgressPreview(
                         width: previewWidth,
