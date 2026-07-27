@@ -57,6 +57,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   final _searchController = TextEditingController();
   final _yearController = TextEditingController();
   final _scrollController = ScrollController();
+  final _layoutMenuController = MenuController();
   List<EmbyPcItem> _libraries = const [];
   List<EmbyPcItem> _items = const [];
   final Map<String, int?> _libraryCounts = {};
@@ -78,6 +79,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   bool _favoritePeopleLoading = false;
   bool _favoriteMovieLoading = false;
   bool _sidebarCollapsed = false;
+  bool _searchExpanded = false;
   String _error = '';
   int _queryVersion = 0;
   final Set<String> _favoriteBusyIds = {};
@@ -279,6 +281,34 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     await _loadItems(reset: true);
   }
 
+  // 搜索入口默认保持收起，展开后再将焦点交给输入框。
+  void _expandSearch() {
+    if (_loading || _searchExpanded) return;
+    setState(() => _searchExpanded = true);
+  }
+
+  void _collapseSearch() {
+    if (!_searchExpanded) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() => _searchExpanded = false);
+  }
+
+  Future<void> _clearSearch() async {
+    if (_searchController.text.isEmpty) return;
+    setState(_searchController.clear);
+    await _applyQuery();
+  }
+
+  // 重置查询时恢复默认排序，但保留用户当前选择的图片布局。
+  Future<void> _resetQuery() async {
+    setState(() {
+      _resetQueryControllers();
+      _sortBy = 'PremiereDate';
+      _sortOrder = 'Descending';
+    });
+    await _applyQuery();
+  }
+
   Future<void> _toggleFavorite(EmbyPcItem item) async {
     if (_favoriteBusyIds.contains(item.id)) return;
     setState(() => _favoriteBusyIds.add(item.id));
@@ -367,7 +397,9 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         final compact = constraints.maxWidth < 820;
         return Scaffold(
           appBar: AppBar(
-            title: Text(_pageTitle),
+            title: compact && _searchExpanded
+                ? _buildExpandedSearchField()
+                : Text(_pageTitle, maxLines: 1, overflow: TextOverflow.ellipsis),
             leading: compact
                 ? PopupMenuButton<String>(
                     tooltip: '切换内容',
@@ -394,31 +426,9 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                   )
                 : null,
             actions: [
-              if (!compact)
-                IconButton(
-                  tooltip: '调整媒体库顺序',
-                  onPressed: _openOrderDialog,
-                  icon: const Icon(Icons.swap_vert),
-                ),
-              IconButton(
-                tooltip: '刷新',
-                onPressed: _loading ? null : () => _loadItems(reset: true),
-                icon: const Icon(Icons.refresh),
-              ),
-              PopupMenuButton<String>(
-                tooltip: '账号',
-                onSelected: (value) {
-                  if (value == 'logout') _logout();
-                },
-                itemBuilder: (_) => [
-                  PopupMenuItem(
-                    enabled: false,
-                    child: Text(EmbyPcService.instance.currentUserName),
-                  ),
-                  const PopupMenuDivider(),
-                  const PopupMenuItem(value: 'logout', child: Text('退出登录')),
-                ],
-              ),
+              if (!compact || !_searchExpanded) _buildToolbarSearchAction(context),
+              _buildAccountMenu(context),
+              const SizedBox(width: 10),
             ],
           ),
           body: _error.isNotEmpty && _libraries.isEmpty
@@ -442,6 +452,165 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       if (library.id == _activeId) return library.name;
     }
     return '媒体库';
+  }
+
+  Widget _buildToolbarSearchAction(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    if (_searchExpanded) {
+      final searchWidth = (MediaQuery.sizeOf(context).width * 0.36).clamp(320.0, 520.0).toDouble();
+      return Padding(
+        padding: const EdgeInsets.only(right: 10),
+        child: _buildExpandedSearchField(width: searchWidth),
+      );
+    }
+
+    final hasKeyword = _searchController.text.trim().isNotEmpty;
+    return Padding(
+      padding: const EdgeInsets.only(right: 10),
+      child: IconButton(
+        tooltip: '搜索媒体',
+        onPressed: _loading ? null : _expandSearch,
+        style: IconButton.styleFrom(
+          fixedSize: const Size.square(44),
+          foregroundColor: hasKeyword ? colors.primary : colors.onSurfaceVariant,
+          backgroundColor: hasKeyword ? colors.primaryContainer.withValues(alpha: 0.45) : null,
+          side: BorderSide(color: hasKeyword ? colors.primary : colors.outlineVariant),
+        ),
+        icon: const Icon(Icons.search, size: 20),
+      ),
+    );
+  }
+
+  Widget _buildExpandedSearchField({double? width}) {
+    final colors = Theme.of(context).colorScheme;
+    final field = SizedBox(
+      height: 40,
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _searchController,
+              autofocus: true,
+              enabled: !_loading,
+              onChanged: (_) => setState(() {}),
+              onSubmitted: (_) => _applyQuery(),
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: '搜索标题、文件名',
+                prefixIcon: const Icon(Icons.search, size: 20),
+                suffixIcon: _searchController.text.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: '清除搜索',
+                        onPressed: _loading ? null : _clearSearch,
+                        icon: const Icon(Icons.clear, size: 18),
+                      ),
+                border: const OutlineInputBorder(
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(999),
+                    bottomLeft: Radius.circular(999),
+                  ),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: colors.outlineVariant),
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(999),
+                    bottomLeft: Radius.circular(999),
+                  ),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: colors.primary),
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(999),
+                    bottomLeft: Radius.circular(999),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 86,
+            height: 40,
+            child: FilledButton.icon(
+              onPressed: _loading ? null : _applyQuery,
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.only(
+                    topRight: Radius.circular(999),
+                    bottomRight: Radius.circular(999),
+                  ),
+                ),
+              ),
+              icon: const Icon(Icons.search, size: 18),
+              label: const Text('搜索'),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    // 点击搜索区域外时自动收起，已提交的关键词仍会保留并高亮搜索入口。
+    return TapRegion(
+      onTapOutside: (_) => _collapseSearch(),
+      child: width == null ? field : SizedBox(width: width, child: field),
+    );
+  }
+
+  Widget _buildAccountMenu(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    // 刷新与媒体库排序收进用户菜单，顶部只保留搜索和用户两个主要入口。
+    return SizedBox.square(
+      dimension: 44,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: colors.outlineVariant),
+        ),
+        child: PopupMenuButton<String>(
+          tooltip: '账号',
+          padding: EdgeInsets.zero,
+          icon: const Icon(Icons.person_outline, size: 20),
+          onSelected: (value) {
+            if (value == 'refresh') {
+              _loadItems(reset: true);
+            } else if (value == 'order') {
+              _openOrderDialog();
+            } else if (value == 'logout') {
+              _logout();
+            }
+          },
+          itemBuilder: (_) => [
+            PopupMenuItem(
+              enabled: false,
+              child: Text(EmbyPcService.instance.currentUserName),
+            ),
+            const PopupMenuDivider(),
+            PopupMenuItem(
+              value: 'refresh',
+              enabled: !_loading,
+              child: const ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.refresh),
+                title: Text('刷新'),
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'order',
+              child: ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.swap_vert),
+                title: Text('调整媒体库顺序'),
+              ),
+            ),
+            const PopupMenuDivider(),
+            const PopupMenuItem(value: 'logout', child: Text('退出登录')),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildSidebar(BuildContext context) {
@@ -526,7 +695,6 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   }
 
   Widget _buildContent(BuildContext context) {
-    if (_loading && _items.isEmpty) return const Center(child: CircularProgressIndicator());
     return Column(
       children: [
         _buildToolbar(context),
@@ -538,33 +706,35 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
             ],
           ),
         Expanded(
-          child: _items.isEmpty
-              ? const _EmptyState()
-              : GridView.builder(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
-                  gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-                    maxCrossAxisExtent: _imageStyle == 'backdrop' ? 320 : 220,
-                    crossAxisSpacing: 14,
-                    mainAxisSpacing: 14,
-                    childAspectRatio: _imageStyle == 'backdrop' ? 1.38 : 0.70,
-                  ),
-                  itemCount: _items.length + (_loadingMore ? 1 : 0),
-                  itemBuilder: (context, index) {
-                    if (index >= _items.length) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    final item = _items[index];
-                    return EmbyPcMediaTile(
-                      item: item,
-                      imageStyle: _imageStyle,
-                      favoriteBusy: _favoriteBusyIds.contains(item.id),
-                      onOpen: () => _openItem(item),
-                      onPlay: _view == 'favorite-people' ? null : () => _playItem(item),
-                      onFavorite: () => _toggleFavorite(item),
-                    );
-                  },
-                ),
+          child: _loading && _items.isEmpty
+              ? const Center(child: CircularProgressIndicator())
+              : _items.isEmpty
+                  ? const _EmptyState()
+                  : GridView.builder(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
+                      gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                        maxCrossAxisExtent: _imageStyle == 'backdrop' ? 320 : 220,
+                        crossAxisSpacing: 14,
+                        mainAxisSpacing: 14,
+                        childAspectRatio: _imageStyle == 'backdrop' ? 1.38 : 0.70,
+                      ),
+                      itemCount: _items.length + (_loadingMore ? 1 : 0),
+                      itemBuilder: (context, index) {
+                        if (index >= _items.length) {
+                          return const Center(child: CircularProgressIndicator());
+                        }
+                        final item = _items[index];
+                        return EmbyPcMediaTile(
+                          item: item,
+                          imageStyle: _imageStyle,
+                          favoriteBusy: _favoriteBusyIds.contains(item.id),
+                          onOpen: () => _openItem(item),
+                          onPlay: _view == 'favorite-people' ? null : () => _playItem(item),
+                          onFavorite: () => _toggleFavorite(item),
+                        );
+                      },
+                    ),
         ),
       ],
     );
@@ -572,176 +742,402 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
 
   Widget _buildToolbar(BuildContext context) {
     final compact = MediaQuery.sizeOf(context).width < 720;
+    final controls = Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: [
+        _buildFilterMenu(context),
+        _buildSortMenu(context),
+        _buildLayoutMenu(context),
+        _buildQueryPill(
+          label: '重置',
+          onPressed: _loading ? null : _resetQuery,
+        ),
+      ],
+    );
+    final total = Text(
+      _mediaTotalText,
+      textAlign: TextAlign.right,
+      style: TextStyle(
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+        fontSize: 13,
+      ),
+    );
+
     return Material(
       color: Theme.of(context).colorScheme.surface,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 14, 18, 8),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _searchController,
-                    onSubmitted: (_) => _applyQuery(),
-                    decoration: InputDecoration(
-                      isDense: true,
-                      hintText: '搜索媒体',
-                      prefixIcon: const Icon(Icons.search),
-                      suffixIcon: _searchController.text.isEmpty
-                          ? null
-                          : IconButton(
-                              tooltip: '清除搜索',
-                              onPressed: () {
-                                _searchController.clear();
-                                _applyQuery();
-                                setState(() {});
-                              },
-                              icon: const Icon(Icons.clear),
-                            ),
-                      border: const OutlineInputBorder(),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                FilledButton.icon(
-                  onPressed: _applyQuery,
-                  icon: const Icon(Icons.search),
-                  label: Text(compact ? '搜索' : '应用'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                _select<String>(
-                  value: _itemType,
-                  label: '类型',
-                  options: const {'': '全部类型', 'Movie': '电影', 'Series': '剧集', 'Video': '视频'},
-                  onChanged: (value) {
-                    setState(() => _itemType = value ?? '');
-                    _applyQuery();
-                  },
-                ),
-                if (_view != 'favorite-movies' && _view != 'favorite-people')
-                  _select<String>(
-                    value: _statusFilter,
-                    label: '观看',
-                    options: const {
-                      '': '全部状态',
-                      'IsUnplayed': '未观看',
-                      'IsPlayed': '已观看',
-                      'IsResumable': '可继续',
-                    },
-                    onChanged: (value) {
-                      setState(() => _statusFilter = value ?? '');
-                      _applyQuery();
-                    },
-                  ),
-                if (_view != 'favorite-movies' && _view != 'favorite-people')
-                  _select<String>(
-                    value: _markFilter,
-                    label: '偏好',
-                    options: const {'': '全部偏好', 'IsFavorite': '收藏', 'Likes': '喜欢', 'Dislikes': '不喜欢'},
-                    onChanged: (value) {
-                      setState(() => _markFilter = value ?? '');
-                      _applyQuery();
-                    },
-                  ),
-                if (_view != 'favorite-movies' && _view != 'favorite-people')
-                  _select<String>(
-                    value: _videoType,
-                    label: '视频源',
-                    options: const {
-                      '': '全部视频',
-                      'videofile': '视频文件',
-                      'dvd': 'DVD',
-                      'bluray': '蓝光',
-                      'iso': 'ISO',
-                    },
-                    onChanged: (value) {
-                      setState(() => _videoType = value ?? '');
-                      _applyQuery();
-                    },
-                  ),
-                _select<String>(
-                  value: _sortBy,
-                  label: '排序',
-                  options: const {
-                    'CommunityRating': '评分',
-                    'Height': '分辨率',
-                    'DateCreated': '加入日期',
-                    'PremiereDate': '发行日期',
-                    'DatePlayed': '播放日期',
-                    'Runtime': '播放时长',
-                    'SortName': '文件名',
-                  },
-                  onChanged: (value) {
-                    setState(() => _sortBy = value ?? _sortBy);
-                    _applyQuery();
-                  },
-                ),
-                SegmentedButton<String>(
-                  segments: const [
-                    ButtonSegment(value: 'Descending', icon: Icon(Icons.south), label: Text('降序')),
-                    ButtonSegment(value: 'Ascending', icon: Icon(Icons.north), label: Text('升序')),
-                  ],
-                  selected: {_sortOrder},
-                  onSelectionChanged: (value) {
-                    setState(() => _sortOrder = value.first);
-                    _applyQuery();
-                  },
-                ),
-                SegmentedButton<String>(
-                  segments: const [
-                    ButtonSegment(value: 'backdrop', icon: Icon(Icons.view_agenda_outlined), label: Text('背景图')),
-                    ButtonSegment(value: 'poster', icon: Icon(Icons.grid_view), label: Text('海报')),
-                  ],
-                  selected: {_imageStyle},
-                  onSelectionChanged: (value) {
-                    setState(() => _imageStyle = value.first);
-                    _applyQuery();
-                  },
-                ),
-                SizedBox(
-                  width: 112,
-                  child: TextField(
-                    controller: _yearController,
-                    keyboardType: TextInputType.number,
-                    onSubmitted: (_) => _applyQuery(),
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      labelText: '年份',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(18, 8, 18, 14),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+          ),
         ),
+        // 窄屏时加载信息独占一行，避免与查询按钮相互挤压。
+        child: compact
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  controls,
+                  const SizedBox(height: 10),
+                  Align(alignment: Alignment.centerRight, child: total),
+                ],
+              )
+            : Row(
+                children: [
+                  Expanded(child: controls),
+                  const SizedBox(width: 12),
+                  total,
+                ],
+              ),
       ),
     );
   }
 
-  Widget _select<T>({
-    required String value,
-    required String label,
+  String get _mediaTotalText {
+    if (_loading && _items.isEmpty) return '加载中';
+    final loadingSuffix = _loadingMore ? '，加载中...' : '';
+    if (_total > 0) return '已加载 ${_items.length} / $_total 项$loadingSuffix';
+    return '共 ${_items.length} 项$loadingSuffix';
+  }
+
+  String get _filterButtonText {
+    const itemTypes = {'Movie': '电影', 'Series': '剧集', 'Video': '视频'};
+    const statuses = {'IsUnplayed': '未观看', 'IsPlayed': '已观看', 'IsResumable': '可继续'};
+    const marks = {'IsFavorite': '收藏', 'Likes': '喜欢', 'Dislikes': '不喜欢'};
+    const videoTypes = {'videofile': '视频文件', 'dvd': 'DVD', 'bluray': '蓝光', 'iso': 'ISO'};
+    final selected = <String?>[
+      itemTypes[_itemType],
+      statuses[_statusFilter],
+      marks[_markFilter],
+      videoTypes[_videoType],
+      if (_yearController.text.trim().isNotEmpty) _yearController.text.trim(),
+    ].whereType<String>().toList();
+    return selected.isEmpty ? '全部筛选' : selected.join(' / ');
+  }
+
+  Widget _buildFilterMenu(BuildContext context) {
+    const itemTypes = {'': '全部类型', 'Movie': '电影', 'Series': '剧集', 'Video': '视频'};
+    const statuses = {
+      '': '全部状态',
+      'IsUnplayed': '未观看',
+      'IsPlayed': '已观看',
+      'IsResumable': '可继续',
+    };
+    const marks = {'': '全部偏好', 'IsFavorite': '收藏', 'Likes': '喜欢', 'Dislikes': '不喜欢'};
+    const videoTypes = {
+      '': '全部视频',
+      'videofile': '视频文件',
+      'dvd': 'DVD',
+      'bluray': '蓝光',
+      'iso': 'ISO',
+    };
+    final availableWidth = MediaQuery.sizeOf(context).width - 24;
+    final panelWidth = availableWidth > 420 ? 420.0 : availableWidth;
+    final showAdvancedFilters = _view != 'favorite-movies' && _view != 'favorite-people';
+
+    // 多组低频筛选集中放入弹出面板，选中后仍按原逻辑立即刷新列表。
+    return MenuAnchor(
+      style: MenuStyle(
+        padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+        maximumSize: WidgetStatePropertyAll(Size(panelWidth, 560)),
+      ),
+      menuChildren: [
+        SizedBox(
+          width: panelWidth,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 520),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildQueryGroup(
+                    title: '类型',
+                    options: itemTypes,
+                    selected: _itemType,
+                    onSelected: (value) {
+                      if (value == _itemType) return;
+                      setState(() => _itemType = value);
+                      _applyQuery();
+                    },
+                  ),
+                  if (showAdvancedFilters) ...[
+                    _buildQueryGroup(
+                      title: '播放状态',
+                      options: statuses,
+                      selected: _statusFilter,
+                      onSelected: (value) {
+                        if (value == _statusFilter) return;
+                        setState(() => _statusFilter = value);
+                        _applyQuery();
+                      },
+                    ),
+                    _buildQueryGroup(
+                      title: '收藏偏好',
+                      options: marks,
+                      selected: _markFilter,
+                      onSelected: (value) {
+                        if (value == _markFilter) return;
+                        setState(() => _markFilter = value);
+                        _applyQuery();
+                      },
+                    ),
+                    _buildQueryGroup(
+                      title: '视频类型',
+                      options: videoTypes,
+                      selected: _videoType,
+                      onSelected: (value) {
+                        if (value == _videoType) return;
+                        setState(() => _videoType = value);
+                        _applyQuery();
+                      },
+                    ),
+                  ],
+                  const Text(
+                    '发行年份',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: SizedBox(
+                      width: 160,
+                      child: TextField(
+                        controller: _yearController,
+                        enabled: !_loading,
+                        keyboardType: TextInputType.number,
+                        onChanged: (_) => setState(() {}),
+                        onSubmitted: (_) => _applyQuery(),
+                        decoration: InputDecoration(
+                          isDense: true,
+                          hintText: '年份',
+                          suffixIcon: IconButton(
+                            tooltip: '应用年份',
+                            onPressed: _loading ? null : _applyQuery,
+                            icon: const Icon(Icons.check, size: 18),
+                          ),
+                          border: const OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+      builder: (context, controller, child) => _buildQueryPill(
+        label: '筛选',
+        value: _filterButtonText,
+        onPressed: _loading
+            ? null
+            : () => controller.isOpen ? controller.close() : controller.open(),
+      ),
+    );
+  }
+
+  Widget _buildSortMenu(BuildContext context) {
+    const sortOptions = {
+      'CommunityRating': '评分',
+      'Height': '分辨率',
+      'DateCreated': '加入日期',
+      'PremiereDate': '发行日期',
+      'DatePlayed': '播放日期',
+      'Runtime': '播放时长',
+      'SortName': '文件名',
+    };
+    const orderOptions = {'Descending': '降序', 'Ascending': '升序'};
+    final availableWidth = MediaQuery.sizeOf(context).width - 24;
+    final panelWidth = availableWidth > 460 ? 460.0 : availableWidth;
+
+    return MenuAnchor(
+      style: MenuStyle(
+        padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+        maximumSize: WidgetStatePropertyAll(Size(panelWidth, 520)),
+      ),
+      menuChildren: [
+        SizedBox(
+          width: panelWidth,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildQueryGroup(
+                  title: '排序字段',
+                  options: sortOptions,
+                  selected: _sortBy,
+                  columns: panelWidth >= 400 ? 3 : 2,
+                  onSelected: (value) {
+                    if (value == _sortBy) return;
+                    setState(() => _sortBy = value);
+                    _applyQuery();
+                  },
+                ),
+                _buildQueryGroup(
+                  title: '顺序',
+                  options: orderOptions,
+                  selected: _sortOrder,
+                  onSelected: (value) {
+                    if (value == _sortOrder) return;
+                    setState(() => _sortOrder = value);
+                    _applyQuery();
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+      builder: (context, controller, child) => _buildQueryPill(
+        label: '排序',
+        onPressed: _loading
+            ? null
+            : () => controller.isOpen ? controller.close() : controller.open(),
+      ),
+    );
+  }
+
+  Widget _buildLayoutMenu(BuildContext context) {
+    const layoutOptions = {'backdrop': '背景图', 'poster': '海报'};
+    final availableWidth = MediaQuery.sizeOf(context).width - 24;
+    final panelWidth = availableWidth > 260 ? 260.0 : availableWidth;
+    return MenuAnchor(
+      controller: _layoutMenuController,
+      style: MenuStyle(
+        padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+        maximumSize: WidgetStatePropertyAll(Size(panelWidth, 220)),
+      ),
+      menuChildren: [
+        SizedBox(
+          width: panelWidth,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: _buildQueryOptionGrid(
+              options: layoutOptions,
+              selected: _imageStyle,
+              onSelected: (value) {
+                if (value == _imageStyle) return;
+                _layoutMenuController.close();
+                setState(() => _imageStyle = value);
+                _applyQuery();
+              },
+            ),
+          ),
+        ),
+      ],
+      builder: (context, controller, child) => _buildQueryPill(
+        label: '布局',
+        onPressed: _loading
+            ? null
+            : () => controller.isOpen ? controller.close() : controller.open(),
+      ),
+    );
+  }
+
+  Widget _buildQueryGroup({
+    required String title,
     required Map<String, String> options,
-    required ValueChanged<String?> onChanged,
-  }) => SizedBox(
-    width: 146,
-    child: DropdownButtonFormField<String>(
-      value: options.containsKey(value) ? value : options.keys.first,
-      isDense: true,
-      decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
-      items: options.entries
-          .map((entry) => DropdownMenuItem(value: entry.key, child: Text(entry.value)))
-          .toList(),
-      onChanged: onChanged,
+    required String selected,
+    required ValueChanged<String> onSelected,
+    int columns = 2,
+  }) => Padding(
+    padding: const EdgeInsets.only(bottom: 14),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        _buildQueryOptionGrid(
+          options: options,
+          selected: selected,
+          onSelected: onSelected,
+          columns: columns,
+        ),
+      ],
+    ),
+  );
+
+  Widget _buildQueryOptionGrid({
+    required Map<String, String> options,
+    required String selected,
+    required ValueChanged<String> onSelected,
+    int columns = 2,
+  }) => LayoutBuilder(
+    builder: (context, constraints) {
+      const spacing = 8.0;
+      final itemWidth = (constraints.maxWidth - spacing * (columns - 1)) / columns;
+      final colors = Theme.of(context).colorScheme;
+      return Wrap(
+        spacing: spacing,
+        runSpacing: spacing,
+        children: options.entries.map((entry) {
+          final active = entry.key == selected;
+          return SizedBox(
+            width: itemWidth,
+            child: OutlinedButton(
+              onPressed: _loading ? null : () => onSelected(entry.key),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(0, 36),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                alignment: Alignment.centerLeft,
+                foregroundColor: active ? colors.primary : colors.onSurface,
+                backgroundColor: active ? colors.primaryContainer.withValues(alpha: 0.45) : null,
+                side: BorderSide(color: active ? colors.primary : colors.outlineVariant),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      entry.value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                  ),
+                  if (active) ...[
+                    const SizedBox(width: 6),
+                    const Icon(Icons.check, size: 16),
+                  ],
+                ],
+              ),
+            ),
+          );
+        }).toList(),
+      );
+    },
+  );
+
+  Widget _buildQueryPill({
+    required String label,
+    String? value,
+    required VoidCallback? onPressed,
+  }) => OutlinedButton(
+    onPressed: onPressed,
+    style: OutlinedButton.styleFrom(
+      minimumSize: const Size(112, 38),
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      shape: const StadiumBorder(),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
+        if (value != null) ...[
+          const SizedBox(width: 6),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 160),
+            child: Text(value, maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
+        ],
+        if (label != '重置') ...[
+          const SizedBox(width: 6),
+          const Icon(Icons.keyboard_arrow_down, size: 18),
+        ],
+      ],
     ),
   );
 }
