@@ -216,33 +216,36 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
                   text: '播放器不可用',
                 ),
               )
-              : SizedBox.expand(
-                // Fill the available player area while keeping the video
-                // content at its original aspect ratio.
-                child: Video(
-                  controller: _videoController,
+              : Center(
+                // 让画面、字幕和控制层共享同一宽高比区域，避免控制条宽于实际视频画面。
+                child: AspectRatio(
                   aspectRatio: _aspectRatio,
-                  fit: BoxFit.contain,
-                  // Flutter 字幕上移到控制区上方，避免与进度条和操作按钮重叠。
-                  subtitleViewConfiguration: const SubtitleViewConfiguration(
-                    padding: EdgeInsets.fromLTRB(24, 0, 24, 104),
+                  child: Video(
+                    controller: _videoController,
+                    aspectRatio: _aspectRatio,
+                    fit: BoxFit.contain,
+                    // Flutter 字幕上移到控制区上方，避免与进度条和操作按钮重叠。
+                    subtitleViewConfiguration:
+                        const SubtitleViewConfiguration(
+                          padding: EdgeInsets.fromLTRB(24, 0, 24, 104),
+                        ),
+                    // Render the custom controls inside Video as its only
+                    // control layer instead of stacking a second outer bar.
+                    // 控制层自身占满播放器，再在内部固定到底部，避免 Align 的松约束
+                    // 让进度条、预览框在不同窗口比例下出现错位。
+                    controls:
+                        (_) => _PlayerControls(
+                          player: _player,
+                          position: _position,
+                          duration: _duration,
+                          isPlaying: _isPlaying,
+                          thumbnailPreviewController:
+                              _thumbnailPreviewController,
+                          muted: _muted,
+                          onTogglePlay: _togglePlay,
+                          onToggleMute: _toggleMute,
+                        ),
                   ),
-                  // Render the custom controls inside Video as its only
-                  // control layer instead of stacking a second outer bar.
-                  // 控制层自身占满播放器，再在内部固定到底部，避免 Align 的松约束
-                  // 让进度条、预览框在不同窗口比例下出现错位。
-                  controls:
-                      (_) => _PlayerControls(
-                        player: _player,
-                        position: _position,
-                        duration: _duration,
-                        isPlaying: _isPlaying,
-                        thumbnailPreviewController:
-                            _thumbnailPreviewController,
-                        muted: _muted,
-                        onTogglePlay: _togglePlay,
-                        onToggleMute: _toggleMute,
-                      ),
                 ),
               ),
     );
@@ -478,7 +481,7 @@ class _PlayerControls extends StatelessWidget {
                             ),
                           ),
                           const Spacer(),
-                          // 倍速、字幕、全屏等后续能力统一添加到右侧操作区。
+                          // 声音和全屏等播放器能力统一放在右侧操作区。
                           IconButton(
                             tooltip: muted ? '取消静音' : '静音',
                             color: Colors.white,
@@ -488,6 +491,19 @@ class _PlayerControls extends StatelessWidget {
                               muted
                                   ? Icons.volume_off_rounded
                                   : Icons.volume_up_rounded,
+                            ),
+                          ),
+                          // 使用播放器自带的全屏路由，并同步桌面端的原生窗口状态。
+                          IconButton(
+                            tooltip: isFullscreen(context) ? '退出全屏' : '全屏',
+                            color: Colors.white,
+                            visualDensity: VisualDensity.compact,
+                            onPressed:
+                                () => unawaited(toggleFullscreen(context)),
+                            icon: Icon(
+                              isFullscreen(context)
+                                  ? Icons.fullscreen_exit_rounded
+                                  : Icons.fullscreen_rounded,
                             ),
                           ),
                         ],
