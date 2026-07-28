@@ -60,10 +60,16 @@ class _EmbyPcPersonPageState extends State<EmbyPcPersonPage> {
     if (person == null || _favoriteBusy) return;
     setState(() => _favoriteBusy = true);
     try {
-      final value = await EmbyPcService.instance.setFavorite(person.id, !person.isFavorite);
+      final value = await EmbyPcService.instance.setFavorite(
+        person.id,
+        !person.isFavorite,
+      );
       if (mounted) setState(() => _person = person.copyWith(isFavorite: value));
     } catch (error) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString())));
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.toString())));
     } finally {
       if (mounted) setState(() => _favoriteBusy = false);
     }
@@ -72,45 +78,137 @@ class _EmbyPcPersonPageState extends State<EmbyPcPersonPage> {
   @override
   Widget build(BuildContext context) {
     final person = _person;
+    final colors = Theme.of(context).colorScheme;
+    final reduceMotion =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    final contentDuration =
+        reduceMotion ? Duration.zero : const Duration(milliseconds: 220);
+    final title =
+        person?.name.isNotEmpty == true ? person!.name : widget.personName;
+
+    final Widget pageContent;
+    if (_loading) {
+      pageContent = const Center(
+        key: ValueKey('person-loading'),
+        child: CircularProgressIndicator(),
+      );
+    } else if (_error.isNotEmpty) {
+      pageContent = KeyedSubtree(
+        key: const ValueKey('person-error'),
+        child: _PersonError(message: _error, onRetry: _loadPerson),
+      );
+    } else if (person == null) {
+      pageContent = const Center(
+        key: ValueKey('person-empty'),
+        child: Text('没有可显示的人物资料'),
+      );
+    } else {
+      pageContent = CustomScrollView(
+        key: ValueKey('person-${person.id}'),
+        slivers: [
+          SliverToBoxAdapter(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1180),
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: _PersonContent(
+                    person: person,
+                    items: _items,
+                    favoriteBusy: _favoriteBusy,
+                    onFavorite: _toggleFavorite,
+                    onOpenItem:
+                        (item) => Navigator.of(context).push(
+                          embyPcFadeRoute(
+                            context,
+                            (_) => EmbyPcDetailPage(item: item),
+                          ),
+                        ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
     return Scaffold(
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error.isNotEmpty
-              ? _PersonError(message: _error, onRetry: _loadPerson)
-              : person == null
-                  ? const Center(child: Text('没有可显示的人物资料'))
-                  : CustomScrollView(
-                      slivers: [
-                        // 人物页只保留普通吸顶标题栏，不再展示顶部横向背景图。
-                        SliverAppBar(
-                          pinned: true,
-                          title: Text(
-                            person.name.isEmpty ? widget.personName : person.name,
-                          ),
-                        ),
-                        SliverToBoxAdapter(
-                          child: Center(
-                            child: ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 1180),
-                              child: Padding(
-                                padding: const EdgeInsets.all(24),
-                                child: _PersonContent(
-                                  person: person,
-                                  items: _items,
-                                  favoriteBusy: _favoriteBusy,
-                                  onFavorite: _toggleFavorite,
-                                  onOpenItem: (item) => Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) => EmbyPcDetailPage(item: item),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+      backgroundColor: colors.surface,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // 人物图片仅作为低对比度背景渐显，顶部导航和正文不会随请求整体替换。
+          _PersonBackdrop(
+            person: person,
+            duration:
+                reduceMotion
+                    ? Duration.zero
+                    : const Duration(milliseconds: 260),
+          ),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  colors.surface.withValues(alpha: 0.72),
+                  colors.surface.withValues(alpha: 0.92),
+                  colors.surface.withValues(alpha: 0.99),
+                ],
+                stops: const [0, 0.42, 1],
+              ),
+            ),
+          ),
+          Column(
+            children: [
+              EmbyPcImmersiveTopBar(title: title, loading: _loading),
+              Expanded(
+                child: AnimatedSwitcher(
+                  duration: contentDuration,
+                  switchInCurve: Curves.easeOutCubic,
+                  switchOutCurve: Curves.easeInCubic,
+                  child: pageContent,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PersonBackdrop extends StatelessWidget {
+  final EmbyPcItem? person;
+  final Duration duration;
+
+  const _PersonBackdrop({required this.person, required this.duration});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final currentPerson = person;
+    final url =
+        currentPerson?.hasPrimaryImage == true
+            ? EmbyPcService.instance.imageUrl(currentPerson!.id, maxWidth: 1200)
+            : '';
+    return ExcludeSemantics(
+      child: AnimatedSwitcher(
+        duration: duration,
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        child:
+            url.isEmpty
+                ? ColoredBox(
+                  key: const ValueKey('person-backdrop-empty'),
+                  color: colors.surfaceContainerLowest,
+                )
+                : SizedBox.expand(
+                  key: ValueKey(url),
+                  child: EmbyPcNetworkImage(url: url),
+                ),
+      ),
     );
   }
 }
@@ -136,9 +234,10 @@ class _PersonContent extends StatelessWidget {
       final colors = Theme.of(context).colorScheme;
       final useWideHero = constraints.maxWidth >= 680;
       // 宽屏使用参考页面的大头像，窄屏缩小头像以避免摘要文字溢出。
-      final posterWidth = useWideHero
-          ? 268.0
-          : constraints.maxWidth < 180
+      final posterWidth =
+          useWideHero
+              ? 268.0
+              : constraints.maxWidth < 180
               ? constraints.maxWidth
               : 180.0;
       final poster = SizedBox(
@@ -159,9 +258,13 @@ class _PersonContent extends StatelessWidget {
             child: ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: EmbyPcNetworkImage(
-                url: person.hasPrimaryImage
-                    ? EmbyPcService.instance.imageUrl(person.id, maxWidth: 520)
-                    : '',
+                url:
+                    person.hasPrimaryImage
+                        ? EmbyPcService.instance.imageUrl(
+                          person.id,
+                          maxWidth: 520,
+                        )
+                        : '',
               ),
             ),
           ),
@@ -184,16 +287,16 @@ class _PersonContent extends StatelessWidget {
             Wrap(
               spacing: 14,
               runSpacing: 10,
-              children: facts
-                  .map(
-                    (fact) => Text(
-                      fact,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: colors.onSurfaceVariant,
-                      ),
-                    ),
-                  )
-                  .toList(),
+              children:
+                  facts
+                      .map(
+                        (fact) => Text(
+                          fact,
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(color: colors.onSurfaceVariant),
+                        ),
+                      )
+                      .toList(),
             ),
           ],
           const SizedBox(height: 20),
@@ -209,25 +312,28 @@ class _PersonContent extends StatelessWidget {
                     borderRadius: BorderRadius.circular(10),
                   ),
                 ),
-                child: favoriteBusy
-                    ? const SizedBox.square(
-                        dimension: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Icon(
-                        person.isFavorite
-                            ? Icons.favorite_rounded
-                            : Icons.favorite_border_rounded,
-                        color: person.isFavorite ? colors.error : null,
-                        size: 28,
-                      ),
+                child:
+                    favoriteBusy
+                        ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                        : Icon(
+                          person.isFavorite
+                              ? Icons.favorite_rounded
+                              : Icons.favorite_border_rounded,
+                          color: person.isFavorite ? colors.error : null,
+                          size: 28,
+                        ),
               ),
             ),
           ),
           const SizedBox(height: 28),
           Text(
             person.overview.isEmpty ? '暂无简介' : person.overview,
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.72),
+            style: Theme.of(
+              context,
+            ).textTheme.bodyLarge?.copyWith(height: 1.72),
           ),
         ],
       );
@@ -257,15 +363,19 @@ class _PersonContent extends StatelessWidget {
             LayoutBuilder(
               builder: (context, infoConstraints) {
                 const spacing = 14.0;
-                final cardWidth = infoConstraints.maxWidth >= 560
-                    ? (infoConstraints.maxWidth - spacing) / 2
-                    : infoConstraints.maxWidth;
+                final cardWidth =
+                    infoConstraints.maxWidth >= 560
+                        ? (infoConstraints.maxWidth - spacing) / 2
+                        : infoConstraints.maxWidth;
                 return Wrap(
                   spacing: spacing,
                   runSpacing: spacing,
-                  children: infoCards
-                      .map((card) => SizedBox(width: cardWidth, child: card))
-                      .toList(),
+                  children:
+                      infoCards
+                          .map(
+                            (card) => SizedBox(width: cardWidth, child: card),
+                          )
+                          .toList(),
                 );
               },
             ),
@@ -293,11 +403,12 @@ class _PersonContent extends StatelessWidget {
                 mainAxisSpacing: 14,
                 childAspectRatio: 0.72,
               ),
-              itemBuilder: (context, index) => EmbyPcMediaTile(
-                item: items[index],
-                imageStyle: 'poster',
-                onOpen: () => onOpenItem(items[index]),
-              ),
+              itemBuilder:
+                  (context, index) => EmbyPcMediaTile(
+                    item: items[index],
+                    imageStyle: 'poster',
+                    onOpen: () => onOpenItem(items[index]),
+                  ),
             ),
         ],
       );
@@ -308,8 +419,10 @@ class _PersonContent extends StatelessWidget {
   List<String> _personFacts(EmbyPcItem person) => [
     if (person.type.isNotEmpty) '类型：${_typeLabel(person.type)}',
     if (person.sortName.isNotEmpty) '排序名：${person.sortName}',
-    if (person.premiereDate.isNotEmpty) '首映日期：${_formatDate(person.premiereDate)}',
-    if (person.dateCreated.isNotEmpty) '添加日期：${_formatDate(person.dateCreated)}',
+    if (person.premiereDate.isNotEmpty)
+      '首映日期：${_formatDate(person.premiereDate)}',
+    if (person.dateCreated.isNotEmpty)
+      '添加日期：${_formatDate(person.dateCreated)}',
   ];
 
   // 流派等已有资料与新增外部资料统一使用相同的信息卡片样式。
@@ -333,10 +446,11 @@ class _PersonContent extends StatelessWidget {
         ),
       );
     }
-    final studioNames = person.studios
-        .map((studio) => studio.name)
-        .where((name) => name.isNotEmpty)
-        .toList();
+    final studioNames =
+        person.studios
+            .map((studio) => studio.name)
+            .where((name) => name.isNotEmpty)
+            .toList();
     if (studioNames.isNotEmpty) {
       cards.add(
         _PersonInfoCard(
@@ -351,9 +465,10 @@ class _PersonContent extends StatelessWidget {
         _PersonInfoCard(
           icon: Icons.calendar_month_outlined,
           title: '外部编号',
-          children: person.providerIds.entries
-              .map((entry) => Text('${entry.key}：${entry.value}'))
-              .toList(),
+          children:
+              person.providerIds.entries
+                  .map((entry) => Text('${entry.key}：${entry.value}'))
+                  .toList(),
         ),
       );
     }
@@ -366,19 +481,20 @@ class _PersonContent extends StatelessWidget {
           icon: Icons.link,
           title: '外部链接',
           // 当前项目未引入 URL 启动依赖，先以可选择文本展示并通过提示显示完整地址。
-          children: externalUrls
-              .map(
-                (external) => Tooltip(
-                  message: external.url,
-                  child: SelectableText(
-                    external.name.isEmpty ? external.url : external.name,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.primary,
+          children:
+              externalUrls
+                  .map(
+                    (external) => Tooltip(
+                      message: external.url,
+                      child: SelectableText(
+                        external.name.isEmpty ? external.url : external.name,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-              )
-              .toList(),
+                  )
+                  .toList(),
         ),
       );
     }
@@ -430,9 +546,7 @@ class _SectionTitle extends StatelessWidget {
       const SizedBox(width: 8),
       Text(
         title,
-        style: Theme.of(
-          context,
-        ).textTheme.titleLarge?.copyWith(
+        style: Theme.of(context).textTheme.titleLarge?.copyWith(
           fontFamily: 'Microsoft YaHei UI',
           fontWeight: FontWeight.w600,
         ),
@@ -478,18 +592,17 @@ class _PersonInfoCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          ...children.expand((child) => [
-            DefaultTextStyle(
-              style: (
-                Theme.of(context).textTheme.bodyMedium ?? const TextStyle()
-              ).copyWith(
-                color: colors.onSurfaceVariant,
-                height: 1.5,
+          ...children.expand(
+            (child) => [
+              DefaultTextStyle(
+                style: (Theme.of(context).textTheme.bodyMedium ??
+                        const TextStyle())
+                    .copyWith(color: colors.onSurfaceVariant, height: 1.5),
+                child: child,
               ),
-              child: child,
-            ),
-            const SizedBox(height: 6),
-          ]),
+              const SizedBox(height: 6),
+            ],
+          ),
         ],
       ),
     );

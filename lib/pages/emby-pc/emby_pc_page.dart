@@ -362,26 +362,26 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   void _openItem(EmbyPcItem item) {
     if (_view == 'favorite-people') {
       Navigator.of(context).push(
-        MaterialPageRoute(
-          builder:
-              (_) => EmbyPcPersonPage(personId: item.id, personName: item.name),
+        embyPcFadeRoute(
+          context,
+          (_) => EmbyPcPersonPage(personId: item.id, personName: item.name),
         ),
       );
       return;
     }
     Navigator.of(
       context,
-    ).push(MaterialPageRoute(builder: (_) => EmbyPcDetailPage(item: item)));
+    ).push(embyPcFadeRoute(context, (_) => EmbyPcDetailPage(item: item)));
   }
 
   void _playItem(EmbyPcItem item) {
     Navigator.of(context).push(
-      MaterialPageRoute(
-        builder:
-            (_) => EmbyPcPlayerPage(
-              item: item,
-              startPositionTicks: item.playbackPositionTicks,
-            ),
+      embyPcFadeRoute(
+        context,
+        (_) => EmbyPcPlayerPage(
+          item: item,
+          startPositionTicks: item.playbackPositionTicks,
+        ),
       ),
     );
   }
@@ -491,7 +491,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
             } else if (value == 'settings') {
               Navigator.of(
                 context,
-              ).push(MaterialPageRoute(builder: (_) => const SettingsPage()));
+              ).push(embyPcFadeRoute(context, (_) => const SettingsPage()));
             } else if (value == 'logout') {
               _logout();
             }
@@ -1009,10 +1009,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
-                  '排序字段',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
+                Text('排序字段', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 8),
                 // 当前字段再次点击时切换方向，其他字段沿用当前排序方向。
                 ...sortOptions.entries.map((entry) {
@@ -1149,20 +1146,23 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         minimumSize: const WidgetStatePropertyAll(Size(0, 38)),
         // 布局选中态与侧栏、筛选项统一使用用户设置的主题色。
         foregroundColor: WidgetStateProperty.resolveWith(
-          (states) => states.contains(WidgetState.selected)
-              ? colors.onPrimary
-              : colors.onSurface,
+          (states) =>
+              states.contains(WidgetState.selected)
+                  ? colors.onPrimary
+                  : colors.onSurface,
         ),
         backgroundColor: WidgetStateProperty.resolveWith(
-          (states) => states.contains(WidgetState.selected)
-              ? colors.primary
-              : Colors.transparent,
+          (states) =>
+              states.contains(WidgetState.selected)
+                  ? colors.primary
+                  : Colors.transparent,
         ),
         side: WidgetStateProperty.resolveWith(
           (states) => BorderSide(
-            color: states.contains(WidgetState.selected)
-                ? colors.primary
-                : colors.outlineVariant,
+            color:
+                states.contains(WidgetState.selected)
+                    ? colors.primary
+                    : colors.outlineVariant,
           ),
         ),
         shape: WidgetStatePropertyAll(
