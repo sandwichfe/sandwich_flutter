@@ -45,7 +45,8 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: Material(
-        color: colors.surfaceContainerLow,
+        // 媒体卡片底色跟随背景色，主题色只用于操作按钮和选中状态。
+        color: colors.surface,
         borderRadius: BorderRadius.circular(6),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
@@ -172,17 +173,17 @@ class EmbyPcNetworkImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    if (url.isEmpty) return _ImagePlaceholder(color: colors.surfaceContainerHighest);
+    if (url.isEmpty) return _ImagePlaceholder(color: colors.surface);
     return CachedNetworkImage(
       imageUrl: url,
       fit: fit,
       fadeInDuration: const Duration(milliseconds: 160),
       placeholder: (_, _) => _ImagePlaceholder(
-        color: colors.surfaceContainerHighest,
+        color: colors.surface,
         loading: true,
       ),
       errorWidget: (_, _, _) =>
-          _ImagePlaceholder(color: colors.surfaceContainerHighest),
+          _ImagePlaceholder(color: colors.surface),
     );
   }
 }

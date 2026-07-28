@@ -474,7 +474,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         style: IconButton.styleFrom(
           fixedSize: const Size.square(44),
           foregroundColor: hasKeyword ? colors.primary : colors.onSurfaceVariant,
-          backgroundColor: hasKeyword ? colors.primaryContainer.withValues(alpha: 0.45) : null,
+          backgroundColor: hasKeyword ? colors.primary.withValues(alpha: 0.12) : null,
           side: BorderSide(color: hasKeyword ? colors.primary : colors.outlineVariant),
         ),
         icon: const Icon(Icons.search, size: 20),
@@ -634,7 +634,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       width: _sidebarCollapsed ? 64 : 236,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: colors.surfaceContainerLow,
+          // 侧栏是页面背景的一部分，不使用主题色生成的粉色表面层。
+          color: colors.surface,
           border: Border(right: BorderSide(color: colors.outlineVariant)),
         ),
         child: Column(
@@ -1115,7 +1116,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
               alignment: Alignment.centerLeft,
               foregroundColor: active ? colors.primary : colors.onSurface,
-              backgroundColor: active ? colors.primaryContainer.withValues(alpha: 0.45) : null,
+              backgroundColor: active ? colors.primary.withValues(alpha: 0.12) : null,
               side: BorderSide(color: active ? colors.primary : colors.outlineVariant),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
@@ -1190,24 +1191,28 @@ class _SidebarButton extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 3),
-    // 为列表项提供独立的绘制层，避免外层侧栏背景遮挡选中效果和点击水波纹。
-    child: Material(
-      type: MaterialType.transparency,
-      child: ListTile(
-        dense: true,
-        selected: active,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-        leading: Icon(icon),
-        title: Text(title, overflow: TextOverflow.ellipsis),
-        trailing: loading
-            ? const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2))
-            : Text(count == null ? '-' : '$count'),
-        onTap: onPressed,
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 3),
+      // 为列表项提供独立的绘制层，避免外层侧栏背景遮挡选中效果和点击水波纹。
+      child: Material(
+        type: MaterialType.transparency,
+        child: ListTile(
+          dense: true,
+          selected: active,
+          selectedTileColor: colors.primary.withValues(alpha: 0.12),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          leading: Icon(icon),
+          title: Text(title, overflow: TextOverflow.ellipsis),
+          trailing: loading
+              ? const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2))
+              : Text(count == null ? '-' : '$count'),
+          onTap: onPressed,
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _LibraryOrderDialog extends StatefulWidget {

@@ -22,12 +22,25 @@ class ThemeManager extends ChangeNotifier {
       _backgroundColor ??
       (_brightness == Brightness.dark ? const Color(0xFF121212) : Colors.white);
 
-  ThemeData get themeData => ThemeData(
-    colorScheme: ColorScheme.fromSeed(seedColor: _seedColor, brightness: _brightness),
-    brightness: _brightness,
-    scaffoldBackgroundColor: backgroundColor,
-    useMaterial3: true,
-  );
+  ThemeData get themeData {
+    final generatedScheme = ColorScheme.fromSeed(
+      seedColor: _seedColor,
+      brightness: _brightness,
+    );
+    // AppBar 和桌面标题栏使用 surface；覆盖它才能让背景色真正独立于主题色。
+    final colorScheme = generatedScheme.copyWith(surface: backgroundColor);
+    return ThemeData(
+      colorScheme: colorScheme,
+      brightness: _brightness,
+      scaffoldBackgroundColor: backgroundColor,
+      // 顶部导航属于背景层，不再叠加主题色生成的表面色。
+      appBarTheme: AppBarTheme(
+        backgroundColor: backgroundColor,
+        surfaceTintColor: Colors.transparent,
+      ),
+      useMaterial3: true,
+    );
+  }
 
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
