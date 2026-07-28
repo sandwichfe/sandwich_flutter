@@ -300,16 +300,6 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     await _applyQuery();
   }
 
-  // 重置查询时恢复默认排序，但保留用户当前选择的图片布局。
-  Future<void> _resetQuery() async {
-    setState(() {
-      _resetQueryControllers();
-      _sortBy = 'PremiereDate';
-      _sortOrder = 'Descending';
-    });
-    await _applyQuery();
-  }
-
   Future<void> _toggleFavorite(EmbyPcItem item) async {
     if (_favoriteBusyIds.contains(item.id)) return;
     setState(() => _favoriteBusyIds.add(item.id));
@@ -571,6 +561,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         child: PopupMenuButton<String>(
           tooltip: '账号',
           padding: EdgeInsets.zero,
+          color: colors.surface,
+          surfaceTintColor: Colors.transparent,
           icon: const Icon(Icons.person_outline, size: 20),
           onSelected: (value) {
             if (value == 'refresh') {
@@ -765,10 +757,6 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         _buildFilterMenu(context),
         _buildSortMenu(context),
         _buildLayoutMenu(context),
-        _buildQueryPill(
-          label: '重置',
-          onPressed: _loading ? null : _resetQuery,
-        ),
       ],
     );
     final total = Text(
@@ -857,6 +845,10 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     // 多组低频筛选集中放入弹出面板，选中后仍按原逻辑立即刷新列表。
     return MenuAnchor(
       style: MenuStyle(
+        backgroundColor: WidgetStatePropertyAll(
+          Theme.of(context).colorScheme.surface,
+        ),
+        surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
         padding: const WidgetStatePropertyAll(EdgeInsets.zero),
         maximumSize: WidgetStatePropertyAll(Size(panelWidth, 560)),
       ),
@@ -978,6 +970,10 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
 
     return MenuAnchor(
       style: MenuStyle(
+        backgroundColor: WidgetStatePropertyAll(
+          Theme.of(context).colorScheme.surface,
+        ),
+        surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
         padding: const WidgetStatePropertyAll(EdgeInsets.zero),
         maximumSize: WidgetStatePropertyAll(Size(panelWidth, 520)),
       ),
@@ -1035,6 +1031,10 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     return MenuAnchor(
       controller: _layoutMenuController,
       style: MenuStyle(
+        backgroundColor: WidgetStatePropertyAll(
+          Theme.of(context).colorScheme.surface,
+        ),
+        surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
         padding: const WidgetStatePropertyAll(EdgeInsets.zero),
         maximumSize: WidgetStatePropertyAll(Size(panelWidth, 220)),
       ),
@@ -1164,10 +1164,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
             child: Text(value, maxLines: 1, overflow: TextOverflow.ellipsis),
           ),
         ],
-        if (label != '重置') ...[
-          const SizedBox(width: 6),
-          const Icon(Icons.keyboard_arrow_down, size: 18),
-        ],
+        const SizedBox(width: 6),
+        const Icon(Icons.keyboard_arrow_down, size: 18),
       ],
     ),
   );

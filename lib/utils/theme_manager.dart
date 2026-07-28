@@ -38,6 +38,10 @@ class ThemeManager extends ChangeNotifier {
         backgroundColor: backgroundColor,
         surfaceTintColor: Colors.transparent,
       ),
+      popupMenuTheme: PopupMenuThemeData(
+        color: backgroundColor,
+        surfaceTintColor: Colors.transparent,
+      ),
       useMaterial3: true,
     );
   }
