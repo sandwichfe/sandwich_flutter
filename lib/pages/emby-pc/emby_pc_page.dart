@@ -1280,6 +1280,8 @@ class _SidebarButton extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
+                            // 侧栏文字固定使用微软雅黑 UI，避免中英文混用不同字体。
+                            fontFamily: 'Microsoft YaHei UI',
                             fontSize: 14,
                             fontWeight:
                                 active ? FontWeight.w600 : FontWeight.w400,
@@ -1308,6 +1310,7 @@ class _SidebarButton extends StatelessWidget {
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               color: colors.onSurfaceVariant,
+                              fontFamily: 'Microsoft YaHei UI',
                               fontSize: 11,
                             ),
                           ),
@@ -1351,8 +1354,10 @@ class _SidebarSectionTitle extends StatelessWidget {
       title,
       style: TextStyle(
         color: Theme.of(context).colorScheme.onSurfaceVariant,
+        fontFamily: 'Microsoft YaHei UI',
         fontSize: 12,
-        fontWeight: FontWeight.w600,
+        // 小字号使用中等字重，避免微软雅黑 UI 的笔画显得拥挤。
+        fontWeight: FontWeight.w500,
       ),
     ),
   );
