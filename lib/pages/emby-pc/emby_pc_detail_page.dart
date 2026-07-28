@@ -791,10 +791,11 @@ class _ArtworkSection extends StatelessWidget {
         builder: (context, constraints) {
           final responsiveWidth = constraints.maxWidth * 0.78;
           final cardWidth = responsiveWidth > 330 ? 330.0 : responsiveWidth;
-          return _DetailHorizontalCarousel(
+          return EmbyPcHorizontalCarousel(
             itemCount: images.length,
             itemWidth: cardWidth,
             height: cardWidth * 9 / 16 + 46,
+            navigationLabel: '艺术图',
             itemBuilder:
                 (context, index) => _ArtworkCard(
                   image: images[index],
@@ -899,7 +900,7 @@ class _CastSection extends StatelessWidget {
     children: [
       const _SectionTitle(title: '演员与导演', icon: Icons.person_outline_rounded),
       const SizedBox(height: 12),
-      _DetailHorizontalCarousel(
+      EmbyPcHorizontalCarousel(
         itemCount: people.length,
         itemWidth: 148,
         height: 264,
@@ -1004,11 +1005,12 @@ class _SimilarSection extends StatelessWidget {
         icon: Icons.collections_bookmark_outlined,
       ),
       const SizedBox(height: 12),
-      _DetailHorizontalCarousel(
+      EmbyPcHorizontalCarousel(
         itemCount: items.length,
         itemWidth: 160,
         height: 258,
         spacing: 12,
+        navigationLabel: '类似影片',
         itemBuilder:
             (context, index) => EmbyPcMediaTile(
               item: items[index],
@@ -1018,116 +1020,6 @@ class _SimilarSection extends StatelessWidget {
       ),
     ],
   );
-}
-
-// 图片、人物和类似影片共用横向列表行为，导航按钮只负责滚动当前列表。
-class _DetailHorizontalCarousel extends StatefulWidget {
-  final int itemCount;
-  final double itemWidth;
-  final double height;
-  final double spacing;
-  final bool showNavigation;
-  final IndexedWidgetBuilder itemBuilder;
-
-  const _DetailHorizontalCarousel({
-    required this.itemCount,
-    required this.itemWidth,
-    required this.height,
-    required this.itemBuilder,
-    this.spacing = 16,
-    this.showNavigation = true,
-  });
-
-  @override
-  State<_DetailHorizontalCarousel> createState() =>
-      _DetailHorizontalCarouselState();
-}
-
-class _DetailHorizontalCarouselState extends State<_DetailHorizontalCarousel> {
-  final ScrollController _scrollController = ScrollController();
-  bool _hovering = false;
-
-  @override
-  void dispose() {
-    _scrollController.dispose();
-    super.dispose();
-  }
-
-  void _scroll(int direction) {
-    if (!_scrollController.hasClients) return;
-    final position = _scrollController.position;
-    final viewportDistance = position.viewportDimension * 0.72;
-    final distance = viewportDistance < 280 ? 280.0 : viewportDistance;
-    final target =
-        (_scrollController.offset + direction * distance)
-            .clamp(0.0, position.maxScrollExtent)
-            .toDouble();
-    _scrollController.animateTo(
-      target,
-      duration: const Duration(milliseconds: 280),
-      curve: Curves.easeOutCubic,
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovering = true),
-      onExit: (_) => setState(() => _hovering = false),
-      child: SizedBox(
-        height: widget.height,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            ScrollConfiguration(
-              behavior: const _HorizontalDragScrollBehavior(),
-              child: ListView.separated(
-                controller: _scrollController,
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                scrollDirection: Axis.horizontal,
-                itemCount: widget.itemCount,
-                separatorBuilder: (_, _) => SizedBox(width: widget.spacing),
-                itemBuilder:
-                    (context, index) => SizedBox(
-                      width: widget.itemWidth,
-                      child: widget.itemBuilder(context, index),
-                    ),
-              ),
-            ),
-            if (widget.showNavigation && widget.itemCount > 1) ...[
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Padding(
-                  padding: const EdgeInsets.only(left: 10),
-                  child: _ChapterNavigationButton(
-                    visible: _hovering,
-                    icon: Icons.chevron_left_rounded,
-                    tooltip: '向左滚动',
-                    colors: colors,
-                    onPressed: () => _scroll(-1),
-                  ),
-                ),
-              ),
-              Align(
-                alignment: Alignment.centerRight,
-                child: Padding(
-                  padding: const EdgeInsets.only(right: 10),
-                  child: _ChapterNavigationButton(
-                    visible: _hovering,
-                    icon: Icons.chevron_right_rounded,
-                    tooltip: '向右滚动',
-                    colors: colors,
-                    onPressed: () => _scroll(1),
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 // 其它信息按两列自适应排列，窄屏时自动改为单列。

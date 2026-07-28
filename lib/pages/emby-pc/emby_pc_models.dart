@@ -18,6 +18,9 @@ class EmbyPcItem {
   final String path;
   final String premiereDate;
   final String dateCreated;
+
+  // 上次播放时间来自用户数据，只在服务端返回该字段时展示。
+  final String lastPlayedDate;
   final bool isFavorite;
   final bool played;
   final int playbackPositionTicks;
@@ -53,6 +56,7 @@ class EmbyPcItem {
     this.path = '',
     this.premiereDate = '',
     this.dateCreated = '',
+    this.lastPlayedDate = '',
     this.isFavorite = false,
     this.played = false,
     this.playbackPositionTicks = 0,
@@ -89,6 +93,7 @@ class EmbyPcItem {
       path: _text(json['Path']),
       premiereDate: _text(json['PremiereDate']),
       dateCreated: _text(json['DateCreated']),
+      lastPlayedDate: _text(userData['LastPlayedDate']),
       isFavorite: userData['IsFavorite'] == true,
       played: userData['Played'] == true,
       playbackPositionTicks: _integer(userData['PlaybackPositionTicks']),
@@ -126,6 +131,7 @@ class EmbyPcItem {
     path: path,
     premiereDate: premiereDate,
     dateCreated: dateCreated,
+    lastPlayedDate: lastPlayedDate,
     isFavorite: isFavorite ?? this.isFavorite,
     played: played,
     playbackPositionTicks: playbackPositionTicks,
@@ -155,6 +161,17 @@ class EmbyPcItem {
     final minutes = duration.inMinutes;
     final hours = minutes ~/ 60;
     return hours > 0 ? '${hours}h ${minutes % 60}m' : '${minutes}m';
+  }
+
+  // Emby 通常返回 UTC ISO 时间，展示前转换为设备本地时间。
+  String get lastPlayedLabel {
+    final parsed = DateTime.tryParse(lastPlayedDate);
+    if (parsed == null) return '';
+    final local = parsed.toLocal();
+    String twoDigits(int value) => value.toString().padLeft(2, '0');
+    return '上次播放 ${local.year}-${twoDigits(local.month)}-'
+        '${twoDigits(local.day)} ${twoDigits(local.hour)}:'
+        '${twoDigits(local.minute)}';
   }
 }
 

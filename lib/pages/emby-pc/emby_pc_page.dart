@@ -262,7 +262,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
             _view == 'favorite-movies' || _view == 'favorite-people'
                 ? ''
                 : <String>[
-                  _statusFilter,
+                  // 播放记录始终限定已播放项目，确保分页结果与首页摘要一致。
+                  _view == 'recently-played' ? 'IsPlayed' : _statusFilter,
                   _markFilter,
                 ].where((value) => value.isNotEmpty).join(','),
         videoType: _videoType,
@@ -326,6 +327,19 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       _view = view;
       _activeId = '';
       _resetQueryControllers();
+    });
+    await _loadItems(reset: true);
+  }
+
+  Future<void> _selectRecentlyPlayed() async {
+    if (_view == 'recently-played') return;
+    setState(() {
+      _view = 'recently-played';
+      _activeId = '';
+      _resetQueryControllers();
+      // 首次进入播放记录时按最近播放时间倒序展示。
+      _sortBy = 'DatePlayed';
+      _sortOrder = 'Descending';
     });
     await _loadItems(reset: true);
   }
@@ -478,6 +492,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
 
   String get _pageTitle {
     if (_view == 'home') return '首页';
+    if (_view == 'recently-played') return '播放记录';
     if (_view == 'favorite-movies') return '收藏影片';
     if (_view == 'favorite-people') return '收藏演员';
     for (final library in _libraries) {
@@ -640,6 +655,15 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                     collapsed: _sidebarCollapsed,
                     onPressed: _selectHome,
                   ),
+                  _SidebarButton(
+                    icon: Icons.history_rounded,
+                    title: '播放记录',
+                    count: null,
+                    showCount: false,
+                    active: _view == 'recently-played',
+                    collapsed: _sidebarCollapsed,
+                    onPressed: _selectRecentlyPlayed,
+                  ),
                   Divider(height: _sidebarCollapsed ? 18 : 28),
                   if (!_sidebarCollapsed) const _SidebarSectionTitle('媒体库'),
                   ..._libraries.map(
@@ -749,6 +773,10 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                               return EmbyPcMediaTile(
                                 item: item,
                                 imageStyle: _imageStyle,
+                                secondaryLabel:
+                                    _view == 'recently-played'
+                                        ? item.lastPlayedLabel
+                                        : '',
                                 favoriteBusy: _favoriteBusyIds.contains(
                                   item.id,
                                 ),
@@ -808,6 +836,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
             context,
             title: '播放记录',
             items: _recentlyPlayed,
+            showLastPlayedTime: true,
+            onOpenSection: _selectRecentlyPlayed,
           ),
         ),
         ..._libraries.map(
@@ -816,7 +846,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
               context,
               title: library.name,
               items: _homeLibraryItems[library.id] ?? const [],
-              onOpenLibrary: () => _selectLibrary(library.id),
+              onOpenSection: () => _selectLibrary(library.id),
             ),
           ),
         ),
@@ -836,20 +866,20 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
           if (_libraries.isEmpty)
             const SizedBox(height: 80, child: Center(child: Text('暂无媒体库')))
           else
-            SizedBox(
+            EmbyPcHorizontalCarousel(
               height: 164,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: _libraries.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 16),
-                itemBuilder: (context, index) {
-                  final library = _libraries[index];
-                  return _HomeLibraryTile(
-                    library: library,
-                    onPressed: () => _selectLibrary(library.id),
-                  );
-                },
-              ),
+              itemWidth: 246,
+              itemCount: _libraries.length,
+              spacing: 16,
+              navigationLabel: '媒体库',
+              padding: EdgeInsets.zero,
+              itemBuilder: (context, index) {
+                final library = _libraries[index];
+                return _HomeLibraryTile(
+                  library: library,
+                  onPressed: () => _selectLibrary(library.id),
+                );
+              },
             ),
         ],
       ),
@@ -860,7 +890,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     BuildContext context, {
     required String title,
     required List<EmbyPcItem> items,
-    VoidCallback? onOpenLibrary,
+    bool showLastPlayedTime = false,
+    VoidCallback? onOpenSection,
   }) {
     final titleWidget = Row(
       mainAxisSize: MainAxisSize.min,
@@ -873,7 +904,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
             style: Theme.of(context).textTheme.titleLarge,
           ),
         ),
-        if (onOpenLibrary != null) ...[
+        if (onOpenSection != null) ...[
           const SizedBox(width: 3),
           const Icon(Icons.chevron_right, size: 21),
         ],
@@ -884,11 +915,11 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (onOpenLibrary == null)
+          if (onOpenSection == null)
             titleWidget
           else
             InkWell(
-              onTap: onOpenLibrary,
+              onTap: onOpenSection,
               borderRadius: BorderRadius.circular(6),
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 2),
@@ -905,25 +936,24 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
               ),
             )
           else
-            SizedBox(
+            EmbyPcHorizontalCarousel(
               height: 205,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: items.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 18),
-                itemBuilder: (context, index) {
-                  final item = items[index];
-                  return SizedBox(
-                    width: 270,
-                    child: EmbyPcMediaTile(
-                      item: item,
-                      imageStyle: 'backdrop',
-                      onOpen: () => _openItem(item),
-                      onPlay: () => _playItem(item),
-                    ),
-                  );
-                },
-              ),
+              itemWidth: 270,
+              itemCount: items.length,
+              spacing: 18,
+              navigationLabel: title,
+              padding: EdgeInsets.zero,
+              itemBuilder: (context, index) {
+                final item = items[index];
+                return EmbyPcMediaTile(
+                  item: item,
+                  imageStyle: 'backdrop',
+                  secondaryLabel:
+                      showLastPlayedTime ? item.lastPlayedLabel : '',
+                  onOpen: () => _openItem(item),
+                  onPlay: () => _playItem(item),
+                );
+              },
             ),
         ],
       ),
@@ -994,6 +1024,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         _openOrderDialog();
       } else if (value == 'home') {
         _selectHome();
+      } else if (value == 'recently-played') {
+        _selectRecentlyPlayed();
       } else if (value == 'favorite-movies' || value == 'favorite-people') {
         _selectFavorites(value);
       } else {
@@ -1003,6 +1035,10 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     itemBuilder:
         (_) => [
           const PopupMenuItem(value: 'home', child: Text('首页')),
+          const PopupMenuItem(
+            value: 'recently-played',
+            child: Text('播放记录'),
+          ),
           const PopupMenuDivider(),
           ..._libraries.map(
             (library) =>
@@ -1077,7 +1113,9 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     // 菜单内容左右各保留 14 像素内边距，选项宽度直接使用剩余空间计算。
     final contentWidth = panelWidth - 28;
     final showAdvancedFilters =
-        _view != 'favorite-movies' && _view != 'favorite-people';
+        _view != 'favorite-movies' &&
+        _view != 'favorite-people' &&
+        _view != 'recently-played';
 
     // 多组低频筛选集中放入弹出面板，选中后仍按原逻辑立即刷新列表。
     return MenuAnchor(

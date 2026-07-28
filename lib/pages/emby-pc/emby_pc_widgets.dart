@@ -1,8 +1,175 @@
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import 'emby_pc_models.dart';
 import 'emby_pc_service.dart';
+
+// Emby PC 横向内容统一使用左右按钮翻页，同时保留鼠标拖动和触控滑动。
+class EmbyPcHorizontalCarousel extends StatefulWidget {
+  final int itemCount;
+  final double itemWidth;
+  final double height;
+  final double spacing;
+  final bool showNavigation;
+  final String navigationLabel;
+  final EdgeInsetsGeometry padding;
+  final IndexedWidgetBuilder itemBuilder;
+
+  const EmbyPcHorizontalCarousel({
+    super.key,
+    required this.itemCount,
+    required this.itemWidth,
+    required this.height,
+    required this.itemBuilder,
+    this.spacing = 16,
+    this.showNavigation = true,
+    this.navigationLabel = '',
+    this.padding = const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+  });
+
+  @override
+  State<EmbyPcHorizontalCarousel> createState() =>
+      _EmbyPcHorizontalCarouselState();
+}
+
+class _EmbyPcHorizontalCarouselState
+    extends State<EmbyPcHorizontalCarousel> {
+  final _scrollController = ScrollController();
+  bool _hovering = false;
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  // 每次切换约一个可视区域，较窄窗口仍保证有明确的翻页距离。
+  void _scroll(int direction) {
+    if (!_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    final viewportDistance = position.viewportDimension * 0.72;
+    final distance = viewportDistance < 280 ? 280.0 : viewportDistance;
+    final target =
+        (_scrollController.offset + direction * distance)
+            .clamp(0.0, position.maxScrollExtent)
+            .toDouble();
+    _scrollController.animateTo(
+      target,
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final labelSuffix =
+        widget.navigationLabel.isEmpty ? '' : widget.navigationLabel;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: SizedBox(
+        height: widget.height,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            ScrollConfiguration(
+              behavior: const _EmbyPcHorizontalDragScrollBehavior(),
+              child: ListView.separated(
+                controller: _scrollController,
+                padding: widget.padding,
+                scrollDirection: Axis.horizontal,
+                itemCount: widget.itemCount,
+                separatorBuilder: (_, _) => SizedBox(width: widget.spacing),
+                itemBuilder:
+                    (context, index) => SizedBox(
+                      width: widget.itemWidth,
+                      child: widget.itemBuilder(context, index),
+                    ),
+              ),
+            ),
+            if (widget.showNavigation && widget.itemCount > 1) ...[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 10),
+                  child: _EmbyPcCarouselNavigationButton(
+                    visible: _hovering,
+                    icon: Icons.chevron_left_rounded,
+                    tooltip: '向左滚动$labelSuffix',
+                    colors: colors,
+                    onPressed: () => _scroll(-1),
+                  ),
+                ),
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 10),
+                  child: _EmbyPcCarouselNavigationButton(
+                    visible: _hovering,
+                    icon: Icons.chevron_right_rounded,
+                    tooltip: '向右滚动$labelSuffix',
+                    colors: colors,
+                    onPressed: () => _scroll(1),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// 导航按钮仅在鼠标进入当前横向区域后显示，避免遮挡卡片内容。
+class _EmbyPcCarouselNavigationButton extends StatelessWidget {
+  final bool visible;
+  final IconData icon;
+  final String tooltip;
+  final ColorScheme colors;
+  final VoidCallback onPressed;
+
+  const _EmbyPcCarouselNavigationButton({
+    required this.visible,
+    required this.icon,
+    required this.tooltip,
+    required this.colors,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) => IgnorePointer(
+    ignoring: !visible,
+    child: AnimatedOpacity(
+      opacity: visible ? 1 : 0,
+      duration: const Duration(milliseconds: 180),
+      child: Material(
+        color: colors.surface.withValues(alpha: 0.96),
+        elevation: 6,
+        shape: CircleBorder(side: BorderSide(color: colors.outlineVariant)),
+        child: IconButton(
+          onPressed: onPressed,
+          tooltip: tooltip,
+          icon: Icon(icon),
+        ),
+      ),
+    ),
+  );
+}
+
+// 公共横向列表只补充鼠标拖动，不接管鼠标滚轮事件。
+class _EmbyPcHorizontalDragScrollBehavior extends MaterialScrollBehavior {
+  const _EmbyPcHorizontalDragScrollBehavior();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => {
+    ...super.dragDevices,
+    PointerDeviceKind.mouse,
+  };
+}
 
 class EmbyPcMediaTile extends StatefulWidget {
   final EmbyPcItem item;
@@ -12,6 +179,9 @@ class EmbyPcMediaTile extends StatefulWidget {
   final VoidCallback? onFavorite;
   final bool favoriteBusy;
 
+  // 指定后替换默认媒体元数据，用于播放记录等具有专属摘要的列表。
+  final String secondaryLabel;
+
   const EmbyPcMediaTile({
     super.key,
     required this.item,
@@ -20,6 +190,7 @@ class EmbyPcMediaTile extends StatefulWidget {
     this.onPlay,
     this.onFavorite,
     this.favoriteBusy = false,
+    this.secondaryLabel = '',
   });
 
   @override
@@ -201,7 +372,18 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
             ),
           ),
           const SizedBox(height: 4),
-          _MediaMetadata(item: widget.item),
+          if (widget.secondaryLabel.isEmpty)
+            _MediaMetadata(item: widget.item)
+          else
+            Text(
+              widget.secondaryLabel,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: colors.onSurfaceVariant,
+                fontSize: 12,
+              ),
+            ),
         ],
       ),
     );
