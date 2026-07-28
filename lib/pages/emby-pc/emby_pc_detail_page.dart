@@ -63,9 +63,9 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
       if (mounted) setState(() => _detail = detail.copyWith(isFavorite: value));
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error.toString())),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.toString())));
       }
     } finally {
       if (mounted) setState(() => _favoriteBusy = false);
@@ -139,7 +139,8 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
                             SliverToBoxAdapter(
                               child: Center(
                                 child: ConstrainedBox(
-                                  constraints: const BoxConstraints(maxWidth: 1180),
+                                  constraints:
+                                      const BoxConstraints(maxWidth: 1180),
                                   child: Padding(
                                     padding: const EdgeInsets.all(24),
                                     child: _DetailContent(
@@ -148,12 +149,15 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
                                       favoriteBusy: _favoriteBusy,
                                       onFavorite: _toggleFavorite,
                                       onPlay: _play,
-                                      onOpenSimilar: (item) => Navigator.of(context).push(
+                                      onOpenSimilar: (item) =>
+                                          Navigator.of(context).push(
                                         MaterialPageRoute(
-                                          builder: (_) => EmbyPcDetailPage(item: item),
+                                          builder: (_) =>
+                                              EmbyPcDetailPage(item: item),
                                         ),
                                       ),
-                                      onOpenPerson: (person) => Navigator.of(context).push(
+                                      onOpenPerson: (person) =>
+                                          Navigator.of(context).push(
                                         MaterialPageRoute(
                                           builder: (_) => EmbyPcPersonPage(
                                             personId: person.id,
@@ -195,98 +199,102 @@ class _DetailContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      final wide = constraints.maxWidth >= 760;
-      // 参考桌面端仅展示演员和导演，避免其它幕后人员挤占横向列表。
-      final creditPeople = detail.people
-          .where((person) => person.type == 'Actor' || person.type == 'Director')
-          .toList();
-      final artworkImages = _buildArtworkImages(detail);
-      final summary = _Summary(
-        detail: detail,
-        onFavorite: onFavorite,
-        favoriteBusy: favoriteBusy,
-        onPlay: onPlay,
-      );
-      // Primary 竖版海报保留在标题旁，和页面背景使用的 Backdrop 区分展示。
-      final poster = SizedBox(
-        width: wide ? 230 : 180,
-        child: AspectRatio(
-          aspectRatio: 2 / 3,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: EmbyPcNetworkImage(
-              url: detail.hasPrimaryImage
-                  ? EmbyPcService.instance.imageUrl(detail.id, maxWidth: 500)
-                  : '',
-            ),
-          ),
-        ),
-      );
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 宽屏时海报位于标题左侧，窄屏时保持原有的上下排列。
-          if (wide)
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [poster, const SizedBox(width: 28), Expanded(child: summary)],
-            )
-          else ...[
-            Center(child: poster),
-            const SizedBox(height: 22),
-            summary,
-          ],
-          if (detail.chapters.isNotEmpty) ...[
-            const SizedBox(height: 32),
-            const _SectionTitle(
-              title: '章节',
-              icon: Icons.play_circle_outline_rounded,
-            ),
-            const SizedBox(height: 12),
-            // 使用 Emby 生成的 Chapter 图片展示章节，点击后从对应时间开始播放。
-            _ChapterCarousel(
-              itemId: detail.id,
-              chapters: detail.chapters,
-              onPlay: onPlay,
-            ),
-          ],
-          if (artworkImages.isNotEmpty) ...[
-            const SizedBox(height: 32),
-            _ArtworkSection(images: artworkImages),
-          ],
-          if (creditPeople.isNotEmpty) ...[
-            const SizedBox(height: 32),
-            _CastSection(
-              people: creditPeople,
-              onOpenPerson: onOpenPerson,
-            ),
-          ],
-          if (similar.isNotEmpty) ...[
-            const SizedBox(height: 32),
-            _SimilarSection(
-              items: similar,
-              onOpenItem: onOpenSimilar,
-            ),
-          ],
-          const SizedBox(height: 32),
-          _OtherInformation(
+        builder: (context, constraints) {
+          final wide = constraints.maxWidth >= 760;
+          // 参考桌面端仅展示演员和导演，避免其它幕后人员挤占横向列表。
+          final creditPeople = detail.people
+              .where(
+                (person) => person.type == 'Actor' || person.type == 'Director',
+              )
+              .toList();
+          final artworkImages = _buildArtworkImages(detail);
+          final summary = _Summary(
             detail: detail,
-            source: detail.mediaSources.isEmpty
-                ? null
-                : detail.mediaSources.first,
-          ),
-          if (detail.mediaSources.isNotEmpty &&
-              detail.mediaSources.first.streams.any(
-                (stream) => stream.type == 'Video' || stream.type == 'Audio',
-              )) ...[
-            const SizedBox(height: 32),
-            _StreamInformation(source: detail.mediaSources.first),
-          ],
-        ],
+            onFavorite: onFavorite,
+            favoriteBusy: favoriteBusy,
+            onPlay: onPlay,
+          );
+          // Primary 竖版海报保留在标题旁，和页面背景使用的 Backdrop 区分展示。
+          final poster = SizedBox(
+            width: wide ? 230 : 180,
+            child: AspectRatio(
+              aspectRatio: 2 / 3,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: EmbyPcNetworkImage(
+                  url: detail.hasPrimaryImage
+                      ? EmbyPcService.instance.imageUrl(
+                          detail.id,
+                          maxWidth: 500,
+                        )
+                      : '',
+                ),
+              ),
+            ),
+          );
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 宽屏时海报位于标题左侧，窄屏时保持原有的上下排列。
+              if (wide)
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    poster,
+                    const SizedBox(width: 28),
+                    Expanded(child: summary),
+                  ],
+                )
+              else ...[
+                Center(child: poster),
+                const SizedBox(height: 22),
+                summary,
+              ],
+              if (detail.chapters.isNotEmpty) ...[
+                const SizedBox(height: 32),
+                const _SectionTitle(
+                  title: '章节',
+                  icon: Icons.play_circle_outline_rounded,
+                ),
+                const SizedBox(height: 12),
+                // 使用 Emby 生成的 Chapter 图片展示章节，点击后从对应时间开始播放。
+                _ChapterCarousel(
+                  itemId: detail.id,
+                  chapters: detail.chapters,
+                  onPlay: onPlay,
+                ),
+              ],
+              if (artworkImages.isNotEmpty) ...[
+                const SizedBox(height: 32),
+                _ArtworkSection(images: artworkImages),
+              ],
+              if (creditPeople.isNotEmpty) ...[
+                const SizedBox(height: 32),
+                _CastSection(people: creditPeople, onOpenPerson: onOpenPerson),
+              ],
+              if (similar.isNotEmpty) ...[
+                const SizedBox(height: 32),
+                _SimilarSection(items: similar, onOpenItem: onOpenSimilar),
+              ],
+              const SizedBox(height: 32),
+              _OtherInformation(
+                detail: detail,
+                source: detail.mediaSources.isEmpty
+                    ? null
+                    : detail.mediaSources.first,
+              ),
+              if (detail.mediaSources.isNotEmpty &&
+                  detail.mediaSources.first.streams.any(
+                    (stream) =>
+                        stream.type == 'Video' || stream.type == 'Audio',
+                  )) ...[
+                const SizedBox(height: 32),
+                _StreamInformation(source: detail.mediaSources.first),
+              ],
+            ],
+          );
+        },
       );
-    },
-  );
 }
 
 // 章节区域保留横向滑动，并在桌面端悬停时显示左右滚动按钮。
@@ -429,22 +437,22 @@ class _ChapterNavigationButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => IgnorePointer(
-    ignoring: !visible,
-    child: AnimatedOpacity(
-      opacity: visible ? 1 : 0,
-      duration: const Duration(milliseconds: 180),
-      child: Material(
-        color: colors.surface.withOpacity(0.96),
-        elevation: 6,
-        shape: CircleBorder(side: BorderSide(color: colors.outlineVariant)),
-        child: IconButton(
-          onPressed: onPressed,
-          tooltip: tooltip,
-          icon: Icon(icon),
+        ignoring: !visible,
+        child: AnimatedOpacity(
+          opacity: visible ? 1 : 0,
+          duration: const Duration(milliseconds: 180),
+          child: Material(
+            color: colors.surface.withOpacity(0.96),
+            elevation: 6,
+            shape: CircleBorder(side: BorderSide(color: colors.outlineVariant)),
+            child: IconButton(
+              onPressed: onPressed,
+              tooltip: tooltip,
+              icon: Icon(icon),
+            ),
+          ),
         ),
-      ),
-    ),
-  );
+      );
 }
 
 // 单个章节卡片提供图片占位、悬停播放浮层以及键盘焦点反馈。
@@ -578,10 +586,9 @@ class _ChapterCardState extends State<_ChapterCard> {
                           name,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodyMedium
-                              ?.copyWith(
+                          style: Theme.of(
+                            context,
+                          ).textTheme.bodyMedium?.copyWith(
                                 fontWeight: FontWeight.w700,
                                 height: 20 / 14,
                               ),
@@ -593,10 +600,12 @@ class _ChapterCardState extends State<_ChapterCard> {
                           time,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: colors.onSurfaceVariant,
-                            height: 18 / 12,
-                          ),
+                          style: Theme.of(
+                            context,
+                          ).textTheme.bodySmall?.copyWith(
+                                color: colors.onSurfaceVariant,
+                                height: 18 / 12,
+                              ),
                         ),
                       ),
                     ],
@@ -619,30 +628,27 @@ class _ArtworkSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      const _SectionTitle(
-        title: '影片图片与艺术图',
-        icon: Icons.image_outlined,
-      ),
-      const SizedBox(height: 12),
-      LayoutBuilder(
-        builder: (context, constraints) {
-          final responsiveWidth = constraints.maxWidth * 0.78;
-          final cardWidth = responsiveWidth > 330 ? 330.0 : responsiveWidth;
-          return _DetailHorizontalCarousel(
-            itemCount: images.length,
-            itemWidth: cardWidth,
-            height: cardWidth * 9 / 16 + 46,
-            itemBuilder: (context, index) => _ArtworkCard(
-              image: images[index],
-              onOpen: () => _showArtworkPreview(context, images, index),
-            ),
-          );
-        },
-      ),
-    ],
-  );
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _SectionTitle(title: '影片图片与艺术图', icon: Icons.image_outlined),
+          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final responsiveWidth = constraints.maxWidth * 0.78;
+              final cardWidth = responsiveWidth > 330 ? 330.0 : responsiveWidth;
+              return _DetailHorizontalCarousel(
+                itemCount: images.length,
+                itemWidth: cardWidth,
+                height: cardWidth * 9 / 16 + 46,
+                itemBuilder: (context, index) => _ArtworkCard(
+                  image: images[index],
+                  onOpen: () => _showArtworkPreview(context, images, index),
+                ),
+              );
+            },
+          ),
+        ],
+      );
 }
 
 // 艺术图卡片在悬停或聚焦时使用主题色描边，并保持固定 16:9 布局。
@@ -701,7 +707,10 @@ class _ArtworkCardState extends State<_ArtworkCard> {
                 child: EmbyPcNetworkImage(url: widget.image.url),
               ),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 9,
+                ),
                 child: Text(
                   widget.image.label,
                   maxLines: 1,
@@ -729,28 +738,26 @@ class _CastSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      const _SectionTitle(
-        title: '演员与导演',
-        icon: Icons.person_outline_rounded,
-      ),
-      const SizedBox(height: 12),
-      _DetailHorizontalCarousel(
-        itemCount: people.length,
-        itemWidth: 148,
-        height: 264,
-        showNavigation: false,
-        itemBuilder: (context, index) {
-          final person = people[index];
-          return _CastCard(
-            person: person,
-            onOpen: person.id.isEmpty ? null : () => onOpenPerson(person),
-          );
-        },
-      ),
-    ],
-  );
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _SectionTitle(
+              title: '演员与导演', icon: Icons.person_outline_rounded),
+          const SizedBox(height: 12),
+          _DetailHorizontalCarousel(
+            itemCount: people.length,
+            itemWidth: 148,
+            height: 264,
+            showNavigation: false,
+            itemBuilder: (context, index) {
+              final person = people[index];
+              return _CastCard(
+                person: person,
+                onOpen: person.id.isEmpty ? null : () => onOpenPerson(person),
+              );
+            },
+          ),
+        ],
+      );
 }
 
 class _CastCard extends StatelessWidget {
@@ -832,26 +839,26 @@ class _SimilarSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      const _SectionTitle(
-        title: '更多类似',
-        icon: Icons.collections_bookmark_outlined,
-      ),
-      const SizedBox(height: 12),
-      _DetailHorizontalCarousel(
-        itemCount: items.length,
-        itemWidth: 160,
-        height: 258,
-        spacing: 12,
-        itemBuilder: (context, index) => EmbyPcMediaTile(
-          item: items[index],
-          imageStyle: 'poster',
-          onOpen: () => onOpenItem(items[index]),
-        ),
-      ),
-    ],
-  );
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _SectionTitle(
+            title: '更多类似',
+            icon: Icons.collections_bookmark_outlined,
+          ),
+          const SizedBox(height: 12),
+          _DetailHorizontalCarousel(
+            itemCount: items.length,
+            itemWidth: 160,
+            height: 258,
+            spacing: 12,
+            itemBuilder: (context, index) => EmbyPcMediaTile(
+              item: items[index],
+              imageStyle: 'poster',
+              onOpen: () => onOpenItem(items[index]),
+            ),
+          ),
+        ],
+      );
 }
 
 // 图片、人物和类似影片共用横向列表行为，导航按钮只负责滚动当前列表。
@@ -877,8 +884,7 @@ class _DetailHorizontalCarousel extends StatefulWidget {
       _DetailHorizontalCarouselState();
 }
 
-class _DetailHorizontalCarouselState
-    extends State<_DetailHorizontalCarousel> {
+class _DetailHorizontalCarouselState extends State<_DetailHorizontalCarousel> {
   final ScrollController _scrollController = ScrollController();
   bool _hovering = false;
 
@@ -918,10 +924,7 @@ class _DetailHorizontalCarouselState
               behavior: const _HorizontalDragScrollBehavior(),
               child: ListView.separated(
                 controller: _scrollController,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 4,
-                  vertical: 4,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
                 scrollDirection: Axis.horizontal,
                 itemCount: widget.itemCount,
                 separatorBuilder: (_, _) => SizedBox(width: widget.spacing),
@@ -1022,10 +1025,7 @@ class _OtherInformation extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const _SectionTitle(
-          title: '其它信息',
-          icon: Icons.description_outlined,
-        ),
+        const _SectionTitle(title: '其它信息', icon: Icons.description_outlined),
         const SizedBox(height: 12),
         _ResponsiveCardGrid(children: cards),
       ],
@@ -1093,10 +1093,7 @@ class _StreamInformation extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const _SectionTitle(
-          title: '视频信息',
-          icon: Icons.schedule_outlined,
-        ),
+        const _SectionTitle(title: '视频信息', icon: Icons.schedule_outlined),
         const SizedBox(height: 12),
         _ResponsiveCardGrid(
           children: streams
@@ -1187,21 +1184,21 @@ class _CardTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Row(
-    children: [
-      Icon(icon, size: 18),
-      const SizedBox(width: 7),
-      Expanded(
-        child: Text(
-          title,
-          style: const TextStyle(
-            fontFamily: 'Microsoft YaHei UI',
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
+        children: [
+          Icon(icon, size: 18),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Text(
+              title,
+              style: const TextStyle(
+                fontFamily: 'Microsoft YaHei UI',
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
-        ),
-      ),
-    ],
-  );
+        ],
+      );
 }
 
 class _ResponsiveCardGrid extends StatelessWidget {
@@ -1211,19 +1208,19 @@ class _ResponsiveCardGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      final cardWidth = constraints.maxWidth >= 600
-          ? (constraints.maxWidth - 14) / 2
-          : constraints.maxWidth;
-      return Wrap(
-        spacing: 14,
-        runSpacing: 14,
-        children: children
-            .map((child) => SizedBox(width: cardWidth, child: child))
-            .toList(),
+        builder: (context, constraints) {
+          final cardWidth = constraints.maxWidth >= 600
+              ? (constraints.maxWidth - 14) / 2
+              : constraints.maxWidth;
+          return Wrap(
+            spacing: 14,
+            runSpacing: 14,
+            children: children
+                .map((child) => SizedBox(width: cardWidth, child: child))
+                .toList(),
+          );
+        },
       );
-    },
-  );
 }
 
 class _InformationRow {
@@ -1239,19 +1236,16 @@ class _HorizontalDragScrollBehavior extends MaterialScrollBehavior {
 
   @override
   Set<PointerDeviceKind> get dragDevices => {
-    ...super.dragDevices,
-    PointerDeviceKind.mouse,
-  };
+        ...super.dragDevices,
+        PointerDeviceKind.mouse,
+      };
 }
 
 class _DetailImageRef {
   final String label;
   final String url;
 
-  const _DetailImageRef({
-    required this.label,
-    required this.url,
-  });
+  const _DetailImageRef({required this.label, required this.url});
 }
 
 // 图片预览提供缩放、滑动切换、左右按钮和关闭操作，不依赖额外组件库。
@@ -1393,29 +1387,159 @@ class _Summary extends StatelessWidget {
     required this.onPlay,
   });
 
+  EmbyPcMediaStream? _preferredStream(String type) {
+    if (detail.mediaSources.isEmpty) return null;
+    EmbyPcMediaStream? first;
+    for (final stream in detail.mediaSources.first.streams) {
+      if (stream.type != type) continue;
+      first ??= stream;
+      if (stream.isDefault == true) return stream;
+    }
+    return first;
+  }
+
+  String _typeLabel() => switch (detail.type) {
+        'Movie' => '电影',
+        'Episode' => '剧集',
+        'Series' => '剧集',
+        'Video' => '视频',
+        'MusicVideo' => '音乐视频',
+        'Trailer' => '预告片',
+        _ => detail.type,
+      };
+
+  String _formatPosition(int ticks) {
+    final duration = Duration(microseconds: ticks ~/ 10);
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return hours > 0 ? '$hours:$minutes:$seconds' : '$minutes:$seconds';
+  }
+
+  String _endingTimeLabel() {
+    if (detail.runTimeTicks <= 0) return '';
+    final playedTicks =
+        detail.playbackPositionTicks.clamp(0, detail.runTimeTicks).toInt();
+    final remaining = Duration(
+      microseconds: (detail.runTimeTicks - playedTicks) ~/ 10,
+    );
+    final endingAt = DateTime.now().add(remaining);
+    final hour = endingAt.hour.toString().padLeft(2, '0');
+    final minute = endingAt.minute.toString().padLeft(2, '0');
+    return '结束于 $hour:$minute';
+  }
+
+  String _videoLabel(EmbyPcMediaStream? stream) {
+    if (stream == null) return '';
+    final width = stream.width ?? detail.width ?? 0;
+    final height = stream.height ?? detail.height ?? 0;
+    final quality = switch ((width, height)) {
+      (>= 3800, _) || (_, >= 2000) => '4K',
+      (>= 1900, _) || (_, >= 1000) => '1080P',
+      (>= 1200, _) || (_, >= 700) => '720P',
+      (> 0, _) || (_, > 0) => 'SD',
+      _ => '',
+    };
+    return [
+      quality,
+      if (stream.codec.isNotEmpty) stream.codec.toUpperCase(),
+    ].where((value) => value.isNotEmpty).join(' ');
+  }
+
+  String _audioLabel(EmbyPcMediaStream? stream) {
+    if (stream == null) return '';
+    final channelLabel = stream.channelLayout.isNotEmpty
+        ? stream.channelLayout
+        : switch (stream.channels) {
+            1 => 'mono',
+            2 => 'stereo',
+            6 => '5.1',
+            8 => '7.1',
+            int channels => '$channels 声道',
+            _ => '',
+          };
+    return [
+      if (stream.codec.isNotEmpty) stream.codec.toUpperCase(),
+      channelLabel,
+      if (stream.isDefault == true) '(默认)',
+    ].where((value) => value.isNotEmpty).join(' ');
+  }
+
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     final meta = <String>[
       if (detail.productionYear != null) '${detail.productionYear}',
       if (detail.officialRating.isNotEmpty) detail.officialRating,
-      if (detail.runtimeLabel.isNotEmpty) detail.runtimeLabel,
       if (detail.communityRating != null)
         '★ ${detail.communityRating!.toStringAsFixed(1)}',
     ];
+    final videoStream = _preferredStream('Video');
+    final audioStream = _preferredStream('Audio');
+    final mediaMeta = <String>[
+      _typeLabel(),
+      detail.runtimeLabel,
+      _endingTimeLabel(),
+      _videoLabel(videoStream),
+      _audioLabel(audioStream),
+    ].where((value) => value.isNotEmpty).toList();
+    final playedTicks = detail.runTimeTicks > 0
+        ? detail.playbackPositionTicks.clamp(0, detail.runTimeTicks).toInt()
+        : 0;
+    final hasPlaybackProgress = playedTicks > 0;
+    final playbackProgress =
+        hasPlaybackProgress ? playedTicks / detail.runTimeTicks : 0.0;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           detail.name,
           style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-            // 媒体主标题沿用分区标题的字体，保持详情页视觉统一。
-            fontFamily: 'Microsoft YaHei UI',
-            fontWeight: FontWeight.w600,
-          ),
+                // 媒体主标题沿用分区标题的字体，保持详情页视觉统一。
+                fontFamily: 'Microsoft YaHei UI',
+                fontWeight: FontWeight.w600,
+              ),
         ),
         if (meta.isNotEmpty) ...[
           const SizedBox(height: 8),
           Text(meta.join('  ·  ')),
+        ],
+        if (mediaMeta.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(
+            mediaMeta.join('   '),
+            style: TextStyle(color: colors.onSurfaceVariant),
+          ),
+        ],
+        if (hasPlaybackProgress) ...[
+          const SizedBox(height: 18),
+          // 续播位置与百分比同时展示，避免用户只能依靠进度条估算。
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '上次播放至 ${_formatPosition(playedTicks)}'
+                  ' / ${_formatPosition(detail.runTimeTicks)}',
+                  style: TextStyle(color: colors.onSurfaceVariant),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                '${(playbackProgress * 100).round()}%',
+                style: TextStyle(color: colors.onSurfaceVariant),
+              ),
+            ],
+          ),
+          const SizedBox(height: 7),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(2),
+            child: LinearProgressIndicator(
+              value: playbackProgress,
+              minHeight: 5,
+              color: colors.primary,
+              backgroundColor: colors.surfaceContainerHighest,
+            ),
+          ),
         ],
         const SizedBox(height: 20),
         Wrap(
@@ -1425,9 +1549,7 @@ class _Summary extends StatelessWidget {
             FilledButton.icon(
               onPressed: () => onPlay(null),
               icon: const Icon(Icons.play_arrow_rounded),
-              label: Text(
-                detail.playbackPositionTicks > 0 ? '继续播放' : '播放',
-              ),
+              label: Text(detail.playbackPositionTicks > 0 ? '继续播放' : '播放'),
             ),
             OutlinedButton.icon(
               onPressed: favoriteBusy ? null : onFavorite,
@@ -1463,22 +1585,19 @@ class _SectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      if (icon != null) ...[
-        Icon(icon, size: 20),
-        const SizedBox(width: 8),
-      ],
-      Text(
-        title,
-        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-          // 微软雅黑 UI 是 Windows 主流中文桌面产品常用的清晰无衬线字体。
-          fontFamily: 'Microsoft YaHei UI',
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    ],
-  );
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[Icon(icon, size: 20), const SizedBox(width: 8)],
+          Text(
+            title,
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  // 微软雅黑 UI 是 Windows 主流中文桌面产品常用的清晰无衬线字体。
+                  fontFamily: 'Microsoft YaHei UI',
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+        ],
+      );
 }
 
 class _DetailError extends StatelessWidget {
@@ -1489,28 +1608,30 @@ class _DetailError extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Center(
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const Icon(Icons.error_outline, size: 48),
-        const SizedBox(height: 12),
-        Text(message),
-        const SizedBox(height: 16),
-        OutlinedButton.icon(
-          onPressed: onRetry,
-          icon: const Icon(Icons.refresh),
-          label: const Text('重试'),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, size: 48),
+            const SizedBox(height: 12),
+            Text(message),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh),
+              label: const Text('重试'),
+            ),
+          ],
         ),
-      ],
-    ),
-  );
+      );
 }
 
 String _ticksLabel(int ticks) {
   final duration = Duration(microseconds: ticks ~/ 10);
   final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
   final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
-  return duration.inHours > 0 ? '${duration.inHours}:$minutes:$seconds' : '$minutes:$seconds';
+  return duration.inHours > 0
+      ? '${duration.inHours}:$minutes:$seconds'
+      : '$minutes:$seconds';
 }
 
 String _fileSize(int size) {
@@ -1571,10 +1692,8 @@ void _showArtworkPreview(
 ) {
   showDialog<void>(
     context: context,
-    builder: (_) => _ArtworkPreviewDialog(
-      images: images,
-      initialIndex: initialIndex,
-    ),
+    builder: (_) =>
+        _ArtworkPreviewDialog(images: images, initialIndex: initialIndex),
   );
 }
 
@@ -1616,10 +1735,7 @@ List<_InformationRow> _mediaStreamRows(EmbyPcMediaStream stream) {
     );
     add('长宽比', stream.aspectRatio);
     add('交错', _booleanLabel(stream.isInterlaced));
-    add(
-      '帧率',
-      _numberLabel(stream.averageFrameRate ?? stream.realFrameRate),
-    );
+    add('帧率', _numberLabel(stream.averageFrameRate ?? stream.realFrameRate));
     add('比特率', _bitrateLabel(stream.bitrate));
     add('基色', stream.colorPrimaries);
     add('色域', stream.colorSpace);
@@ -1645,10 +1761,10 @@ String _numberLabel(double? value) {
   if (value == null) return '';
   return value == value.roundToDouble()
       ? value.toInt().toString()
-      : value.toStringAsFixed(3).replaceFirst(RegExp(r'0+$'), '').replaceFirst(
-          RegExp(r'\.$'),
-          '',
-        );
+      : value
+          .toStringAsFixed(3)
+          .replaceFirst(RegExp(r'0+$'), '')
+          .replaceFirst(RegExp(r'\.$'), '');
 }
 
 String _bitrateLabel(int? bitrate) {
