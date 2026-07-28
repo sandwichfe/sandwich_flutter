@@ -31,7 +31,6 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
     final backdrop = widget.imageStyle == 'backdrop';
     final hasImage =
         backdrop ? widget.item.hasBackdropImage : widget.item.hasPrimaryImage;
@@ -46,39 +45,20 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
             : (widget.item.playbackPositionTicks / widget.item.runTimeTicks)
                 .clamp(0.0, 1.0)
                 .toDouble();
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      cursor: SystemMouseCursors.click,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOut,
-        decoration: BoxDecoration(
-          color: colors.surface,
-          borderRadius: BorderRadius.circular(7),
-          border: Border.all(
-            color:
-                _hovered
-                    ? colors.primary.withValues(alpha: 0.62)
-                    : colors.outlineVariant,
-          ),
-          boxShadow:
-              _hovered
-                  ? [
-                    BoxShadow(
-                      color: colors.shadow.withValues(alpha: 0.16),
-                      blurRadius: 14,
-                      offset: const Offset(0, 5),
-                    ),
-                  ]
-                  : const [],
-        ),
+    return Semantics(
+      button: true,
+      label: '打开 ${widget.item.name}',
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        cursor: SystemMouseCursors.click,
         child: Material(
           color: Colors.transparent,
-          borderRadius: BorderRadius.circular(7),
+          borderRadius: BorderRadius.circular(6),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             onTap: widget.onOpen,
+            hoverColor: Colors.transparent,
             child:
                 backdrop
                     ? _buildBackdropCard(
@@ -102,65 +82,17 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
     required String imageUrl,
     required double progress,
   }) {
-    final colors = Theme.of(context).colorScheme;
-    return Stack(
-      fit: StackFit.expand,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        EmbyPcNetworkImage(url: imageUrl),
-        const DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Colors.transparent, Color(0xE6000000)],
-              stops: [0.40, 1.0],
-            ),
+        Expanded(
+          child: _buildImageFrame(
+            context,
+            imageUrl: imageUrl,
+            progress: progress,
           ),
         ),
-        AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          color:
-              _hovered
-                  ? Colors.black.withValues(alpha: 0.24)
-                  : Colors.transparent,
-        ),
-        Positioned(
-          left: 12,
-          right: 50,
-          bottom: progress > 0 ? 10 : 8,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                widget.item.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 3),
-              _MediaMetadata(item: widget.item, onDark: true),
-            ],
-          ),
-        ),
-        if (_qualityLabel(widget.item).isNotEmpty)
-          Positioned(
-            top: 8,
-            right: 8,
-            child: _MediaBadge(label: _qualityLabel(widget.item)),
-          ),
-        _buildCardActions(bottom: progress > 0 ? 8 : 6),
-        if (progress > 0)
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: _PlaybackProgress(value: progress, color: colors.primary),
-          ),
+        _buildTileCaption(context),
       ],
     );
   }
@@ -170,59 +102,108 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
     required String imageUrl,
     required double progress,
   }) {
-    final colors = Theme.of(context).colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              EmbyPcNetworkImage(url: imageUrl),
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                color:
-                    _hovered
-                        ? Colors.black.withValues(alpha: 0.34)
-                        : Colors.transparent,
-              ),
-              if (_qualityLabel(widget.item).isNotEmpty)
-                Positioned(
-                  top: 8,
-                  right: 8,
-                  child: _MediaBadge(label: _qualityLabel(widget.item)),
-                ),
-              _buildCardActions(bottom: progress > 0 ? 8 : 6),
-              if (progress > 0)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: _PlaybackProgress(
-                    value: progress,
-                    color: colors.primary,
-                  ),
-                ),
-            ],
+          child: _buildImageFrame(
+            context,
+            imageUrl: imageUrl,
+            progress: progress,
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                widget.item.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 4),
-              _MediaMetadata(item: widget.item),
-            ],
-          ),
-        ),
+        _buildTileCaption(context),
       ],
+    );
+  }
+
+  // 只让图片区域承担边框和阴影，文字直接落在画布上，列表会更轻、更接近桌面媒体库。
+  Widget _buildImageFrame(
+    BuildContext context, {
+    required String imageUrl,
+    required double progress,
+  }) {
+    final colors = Theme.of(context).colorScheme;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color:
+              _hovered
+                  ? colors.primary.withValues(alpha: 0.72)
+                  : colors.outlineVariant.withValues(alpha: 0.78),
+        ),
+        boxShadow:
+            _hovered
+                ? [
+                  BoxShadow(
+                    color: colors.shadow.withValues(alpha: 0.15),
+                    blurRadius: 16,
+                    offset: const Offset(0, 6),
+                  ),
+                ]
+                : const [],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(5),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            EmbyPcNetworkImage(url: imageUrl),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              color:
+                  _hovered
+                      ? Colors.black.withValues(alpha: 0.28)
+                      : Colors.transparent,
+            ),
+            if (_qualityLabel(widget.item).isNotEmpty)
+              Positioned(
+                top: 8,
+                right: 8,
+                child: _MediaBadge(label: _qualityLabel(widget.item)),
+              ),
+            _buildCardActions(bottom: progress > 0 ? 8 : 6),
+            if (progress > 0)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: _PlaybackProgress(
+                  value: progress,
+                  color: colors.primary,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTileCaption(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(2, 9, 2, 1),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AnimatedDefaultTextStyle(
+            duration: const Duration(milliseconds: 180),
+            style: (Theme.of(context).textTheme.titleMedium ??
+                    const TextStyle(fontSize: 14, fontWeight: FontWeight.w600))
+                .copyWith(color: _hovered ? colors.primary : colors.onSurface),
+            child: Text(
+              widget.item.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(height: 4),
+          _MediaMetadata(item: widget.item),
+        ],
+      ),
     );
   }
 

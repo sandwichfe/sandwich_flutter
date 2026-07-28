@@ -428,7 +428,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     final colors = Theme.of(context).colorScheme;
     return SizedBox(
       width: width,
-      height: 40,
+      height: 42,
       child: TextField(
         controller: _searchController,
         enabled: !_loading,
@@ -437,7 +437,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         decoration: InputDecoration(
           isDense: true,
           filled: true,
-          fillColor: colors.surface,
+          fillColor: colors.surface.withValues(alpha: 0.82),
           hintText: '搜索标题、文件名',
           prefixIcon: const Icon(Icons.search, size: 19),
           suffixIcon:
@@ -452,14 +452,14 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                     onPressed: _loading ? null : _clearSearch,
                     icon: const Icon(Icons.clear, size: 18),
                   ),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(7)),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
           enabledBorder: OutlineInputBorder(
             borderSide: BorderSide(color: colors.outlineVariant),
-            borderRadius: BorderRadius.circular(7),
+            borderRadius: BorderRadius.circular(6),
           ),
           focusedBorder: OutlineInputBorder(
-            borderSide: BorderSide(color: colors.primary),
-            borderRadius: BorderRadius.circular(7),
+            borderSide: BorderSide(color: colors.primary, width: 1.4),
+            borderRadius: BorderRadius.circular(6),
           ),
         ),
       ),
@@ -470,11 +470,12 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     final colors = Theme.of(context).colorScheme;
     // 刷新、媒体库排序和应用设置收进用户菜单，顶部只保留搜索和用户两个主要入口。
     return SizedBox.square(
-      dimension: 44,
+      dimension: 42,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          shape: BoxShape.circle,
+          color: colors.surface.withValues(alpha: 0.82),
           border: Border.all(color: colors.outlineVariant),
+          borderRadius: BorderRadius.circular(6),
         ),
         child: PopupMenuButton<String>(
           tooltip: '账号',
@@ -542,12 +543,16 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   Widget _buildSidebar(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     return SizedBox(
-      width: _sidebarCollapsed ? 68 : 236,
+      width: _sidebarCollapsed ? 64 : 248,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          // 侧栏使用中间表面层，与画布和媒体卡片形成三级层次。
+          // 侧栏保留一层极轻的主题色，让导航与内容画布自然分区。
           color: colors.surfaceContainerLow,
-          border: Border(right: BorderSide(color: colors.outlineVariant)),
+          border: Border(
+            right: BorderSide(
+              color: colors.outlineVariant.withValues(alpha: 0.72),
+            ),
+          ),
         ),
         child: Column(
           children: [
@@ -555,7 +560,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
               child: ListView(
                 padding: EdgeInsets.fromLTRB(
                   _sidebarCollapsed ? 8 : 10,
-                  12,
+                  16,
                   _sidebarCollapsed ? 8 : 10,
                   8,
                 ),
@@ -622,94 +627,105 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   }
 
   Widget _buildContent(BuildContext context, {required bool compact}) {
-    return Column(
-      children: [
-        _buildWorkspaceHeader(context, compact: compact),
-        _buildToolbar(context),
-        if (_error.isNotEmpty)
-          MaterialBanner(
-            content: Text(_error),
-            actions: [
-              TextButton(
-                onPressed: () => _loadItems(reset: true),
-                child: const Text('重试'),
-              ),
-            ],
-          ),
-        Expanded(
-          child:
-              _loading && _items.isEmpty
-                  ? const Center(child: CircularProgressIndicator())
-                  : _items.isEmpty
-                  ? const _EmptyState()
-                  : CustomScrollView(
-                    controller: _scrollController,
-                    slivers: [
-                      if (_featureItem case final item?)
+    final colors = Theme.of(context).colorScheme;
+    return ColoredBox(
+      color: colors.surfaceContainerLowest,
+      child: Column(
+        children: [
+          _buildWorkspaceHeader(context, compact: compact),
+          _buildToolbar(context),
+          if (_error.isNotEmpty)
+            MaterialBanner(
+              content: Text(_error),
+              actions: [
+                TextButton(
+                  onPressed: () => _loadItems(reset: true),
+                  child: const Text('重试'),
+                ),
+              ],
+            ),
+          Expanded(
+            child:
+                _loading && _items.isEmpty
+                    ? const Center(child: CircularProgressIndicator())
+                    : _items.isEmpty
+                    ? const _EmptyState()
+                    : CustomScrollView(
+                      controller: _scrollController,
+                      slivers: [
+                        if (_featureItem case final item?)
+                          SliverToBoxAdapter(
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(
+                                26,
+                                14,
+                                26,
+                                10,
+                              ),
+                              child: EmbyPcFeatureBanner(
+                                item: item,
+                                onOpen: () => _openItem(item),
+                                onPlay: () => _playItem(item),
+                              ),
+                            ),
+                          ),
                         SliverToBoxAdapter(
                           child: Padding(
-                            padding: const EdgeInsets.fromLTRB(18, 16, 18, 8),
-                            child: EmbyPcFeatureBanner(
-                              item: item,
-                              onOpen: () => _openItem(item),
-                              onPlay: () => _playItem(item),
+                            padding: EdgeInsets.fromLTRB(
+                              26,
+                              _featureItem == null ? 18 : 14,
+                              26,
+                              12,
+                            ),
+                            child: Text(
+                              _featureItem == null ? '全部媒体' : '媒体库',
+                              style: Theme.of(context).textTheme.titleLarge,
                             ),
                           ),
                         ),
-                      SliverToBoxAdapter(
-                        child: Padding(
-                          padding: EdgeInsets.fromLTRB(
-                            18,
-                            _featureItem == null ? 16 : 12,
-                            18,
-                            10,
-                          ),
-                          child: Text(
-                            _featureItem == null ? '全部媒体' : '媒体库',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                        ),
-                      ),
-                      SliverPadding(
-                        padding: const EdgeInsets.fromLTRB(18, 0, 18, 24),
-                        sliver: SliverGrid.builder(
-                          gridDelegate:
-                              SliverGridDelegateWithMaxCrossAxisExtent(
-                                maxCrossAxisExtent:
-                                    _imageStyle == 'backdrop' ? 340 : 210,
-                                crossAxisSpacing: 14,
-                                mainAxisSpacing: 16,
-                                childAspectRatio:
-                                    _imageStyle == 'backdrop' ? 1.60 : 0.58,
-                              ),
-                          itemCount: _items.length,
-                          itemBuilder: (context, index) {
-                            final item = _items[index];
-                            return EmbyPcMediaTile(
-                              item: item,
-                              imageStyle: _imageStyle,
-                              favoriteBusy: _favoriteBusyIds.contains(item.id),
-                              onOpen: () => _openItem(item),
-                              onPlay:
-                                  _view == 'favorite-people'
-                                      ? null
-                                      : () => _playItem(item),
-                              onFavorite: () => _toggleFavorite(item),
-                            );
-                          },
-                        ),
-                      ),
-                      if (_loadingMore)
-                        const SliverToBoxAdapter(
-                          child: Padding(
-                            padding: EdgeInsets.only(bottom: 24),
-                            child: Center(child: CircularProgressIndicator()),
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(26, 0, 26, 30),
+                          sliver: SliverGrid.builder(
+                            gridDelegate:
+                                SliverGridDelegateWithMaxCrossAxisExtent(
+                                  maxCrossAxisExtent:
+                                      _imageStyle == 'backdrop' ? 320 : 196,
+                                  crossAxisSpacing: 20,
+                                  mainAxisSpacing: 22,
+                                  childAspectRatio:
+                                      _imageStyle == 'backdrop' ? 1.40 : 0.56,
+                                ),
+                            itemCount: _items.length,
+                            itemBuilder: (context, index) {
+                              final item = _items[index];
+                              return EmbyPcMediaTile(
+                                item: item,
+                                imageStyle: _imageStyle,
+                                favoriteBusy: _favoriteBusyIds.contains(
+                                  item.id,
+                                ),
+                                onOpen: () => _openItem(item),
+                                onPlay:
+                                    _view == 'favorite-people'
+                                        ? null
+                                        : () => _playItem(item),
+                                onFavorite: () => _toggleFavorite(item),
+                              );
+                            },
                           ),
                         ),
-                    ],
-                  ),
-        ),
-      ],
+                        if (_loadingMore)
+                          const SliverToBoxAdapter(
+                            child: Padding(
+                              padding: EdgeInsets.only(bottom: 24),
+                              child: Center(child: CircularProgressIndicator()),
+                            ),
+                          ),
+                      ],
+                    ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -730,13 +746,10 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   Widget _buildWorkspaceHeader(BuildContext context, {required bool compact}) {
     final colors = Theme.of(context).colorScheme;
     return Material(
-      color: colors.surfaceContainerLow,
+      color: colors.surfaceContainerLowest,
       child: Container(
-        constraints: const BoxConstraints(minHeight: 66),
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-        decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: colors.outlineVariant)),
-        ),
+        constraints: const BoxConstraints(minHeight: 76),
+        padding: const EdgeInsets.fromLTRB(26, 16, 26, 8),
         child: Row(
           children: [
             if (compact) ...[
@@ -751,7 +764,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                       _pageTitle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.headlineSmall,
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(fontSize: 34, fontWeight: FontWeight.w600),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -759,15 +773,15 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                     _loading && _items.isEmpty ? '加载中' : '$_total 项',
                     style: TextStyle(
                       color: colors.onSurfaceVariant,
-                      fontSize: 13,
+                      fontSize: 12,
                     ),
                   ),
                 ],
               ),
             ),
             const SizedBox(width: 16),
-            _buildSearchField(compact ? 230 : 320),
-            const SizedBox(width: 10),
+            _buildSearchField(compact ? 230 : 340),
+            const SizedBox(width: 12),
             _buildAccountMenu(context),
           ],
         ),
@@ -802,15 +816,16 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   );
 
   Widget _buildToolbar(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Material(
-      color: Theme.of(context).colorScheme.surfaceContainerLow,
+      color: colors.surfaceContainerLowest,
       child: Container(
-        constraints: const BoxConstraints(minHeight: 50),
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+        constraints: const BoxConstraints(minHeight: 54),
+        padding: const EdgeInsets.fromLTRB(26, 4, 26, 10),
         decoration: BoxDecoration(
           border: Border(
             bottom: BorderSide(
-              color: Theme.of(context).colorScheme.outlineVariant,
+              color: colors.outlineVariant.withValues(alpha: 0.72),
             ),
           ),
         ),
@@ -1084,9 +1099,9 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
           _loading ? null : (selection) => _updateImageStyle(selection.first),
       style: ButtonStyle(
         visualDensity: VisualDensity.compact,
-        minimumSize: const WidgetStatePropertyAll(Size(0, 36)),
+        minimumSize: const WidgetStatePropertyAll(Size(0, 38)),
         shape: WidgetStatePropertyAll(
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
         ),
       ),
     );
@@ -1200,7 +1215,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     return OutlinedButton.icon(
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
-        minimumSize: const Size(0, 36),
+        minimumSize: const Size(0, 38),
         padding: const EdgeInsets.symmetric(horizontal: 12),
         foregroundColor: active ? colors.primary : colors.onSurface,
         backgroundColor:
@@ -1208,7 +1223,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         side: BorderSide(
           color: active ? colors.primary : colors.outlineVariant,
         ),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
       ),
       icon: Icon(icon, size: 17),
       label: Row(
@@ -1252,28 +1267,28 @@ class _SidebarButton extends StatelessWidget {
           Material(
             color:
                 active
-                    ? colors.primary.withValues(alpha: 0.10)
+                    ? colors.primary.withValues(alpha: 0.11)
                     : Colors.transparent,
             borderRadius: BorderRadius.circular(6),
             clipBehavior: Clip.antiAlias,
             child: InkWell(
               onTap: onPressed,
               child: SizedBox(
-                height: 42,
+                height: 44,
                 child: Row(
                   mainAxisAlignment:
                       collapsed
                           ? MainAxisAlignment.center
                           : MainAxisAlignment.start,
                   children: [
-                    SizedBox(width: collapsed ? 0 : 12),
+                    SizedBox(width: collapsed ? 0 : 14),
                     Icon(
                       icon,
                       size: 20,
                       color: active ? colors.primary : colors.onSurfaceVariant,
                     ),
                     if (!collapsed) ...[
-                      const SizedBox(width: 10),
+                      const SizedBox(width: 11),
                       Expanded(
                         child: Text(
                           title,
@@ -1315,7 +1330,7 @@ class _SidebarButton extends StatelessWidget {
                             ),
                           ),
                         ),
-                      const SizedBox(width: 9),
+                      const SizedBox(width: 11),
                     ],
                   ],
                 ),
@@ -1325,8 +1340,8 @@ class _SidebarButton extends StatelessWidget {
           if (active)
             Positioned(
               left: 0,
-              top: 8,
-              bottom: 8,
+              top: 9,
+              bottom: 9,
               child: Container(
                 width: 3,
                 decoration: BoxDecoration(
@@ -1349,7 +1364,7 @@ class _SidebarSectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
+    padding: const EdgeInsets.fromLTRB(12, 8, 12, 9),
     child: Text(
       title,
       style: TextStyle(
