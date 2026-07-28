@@ -416,8 +416,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   }
 
   String get _pageTitle {
-    if (_view == 'favorite-movies') return '喜欢的影片';
-    if (_view == 'favorite-people') return '喜欢的演员';
+    if (_view == 'favorite-movies') return '收藏影片';
+    if (_view == 'favorite-people') return '收藏演员';
     for (final library in _libraries) {
       if (library.id == _activeId) return library.name;
     }
@@ -577,7 +577,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                     ),
                   ),
                   Divider(height: _sidebarCollapsed ? 18 : 28),
-                  if (!_sidebarCollapsed) const _SidebarSectionTitle('我喜欢的'),
+                  if (!_sidebarCollapsed) const _SidebarSectionTitle('收藏'),
                   _SidebarButton(
                     icon: Icons.movie_outlined,
                     title: '影片',
@@ -765,12 +765,15 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.headlineSmall
-                          ?.copyWith(fontSize: 34, fontWeight: FontWeight.w600),
+                          ?.copyWith(fontSize: 20, fontWeight: FontWeight.w600),
                     ),
                   ),
                   const SizedBox(width: 10),
+                  // 加载进度紧跟页面标题，切换媒体库后可直接确认当前已展示数量。
                   Text(
-                    _loading && _items.isEmpty ? '加载中' : '$_total 项',
+                    _loading && _items.isEmpty
+                        ? '加载中'
+                        : '已加载 ${_items.length} 条 /  $_total 条',
                     style: TextStyle(
                       color: colors.onSurfaceVariant,
                       fontSize: 12,
@@ -808,8 +811,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                 PopupMenuItem(value: library.id, child: Text(library.name)),
           ),
           const PopupMenuDivider(),
-          const PopupMenuItem(value: 'favorite-movies', child: Text('喜欢的影片')),
-          const PopupMenuItem(value: 'favorite-people', child: Text('喜欢的演员')),
+          const PopupMenuItem(value: 'favorite-movies', child: Text('收藏影片')),
+          const PopupMenuItem(value: 'favorite-people', child: Text('收藏演员')),
           const PopupMenuDivider(),
           const PopupMenuItem(value: 'order', child: Text('调整媒体库顺序')),
         ],
