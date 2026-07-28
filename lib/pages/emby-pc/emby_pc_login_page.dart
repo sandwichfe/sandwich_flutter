@@ -83,10 +83,7 @@ class _EmbyPcLoginPageState extends State<EmbyPcLoginPage> {
             // 左侧色带延续项目的绿色 Emby 入口，但不干扰表单阅读。
             Align(
               alignment: Alignment.centerLeft,
-              child: Container(
-                width: 12,
-                color: colors.primary,
-              ),
+              child: Container(width: 12, color: colors.primary),
             ),
             Center(
               child: SingleChildScrollView(
@@ -114,12 +111,13 @@ class _EmbyPcLoginPageState extends State<EmbyPcLoginPage> {
                                 const SizedBox(width: 12),
                                 Text(
                                   'Emby',
-                                  style: Theme.of(context).textTheme.headlineSmall
-                                      ?.copyWith(
-                                        // 登录页品牌标题与桌面端其它标题保持统一字体。
-                                        fontFamily: 'Microsoft YaHei UI',
-                                        fontWeight: FontWeight.w600,
-                                      ),
+                                  style: Theme.of(
+                                    context,
+                                  ).textTheme.headlineSmall?.copyWith(
+                                    // 登录页品牌标题与桌面端其它标题保持统一字体。
+                                    fontFamily: 'Microsoft YaHei UI',
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
                               ],
                             ),
@@ -158,11 +156,14 @@ class _EmbyPcLoginPageState extends State<EmbyPcLoginPage> {
                                 prefixIcon: const Icon(Icons.lock_outline),
                                 suffixIcon: IconButton(
                                   tooltip: _passwordVisible ? '隐藏密码' : '显示密码',
-                                  onPressed: _loading
-                                      ? null
-                                      : () => setState(
-                                          () => _passwordVisible = !_passwordVisible,
-                                        ),
+                                  onPressed:
+                                      _loading
+                                          ? null
+                                          : () => setState(
+                                            () =>
+                                                _passwordVisible =
+                                                    !_passwordVisible,
+                                          ),
                                   icon: Icon(
                                     _passwordVisible
                                         ? Icons.visibility_off_outlined
@@ -178,11 +179,13 @@ class _EmbyPcLoginPageState extends State<EmbyPcLoginPage> {
                               controlAffinity: ListTileControlAffinity.leading,
                               title: const Text('记住密码'),
                               value: _rememberPassword,
-                              onChanged: _loading
-                                  ? null
-                                  : (value) => setState(
-                                      () => _rememberPassword = value ?? false,
-                                    ),
+                              onChanged:
+                                  _loading
+                                      ? null
+                                      : (value) => setState(
+                                        () =>
+                                            _rememberPassword = value ?? false,
+                                      ),
                             ),
                             if (_error.isNotEmpty) ...[
                               const SizedBox(height: 4),
@@ -194,12 +197,15 @@ class _EmbyPcLoginPageState extends State<EmbyPcLoginPage> {
                             const SizedBox(height: 18),
                             FilledButton.icon(
                               onPressed: _loading ? null : _login,
-                              icon: _loading
-                                  ? const SizedBox.square(
-                                      dimension: 18,
-                                      child: CircularProgressIndicator(strokeWidth: 2),
-                                    )
-                                  : const Icon(Icons.login),
+                              icon:
+                                  _loading
+                                      ? const SizedBox.square(
+                                        dimension: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                      : const Icon(Icons.login),
                               label: Text(_loading ? '正在登录' : '登录'),
                             ),
                           ],

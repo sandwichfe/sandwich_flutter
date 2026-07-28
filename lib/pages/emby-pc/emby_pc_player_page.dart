@@ -235,10 +235,7 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
               ? const Center(child: CircularProgressIndicator())
               : _error.isNotEmpty
               ? Center(
-                child: _PlayerMessage(
-                  icon: Icons.error_outline,
-                  text: _error,
-                ),
+                child: _PlayerMessage(icon: Icons.error_outline, text: _error),
               )
               : !_playerReady
               ? const Center(
@@ -269,8 +266,7 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
                         position: _position,
                         duration: _duration,
                         isPlaying: _isPlaying,
-                        thumbnailPreviewController:
-                            _thumbnailPreviewController,
+                        thumbnailPreviewController: _thumbnailPreviewController,
                         muted: _muted,
                         volume: _volume,
                         onTogglePlay: _togglePlay,
@@ -378,10 +374,7 @@ class _ThumbnailPreviewFrame {
   final int index;
   final Uint8List imageBytes;
 
-  const _ThumbnailPreviewFrame({
-    required this.index,
-    required this.imageBytes,
-  });
+  const _ThumbnailPreviewFrame({required this.index, required this.imageBytes});
 }
 
 class _ThumbnailPreviewController {
@@ -390,6 +383,7 @@ class _ThumbnailPreviewController {
   int _revision = 0;
 
   bool get isAvailable => _previewData != null;
+
   int get revision => _revision;
 
   // 当前先使用已加载的 BIF；以后接入 Trickplay 时仍由该控制器统一提供图片。
@@ -595,8 +589,7 @@ class _PlayerControls extends StatelessWidget {
                               ),
                               // 使用播放器自带的全屏路由，并同步桌面端的原生窗口状态。
                               IconButton(
-                                tooltip:
-                                    isFullscreen(context) ? '退出全屏' : '全屏',
+                                tooltip: isFullscreen(context) ? '退出全屏' : '全屏',
                                 color: Colors.white,
                                 visualDensity: VisualDensity.compact,
                                 onPressed:

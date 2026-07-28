@@ -21,27 +21,31 @@ class _SettingsPageState extends State<SettingsPage> {
     Color temp = initialColor;
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
-        title: Text(title),
-        content: SingleChildScrollView(
-          child: ColorPicker(
-            pickerColor: temp,
-            onColorChanged: (c) => temp = c,
-            labelTypes: const [],
-            pickerAreaHeightPercent: 0.8,
+      builder:
+          (_) => AlertDialog(
+            title: Text(title),
+            content: SingleChildScrollView(
+              child: ColorPicker(
+                pickerColor: temp,
+                onColorChanged: (c) => temp = c,
+                labelTypes: const [],
+                pickerAreaHeightPercent: 0.8,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('取消'),
+              ),
+              TextButton(
+                onPressed: () {
+                  onConfirmed(temp);
+                  Navigator.pop(context);
+                },
+                child: const Text('确认'),
+              ),
+            ],
           ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
-          TextButton(
-            onPressed: () {
-              onConfirmed(temp);
-              Navigator.pop(context);
-            },
-            child: const Text('确认'),
-          ),
-        ],
-      ),
     );
   }
 
@@ -51,42 +55,50 @@ class _SettingsPageState extends State<SettingsPage> {
       appBar: AppBar(title: const Text('设置')),
       body: ListenableBuilder(
         listenable: _tm,
-        builder: (context, _) => ListView(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          children: [
-            const _SettingsSectionTitle('显示'),
-            SwitchListTile(
-              secondary: const Icon(Icons.dark_mode_outlined),
-              title: const Text('深色模式'),
-              subtitle: Text(_tm.brightness == Brightness.dark ? '已开启' : '已关闭'),
-              value: _tm.brightness == Brightness.dark,
-              onChanged: (v) => _tm.setBrightness(v ? Brightness.dark : Brightness.light),
+        builder:
+            (context, _) => ListView(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              children: [
+                const _SettingsSectionTitle('显示'),
+                SwitchListTile(
+                  secondary: const Icon(Icons.dark_mode_outlined),
+                  title: const Text('深色模式'),
+                  subtitle: Text(
+                    _tm.brightness == Brightness.dark ? '已开启' : '已关闭',
+                  ),
+                  value: _tm.brightness == Brightness.dark,
+                  onChanged:
+                      (v) => _tm.setBrightness(
+                        v ? Brightness.dark : Brightness.light,
+                      ),
+                ),
+                const Divider(height: 1, indent: 72),
+                const _SettingsSectionTitle('颜色'),
+                _ColorSettingTile(
+                  icon: Icons.format_color_fill_outlined,
+                  title: '背景色',
+                  color: _tm.backgroundColor,
+                  onTap:
+                      () => _pickColor(
+                        title: '选择背景色',
+                        initialColor: _tm.backgroundColor,
+                        onConfirmed: _tm.setBackgroundColor,
+                      ),
+                ),
+                const Divider(height: 1, indent: 72),
+                _ColorSettingTile(
+                  icon: Icons.palette_outlined,
+                  title: '主题色',
+                  color: _tm.seedColor,
+                  onTap:
+                      () => _pickColor(
+                        title: '选择主题色',
+                        initialColor: _tm.seedColor,
+                        onConfirmed: _tm.setSeedColor,
+                      ),
+                ),
+              ],
             ),
-            const Divider(height: 1, indent: 72),
-            const _SettingsSectionTitle('颜色'),
-            _ColorSettingTile(
-              icon: Icons.format_color_fill_outlined,
-              title: '背景色',
-              color: _tm.backgroundColor,
-              onTap: () => _pickColor(
-                title: '选择背景色',
-                initialColor: _tm.backgroundColor,
-                onConfirmed: _tm.setBackgroundColor,
-              ),
-            ),
-            const Divider(height: 1, indent: 72),
-            _ColorSettingTile(
-              icon: Icons.palette_outlined,
-              title: '主题色',
-              color: _tm.seedColor,
-              onTap: () => _pickColor(
-                title: '选择主题色',
-                initialColor: _tm.seedColor,
-                onConfirmed: _tm.setSeedColor,
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -104,9 +116,9 @@ class _SettingsSectionTitle extends StatelessWidget {
       child: Text(
         title,
         style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: Theme.of(context).colorScheme.primary,
-              fontWeight: FontWeight.w600,
-            ),
+          color: Theme.of(context).colorScheme.primary,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }
@@ -128,7 +140,8 @@ class _ColorSettingTile extends StatelessWidget {
 
   String _colorHex(Color value) {
     String component(int channel) => channel.toRadixString(16).padLeft(2, '0');
-    return '#${component(value.red)}${component(value.green)}${component(value.blue)}'.toUpperCase();
+    return '#${component(value.red)}${component(value.green)}${component(value.blue)}'
+        .toUpperCase();
   }
 
   @override
@@ -149,7 +162,9 @@ class _ColorSettingTile extends StatelessWidget {
               decoration: BoxDecoration(
                 color: color,
                 shape: BoxShape.circle,
-                border: Border.all(color: Theme.of(context).colorScheme.outline),
+                border: Border.all(
+                  color: Theme.of(context).colorScheme.outline,
+                ),
               ),
             ),
           ),

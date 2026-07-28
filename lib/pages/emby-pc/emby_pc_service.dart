@@ -119,9 +119,10 @@ class EmbyPcService {
     String sortBy = 'PremiereDate',
     String sortOrder = 'Descending',
   }) async {
-    final types = const {'Movie', 'Series', 'Video', 'Person'}.contains(itemType)
-        ? itemType
-        : 'Movie,Series,Video';
+    final types =
+        const {'Movie', 'Series', 'Video', 'Person'}.contains(itemType)
+            ? itemType
+            : 'Movie,Series,Video';
     final query = <String, String>{
       'Recursive': 'true',
       'IncludeItemTypes': types,
@@ -154,10 +155,10 @@ class EmbyPcService {
         'PremiereDate,DateCreated,CommunityRating,OfficialRating,RunTimeTicks,'
         'Chapters,BackdropImageTags,ScreenshotImageTags';
     return EmbyPcItem.fromJson(
-      await _get('/emby/Users/$userId/Items/$itemId', query: {
-        'Fields': fields,
-        'EnableUserData': 'true',
-      }),
+      await _get(
+        '/emby/Users/$userId/Items/$itemId',
+        query: {'Fields': fields, 'EnableUserData': 'true'},
+      ),
     );
   }
 
@@ -167,14 +168,17 @@ class EmbyPcService {
         'Overview,Genres,Tags,Studios,PremiereDate,DateCreated,SortName,'
         'ProviderIds,ExternalUrls';
     return EmbyPcItem.fromJson(
-      await _get('/emby/Users/$userId/Items/$personId', query: {
-        'Fields': fields,
-        'EnableUserData': 'true',
-      }),
+      await _get(
+        '/emby/Users/$userId/Items/$personId',
+        query: {'Fields': fields, 'EnableUserData': 'true'},
+      ),
     );
   }
 
-  Future<EmbyPcPage> getPersonItems(String personId, {int startIndex = 0}) async {
+  Future<EmbyPcPage> getPersonItems(
+    String personId, {
+    int startIndex = 0,
+  }) async {
     return EmbyPcPage.fromJson(
       await _get(
         '/emby/Users/$userId/Items',
@@ -207,9 +211,10 @@ class EmbyPcService {
 
   Future<bool> setFavorite(String itemId, bool favorite) async {
     final path = '/emby/Users/$userId/FavoriteItems/$itemId';
-    final response = favorite
-        ? await http.post(_uri(path), headers: _tokenHeader)
-        : await http.delete(_uri(path), headers: _tokenHeader);
+    final response =
+        favorite
+            ? await http.post(_uri(path), headers: _tokenHeader)
+            : await http.delete(_uri(path), headers: _tokenHeader);
     final data = _decodeResponse(response, '更新收藏状态失败');
     return data['IsFavorite'] is bool ? data['IsFavorite'] as bool : favorite;
   }
@@ -220,9 +225,10 @@ class EmbyPcService {
     int index = 0,
     int maxWidth = 720,
   }) {
-    final path = type == 'Primary'
-        ? '/emby/Items/$itemId/Images/Primary'
-        : '/emby/Items/$itemId/Images/$type/$index';
+    final path =
+        type == 'Primary'
+            ? '/emby/Items/$itemId/Images/Primary'
+            : '/emby/Items/$itemId/Images/$type/$index';
     return _uri(path, {
       'api_key': accessToken,
       'maxWidth': '$maxWidth',
@@ -230,10 +236,11 @@ class EmbyPcService {
     }).toString();
   }
 
-  String streamUrl(String itemId) => _uri(
-    '/emby/Videos/$itemId/stream',
-    {'api_key': accessToken, 'static': 'true'},
-  ).toString();
+  String streamUrl(String itemId) =>
+      _uri('/emby/Videos/$itemId/stream', {
+        'api_key': accessToken,
+        'static': 'true',
+      }).toString();
 
   // Emby 预先生成的 BIF 文件包含进度条缩略图，加载失败时由播放器降级为普通进度条。
   Future<Uint8List?> getBifPreview(String itemId, {int width = 320}) async {

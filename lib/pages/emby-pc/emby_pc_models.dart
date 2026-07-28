@@ -2,6 +2,7 @@
 class EmbyPcItem {
   final String id;
   final String name;
+
   // 排序名用于人物页摘要，缺失时由页面自动隐藏。
   final String sortName;
   final String type;
@@ -26,6 +27,7 @@ class EmbyPcItem {
   final List<EmbyPcPerson> people;
   final List<EmbyPcMediaSource> mediaSources;
   final List<EmbyPcChapter> chapters;
+
   // 外部编号和链接来自人物详情接口，也保留在通用条目模型中统一解析。
   final Map<String, String> providerIds;
   final List<EmbyPcExternalUrl> externalUrls;
@@ -141,8 +143,11 @@ class EmbyPcItem {
     screenshotImageTags: screenshotImageTags,
   );
 
-  bool get hasPrimaryImage => primaryImageTag.isNotEmpty || imageTags['Primary'] != null;
+  bool get hasPrimaryImage =>
+      primaryImageTag.isNotEmpty || imageTags['Primary'] != null;
+
   bool get hasBackdropImage => backdropImageTags.isNotEmpty;
+
   Duration get duration => Duration(microseconds: runTimeTicks ~/ 10);
 
   String get runtimeLabel {
@@ -169,6 +174,7 @@ class EmbyPcPerson {
   final String name;
   final String role;
   final String type;
+
   // 人物图片标签用于在演职人员卡片中判断是否请求头像。
   final String primaryImageTag;
   final Map<String, dynamic> imageTags;
@@ -254,9 +260,9 @@ class EmbyPcMediaSource {
         bitrate: _integer(json['Bitrate']),
         runTimeTicks: _integer(json['RunTimeTicks']),
         streams:
-            _maps(json['MediaStreams'])
-                .map(EmbyPcMediaStream.fromJson)
-                .toList(),
+            _maps(
+              json['MediaStreams'],
+            ).map(EmbyPcMediaStream.fromJson).toList(),
       );
 }
 
@@ -265,6 +271,7 @@ class EmbyPcMediaStream {
   final String title;
   final String codec;
   final String language;
+
   // 保留 Emby 返回的流详情字段，供视频与音频信息卡片逐项展示。
   final String codecTag;
   final String profile;
@@ -317,9 +324,10 @@ class EmbyPcMediaStream {
   factory EmbyPcMediaStream.fromJson(Map<String, dynamic> json) =>
       EmbyPcMediaStream(
         type: _text(json['Type']),
-        title: _text(json['DisplayTitle']).isNotEmpty
-            ? _text(json['DisplayTitle'])
-            : _text(json['Title']),
+        title:
+            _text(json['DisplayTitle']).isNotEmpty
+                ? _text(json['DisplayTitle'])
+                : _text(json['Title']),
         codec: _text(json['Codec']),
         language: _text(json['Language']),
         codecTag: _text(json['CodecTag']),
@@ -369,9 +377,13 @@ Map<String, String> _stringMap(dynamic value) => {
     if (_text(entry.value).isNotEmpty) entry.key: _text(entry.value),
 };
 
-List<Map<String, dynamic>> _maps(dynamic value) => value is List
-    ? value.whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList()
-    : <Map<String, dynamic>>[];
+List<Map<String, dynamic>> _maps(dynamic value) =>
+    value is List
+        ? value
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList()
+        : <Map<String, dynamic>>[];
 
 List<String> _strings(dynamic value) =>
     value is List ? value.map((item) => item.toString()).toList() : const [];
