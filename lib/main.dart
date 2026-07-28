@@ -37,7 +37,7 @@ void main() async {
       size: const Size(1024, 768),
       minimumSize: const Size(720, 520),
       center: true,
-      backgroundColor: ThemeManager().themeData.colorScheme.surface,
+      backgroundColor: ThemeManager().themeData.scaffoldBackgroundColor,
       title: '媒体中心',
       titleBarStyle: TitleBarStyle.hidden,
       windowButtonVisibility: false,
