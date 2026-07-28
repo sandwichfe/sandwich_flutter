@@ -864,12 +864,6 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       'IsPlayed': '已观看',
       'IsResumable': '可继续',
     };
-    const marks = {
-      '': '全部偏好',
-      'IsFavorite': '收藏',
-      'Likes': '喜欢',
-      'Dislikes': '不喜欢',
-    };
     const videoTypes = {
       '': '全部视频',
       'videofile': '视频文件',
@@ -924,28 +918,6 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                       onSelected: (value) {
                         if (value == _statusFilter) return;
                         setState(() => _statusFilter = value);
-                        _applyQuery();
-                      },
-                    ),
-                    _buildQueryGroup(
-                      title: '收藏偏好',
-                      options: marks,
-                      selected: _markFilter,
-                      availableWidth: contentWidth,
-                      onSelected: (value) {
-                        if (value == _markFilter) return;
-                        setState(() => _markFilter = value);
-                        _applyQuery();
-                      },
-                    ),
-                    _buildQueryGroup(
-                      title: '视频类型',
-                      options: videoTypes,
-                      selected: _videoType,
-                      availableWidth: contentWidth,
-                      onSelected: (value) {
-                        if (value == _videoType) return;
-                        setState(() => _videoType = value);
                         _applyQuery();
                       },
                     ),
