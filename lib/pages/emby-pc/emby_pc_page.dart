@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../settings_page.dart';
 import 'emby_pc_detail_page.dart';
 import 'emby_pc_login_page.dart';
 import 'emby_pc_models.dart';
@@ -559,7 +560,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
 
   Widget _buildAccountMenu(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    // 刷新与媒体库排序收进用户菜单，顶部只保留搜索和用户两个主要入口。
+    // 刷新、媒体库排序和应用设置收进用户菜单，顶部只保留搜索和用户两个主要入口。
     return SizedBox.square(
       dimension: 44,
       child: DecoratedBox(
@@ -576,6 +577,10 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
               _loadItems(reset: true);
             } else if (value == 'order') {
               _openOrderDialog();
+            } else if (value == 'settings') {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SettingsPage()),
+              );
             } else if (value == 'logout') {
               _logout();
             }
@@ -603,6 +608,16 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                 contentPadding: EdgeInsets.zero,
                 leading: Icon(Icons.swap_vert),
                 title: Text('调整媒体库顺序'),
+              ),
+            ),
+            const PopupMenuDivider(),
+            const PopupMenuItem(
+              value: 'settings',
+              child: ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.settings_outlined),
+                title: Text('应用设置'),
               ),
             ),
             const PopupMenuDivider(),
