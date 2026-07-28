@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:window_manager/window_manager.dart';
 
-import 'pages/launcher_page.dart';
+import 'pages/emby-pc/emby_pc_page.dart';
 import 'services/emby_service.dart';
 import 'utils/constants.dart';
 import 'utils/storage_util.dart';
@@ -66,7 +66,8 @@ class MyApp extends StatelessWidget {
       builder: (context, _) => MaterialApp(
         title: '媒体中心',
         theme: ThemeManager().themeData,
-        home: const LauncherPage(),
+        // 应用仅提供 EmbyPc 功能，启动后直接交由入口页恢复会话或展示登录页。
+        home: const EmbyPcEntryPage(),
         // 标题栏放在 Navigator 外层，确保弹窗和所有子页面都共用同一窗口框架。
         builder: (context, child) {
           final content = child ?? const SizedBox.shrink();

@@ -9,8 +9,9 @@ class ThemeManager extends ChangeNotifier {
   static const _keyBrightness = 'theme_brightness';
   static const _keySeedColor = 'theme_seed_color';
 
-  Brightness _brightness = Brightness.dark;
-  Color _seedColor = Colors.green;
+  // 首次启动默认使用浅色模式和白色主题色（#fff）。
+  Brightness _brightness = Brightness.light;
+  Color _seedColor = Colors.white;
 
   Brightness get brightness => _brightness;
   Color get seedColor => _seedColor;
@@ -23,8 +24,8 @@ class ThemeManager extends ChangeNotifier {
 
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
-    final isDark = prefs.getBool(_keyBrightness) ?? true;
-    final colorValue = prefs.getInt(_keySeedColor) ?? Colors.green.value;
+    final isDark = prefs.getBool(_keyBrightness) ?? false;
+    final colorValue = prefs.getInt(_keySeedColor) ?? Colors.white.value;
     _brightness = isDark ? Brightness.dark : Brightness.light;
     _seedColor = Color(colorValue);
     notifyListeners();
