@@ -1077,6 +1077,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   }
 
   Widget _buildLayoutControl(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return SegmentedButton<String>(
       showSelectedIcon: false,
       segments: const [
@@ -1100,6 +1101,24 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       style: ButtonStyle(
         visualDensity: VisualDensity.compact,
         minimumSize: const WidgetStatePropertyAll(Size(0, 38)),
+        // 布局选中态与侧栏、筛选项统一使用用户设置的主题色。
+        foregroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? colors.onPrimary
+              : colors.onSurface,
+        ),
+        backgroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? colors.primary
+              : Colors.transparent,
+        ),
+        side: WidgetStateProperty.resolveWith(
+          (states) => BorderSide(
+            color: states.contains(WidgetState.selected)
+                ? colors.primary
+                : colors.outlineVariant,
+          ),
+        ),
         shape: WidgetStatePropertyAll(
           RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
         ),
