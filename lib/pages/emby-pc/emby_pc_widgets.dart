@@ -33,122 +33,259 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final backdrop = widget.imageStyle == 'backdrop';
-    final hasImage = backdrop
-        ? widget.item.hasBackdropImage
-        : widget.item.hasPrimaryImage;
+    final hasImage =
+        backdrop ? widget.item.hasBackdropImage : widget.item.hasPrimaryImage;
     final imageUrl = EmbyPcService.instance.imageUrl(
       widget.item.id,
       type: backdrop ? 'Backdrop' : 'Primary',
       maxWidth: backdrop ? 720 : 420,
     );
+    final progress =
+        widget.item.runTimeTicks <= 0
+            ? 0.0
+            : (widget.item.playbackPositionTicks / widget.item.runTimeTicks)
+                .clamp(0.0, 1.0)
+                .toDouble();
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
-      child: Material(
-        // 媒体卡片底色跟随背景色，主题色只用于操作按钮和选中状态。
-        color: colors.surface,
-        borderRadius: BorderRadius.circular(6),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: widget.onOpen,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    EmbyPcNetworkImage(
-                      url: hasImage ? imageUrl : '',
-                      fit: BoxFit.cover,
+      cursor: SystemMouseCursors.click,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+        decoration: BoxDecoration(
+          color: colors.surface,
+          borderRadius: BorderRadius.circular(7),
+          border: Border.all(
+            color:
+                _hovered
+                    ? colors.primary.withValues(alpha: 0.62)
+                    : colors.outlineVariant,
+          ),
+          boxShadow:
+              _hovered
+                  ? [
+                    BoxShadow(
+                      color: colors.shadow.withValues(alpha: 0.16),
+                      blurRadius: 14,
+                      offset: const Offset(0, 5),
                     ),
-                    if (_hovered || widget.favoriteBusy)
-                      ColoredBox(
-                        color: Colors.black.withOpacity(0.46),
-                        child: Stack(
-                          children: [
-                            if (widget.onPlay != null)
-                              Center(
-                                child: IconButton.filled(
-                                  tooltip: '播放',
-                                  onPressed: widget.onPlay,
-                                  icon: const Icon(Icons.play_arrow_rounded),
-                                ),
-                              ),
-                            if (widget.onFavorite != null)
-                              Positioned(
-                                right: 8,
-                                bottom: 8,
-                                child: IconButton.filledTonal(
-                                  tooltip: widget.item.isFavorite ? '取消收藏' : '收藏',
-                                  onPressed:
-                                      widget.favoriteBusy ? null : widget.onFavorite,
-                                  icon: widget.favoriteBusy
-                                      ? const SizedBox.square(
-                                          dimension: 18,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                          ),
-                                        )
-                                      : Icon(
-                                          widget.item.isFavorite
-                                              ? Icons.favorite_rounded
-                                              : Icons.favorite_border_rounded,
-                                        ),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    if (_qualityLabel(widget.item).isNotEmpty)
-                      Positioned(
-                        top: 8,
-                        right: 8,
-                        child: _MediaBadge(label: _qualityLabel(widget.item)),
-                      ),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      widget.item.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w600),
+                  ]
+                  : const [],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(7),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: widget.onOpen,
+            child:
+                backdrop
+                    ? _buildBackdropCard(
+                      context,
+                      imageUrl: hasImage ? imageUrl : '',
+                      progress: progress,
+                    )
+                    : _buildPosterCard(
+                      context,
+                      imageUrl: hasImage ? imageUrl : '',
+                      progress: progress,
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _secondaryText(widget.item),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: colors.onSurfaceVariant,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
           ),
         ),
       ),
     );
   }
 
-  String _secondaryText(EmbyPcItem item) {
-    final values = <String>[
-      if (item.productionYear != null) '${item.productionYear}',
-      if (item.communityRating != null)
-        '★ ${item.communityRating!.toStringAsFixed(1)}',
-      if (item.runtimeLabel.isNotEmpty) item.runtimeLabel,
-    ];
-    return values.isEmpty ? (item.type.isEmpty ? '媒体' : item.type) : values.join(' · ');
+  Widget _buildBackdropCard(
+    BuildContext context, {
+    required String imageUrl,
+    required double progress,
+  }) {
+    final colors = Theme.of(context).colorScheme;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        EmbyPcNetworkImage(url: imageUrl),
+        const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Colors.transparent, Color(0xE6000000)],
+              stops: [0.40, 1.0],
+            ),
+          ),
+        ),
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          color:
+              _hovered
+                  ? Colors.black.withValues(alpha: 0.24)
+                  : Colors.transparent,
+        ),
+        Positioned(
+          left: 12,
+          right: 50,
+          bottom: progress > 0 ? 10 : 8,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                widget.item.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 3),
+              _MediaMetadata(item: widget.item, onDark: true),
+            ],
+          ),
+        ),
+        if (_qualityLabel(widget.item).isNotEmpty)
+          Positioned(
+            top: 8,
+            right: 8,
+            child: _MediaBadge(label: _qualityLabel(widget.item)),
+          ),
+        _buildCardActions(bottom: progress > 0 ? 8 : 6),
+        if (progress > 0)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: _PlaybackProgress(value: progress, color: colors.primary),
+          ),
+      ],
+    );
   }
+
+  Widget _buildPosterCard(
+    BuildContext context, {
+    required String imageUrl,
+    required double progress,
+  }) {
+    final colors = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              EmbyPcNetworkImage(url: imageUrl),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                color:
+                    _hovered
+                        ? Colors.black.withValues(alpha: 0.34)
+                        : Colors.transparent,
+              ),
+              if (_qualityLabel(widget.item).isNotEmpty)
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: _MediaBadge(label: _qualityLabel(widget.item)),
+                ),
+              _buildCardActions(bottom: progress > 0 ? 8 : 6),
+              if (progress > 0)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: _PlaybackProgress(
+                    value: progress,
+                    color: colors.primary,
+                  ),
+                ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                widget.item.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 4),
+              _MediaMetadata(item: widget.item),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCardActions({required double bottom}) => Stack(
+    children: [
+      if (widget.onPlay != null)
+        Center(
+          child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 200),
+            opacity: _hovered ? 1 : 0,
+            child: IgnorePointer(
+              ignoring: !_hovered,
+              child: IconButton.filled(
+                tooltip: '播放',
+                onPressed: widget.onPlay,
+                icon: const Icon(Icons.play_arrow_rounded),
+              ),
+            ),
+          ),
+        ),
+      if (widget.onFavorite != null)
+        Positioned(
+          right: 8,
+          bottom: bottom,
+          child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 200),
+            opacity:
+                (_hovered || widget.item.isFavorite || widget.favoriteBusy)
+                    ? 1
+                    : 0,
+            child: IgnorePointer(
+              ignoring: !_hovered && !widget.item.isFavorite,
+              child: IconButton.filledTonal(
+                tooltip: widget.item.isFavorite ? '取消收藏' : '收藏',
+                onPressed: widget.favoriteBusy ? null : widget.onFavorite,
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.black.withValues(alpha: 0.62),
+                  foregroundColor:
+                      widget.item.isFavorite
+                          ? const Color(0xFFE84C5B)
+                          : Colors.white,
+                ),
+                icon:
+                    widget.favoriteBusy
+                        ? const SizedBox.square(
+                          dimension: 17,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                        : Icon(
+                          widget.item.isFavorite
+                              ? Icons.favorite_rounded
+                              : Icons.favorite_border_rounded,
+                          size: 19,
+                        ),
+              ),
+            ),
+          ),
+        ),
+    ],
+  );
 
   String _qualityLabel(EmbyPcItem item) {
     final width = item.width ?? 0;
@@ -158,6 +295,190 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
     if (width >= 1200 || height >= 700) return '720';
     return '';
   }
+}
+
+/// 列表主视觉只使用当前媒体的真实 Backdrop，不引入与内容无关的装饰图片。
+class EmbyPcFeatureBanner extends StatelessWidget {
+  final EmbyPcItem item;
+  final VoidCallback onOpen;
+  final VoidCallback onPlay;
+
+  const EmbyPcFeatureBanner({
+    super.key,
+    required this.item,
+    required this.onOpen,
+    required this.onPlay,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final imageUrl = EmbyPcService.instance.imageUrl(
+      item.id,
+      type: 'Backdrop',
+      maxWidth: 1280,
+    );
+    final isResumable = item.playbackPositionTicks > 0 && !item.played;
+    return Semantics(
+      button: true,
+      label: '打开 ${item.name}',
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: onOpen,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: SizedBox(
+              height: 220,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  EmbyPcNetworkImage(url: imageUrl),
+                  const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                        colors: [Color(0xF0000000), Color(0x18000000)],
+                        stops: [0.0, 0.78],
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(28, 22, 28, 22),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 560),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              isResumable ? '继续观看' : '精选媒体',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.78),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            Text(
+                              item.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 25,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 7),
+                            _MediaMetadata(item: item, onDark: true),
+                            if (item.overview.trim().isNotEmpty) ...[
+                              const SizedBox(height: 9),
+                              Text(
+                                item.overview.trim(),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.82),
+                                  fontSize: 13,
+                                  height: 1.45,
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 13),
+                            FilledButton.icon(
+                              onPressed: onPlay,
+                              style: FilledButton.styleFrom(
+                                backgroundColor: Colors.white,
+                                foregroundColor: colors.primary,
+                                minimumSize: const Size(0, 38),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                              ),
+                              icon: const Icon(Icons.play_arrow_rounded),
+                              label: Text(isResumable ? '继续播放' : '播放'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MediaMetadata extends StatelessWidget {
+  final EmbyPcItem item;
+  final bool onDark;
+
+  const _MediaMetadata({required this.item, this.onDark = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final muted =
+        onDark
+            ? Colors.white.withValues(alpha: 0.74)
+            : Theme.of(context).colorScheme.onSurfaceVariant;
+    final plain = <String>[
+      if (item.productionYear != null) '${item.productionYear}',
+      if (item.runtimeLabel.isNotEmpty) item.runtimeLabel,
+    ];
+    return Row(
+      children: [
+        if (item.communityRating != null) ...[
+          const Icon(Icons.star_rounded, size: 14, color: Color(0xFFF3B33D)),
+          const SizedBox(width: 2),
+          Text(
+            item.communityRating!.toStringAsFixed(1),
+            style: TextStyle(color: muted, fontSize: 12),
+          ),
+          if (plain.isNotEmpty) ...[
+            const SizedBox(width: 6),
+            Text('·', style: TextStyle(color: muted, fontSize: 12)),
+            const SizedBox(width: 6),
+          ],
+        ],
+        Flexible(
+          child: Text(
+            plain.isEmpty
+                ? (item.type.isEmpty ? '媒体' : item.type)
+                : plain.join(' · '),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: muted, fontSize: 12),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PlaybackProgress extends StatelessWidget {
+  final double value;
+  final Color color;
+
+  const _PlaybackProgress({required this.value, required this.color});
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    height: 3,
+    child: LinearProgressIndicator(
+      value: value,
+      minHeight: 3,
+      color: color,
+      backgroundColor: Colors.white.withValues(alpha: 0.28),
+    ),
+  );
 }
 
 class EmbyPcNetworkImage extends StatelessWidget {
@@ -173,17 +494,20 @@ class EmbyPcNetworkImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    if (url.isEmpty) return _ImagePlaceholder(color: colors.surface);
+    if (url.isEmpty) {
+      return _ImagePlaceholder(color: colors.surfaceContainerHigh);
+    }
     return CachedNetworkImage(
       imageUrl: url,
       fit: fit,
       fadeInDuration: const Duration(milliseconds: 160),
-      placeholder: (_, _) => _ImagePlaceholder(
-        color: colors.surface,
-        loading: true,
-      ),
-      errorWidget: (_, _, _) =>
-          _ImagePlaceholder(color: colors.surface),
+      placeholder:
+          (_, _) => _ImagePlaceholder(
+            color: colors.surfaceContainerHigh,
+            loading: true,
+          ),
+      errorWidget:
+          (_, _, _) => _ImagePlaceholder(color: colors.surfaceContainerHigh),
     );
   }
 }
@@ -249,13 +573,15 @@ class _ImageLoadingSkeletonState extends State<_ImageLoadingSkeleton>
     );
     return AnimatedBuilder(
       animation: _controller,
-      builder: (context, child) => ColoredBox(
-        color: Color.lerp(
-          widget.color,
-          highlightColor,
-          Curves.easeInOut.transform(_controller.value),
-        )!,
-      ),
+      builder:
+          (context, child) => ColoredBox(
+            color:
+                Color.lerp(
+                  widget.color,
+                  highlightColor,
+                  Curves.easeInOut.transform(_controller.value),
+                )!,
+          ),
     );
   }
 }

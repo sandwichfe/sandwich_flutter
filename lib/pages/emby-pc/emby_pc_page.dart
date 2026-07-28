@@ -33,15 +33,12 @@ class _EmbyPcEntryPageState extends State<EmbyPcEntryPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    if (_loading)
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     if (!EmbyPcService.instance.isLoggedIn) {
-      return EmbyPcLoginPage(
-        onLogin: () => setState(() {}),
-      );
+      return EmbyPcLoginPage(onLogin: () => setState(() {}));
     }
-    return EmbyPcWorkspace(
-      onLogout: () => setState(() {}),
-    );
+    return EmbyPcWorkspace(onLogout: () => setState(() {}));
   }
 }
 
@@ -58,7 +55,6 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   final _searchController = TextEditingController();
   final _yearController = TextEditingController();
   final _scrollController = ScrollController();
-  final _layoutMenuController = MenuController();
   List<EmbyPcItem> _libraries = const [];
   List<EmbyPcItem> _items = const [];
   final Map<String, int?> _libraryCounts = {};
@@ -80,7 +76,6 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   bool _favoritePeopleLoading = false;
   bool _favoriteMovieLoading = false;
   bool _sidebarCollapsed = false;
-  bool _searchExpanded = false;
   String _error = '';
   int _queryVersion = 0;
   final Set<String> _favoriteBusyIds = {};
@@ -106,7 +101,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         _libraries = ordered;
         _sortBy = preferences.sortBy;
         _sortOrder = preferences.sortOrder;
-        _imageStyle = preferences.imageStyle == 'poster' ? 'poster' : 'backdrop';
+        _imageStyle =
+            preferences.imageStyle == 'poster' ? 'poster' : 'backdrop';
         _activeId = ordered.isEmpty ? '' : ordered.first.id;
         _loading = false;
       });
@@ -151,7 +147,10 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
 
   Future<void> _loadLibraryCount(String libraryId) async {
     try {
-      final page = await EmbyPcService.instance.getItems(libraryId: libraryId, limit: 1);
+      final page = await EmbyPcService.instance.getItems(
+        libraryId: libraryId,
+        limit: 1,
+      );
       if (mounted) setState(() => _libraryCounts[libraryId] = page.total);
     } catch (_) {
       if (mounted) setState(() => _libraryCounts[libraryId] = null);
@@ -190,7 +189,9 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   }
 
   Future<void> _loadItems({required bool reset}) async {
-    if ((!reset && _loadingMore) || (!reset && _items.length >= _total && _total > 0)) return;
+    if ((!reset && _loadingMore) ||
+        (!reset && _items.length >= _total && _total > 0))
+      return;
     final requestVersion = reset ? ++_queryVersion : _queryVersion;
     if (reset) {
       setState(() {
@@ -209,11 +210,13 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         favoriteOnly: _view == 'favorite-movies' || _view == 'favorite-people',
         startIndex: reset ? 0 : _items.length,
         itemType: _view == 'favorite-people' ? 'Person' : _itemType,
-        filters: _view == 'favorite-movies' || _view == 'favorite-people'
-            ? ''
-            : <String>[_statusFilter, _markFilter]
-                  .where((value) => value.isNotEmpty)
-                  .join(','),
+        filters:
+            _view == 'favorite-movies' || _view == 'favorite-people'
+                ? ''
+                : <String>[
+                  _statusFilter,
+                  _markFilter,
+                ].where((value) => value.isNotEmpty).join(','),
         videoType: _videoType,
         searchTerm: _searchController.text,
         productionYear: int.tryParse(_yearController.text.trim()),
@@ -239,7 +242,9 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   }
 
   void _onScroll() {
-    if (_scrollController.position.extentAfter < 700 && !_loading && !_loadingMore) {
+    if (_scrollController.position.extentAfter < 700 &&
+        !_loading &&
+        !_loadingMore) {
       _loadItems(reset: false);
     }
   }
@@ -282,18 +287,6 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     await _loadItems(reset: true);
   }
 
-  // 搜索入口默认保持收起，展开后再将焦点交给输入框。
-  void _expandSearch() {
-    if (_loading || _searchExpanded) return;
-    setState(() => _searchExpanded = true);
-  }
-
-  void _collapseSearch() {
-    if (!_searchExpanded) return;
-    FocusManager.instance.primaryFocus?.unfocus();
-    setState(() => _searchExpanded = false);
-  }
-
   Future<void> _clearSearch() async {
     if (_searchController.text.isEmpty) return;
     setState(_searchController.clear);
@@ -304,24 +297,39 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     if (_favoriteBusyIds.contains(item.id)) return;
     setState(() => _favoriteBusyIds.add(item.id));
     try {
-      final value = await EmbyPcService.instance.setFavorite(item.id, !item.isFavorite);
+      final value = await EmbyPcService.instance.setFavorite(
+        item.id,
+        !item.isFavorite,
+      );
       if (!mounted) return;
       final updated = item.copyWith(isFavorite: value);
       setState(() {
-        _items = _items.map((entry) => entry.id == item.id ? updated : entry).toList();
+        _items =
+            _items
+                .map((entry) => entry.id == item.id ? updated : entry)
+                .toList();
         if (!value && _view == 'favorite-movies') {
           _items = _items.where((entry) => entry.id != item.id).toList();
           _total = (_total - 1).clamp(0, 1 << 30).toInt();
         }
         if (_view == 'favorite-movies' && _favoriteMovieCount != null) {
-          _favoriteMovieCount = (_favoriteMovieCount! + (value ? 1 : -1)).clamp(0, 1 << 30).toInt();
+          _favoriteMovieCount =
+              (_favoriteMovieCount! + (value ? 1 : -1))
+                  .clamp(0, 1 << 30)
+                  .toInt();
         }
         if (_view == 'favorite-people' && _favoritePeopleCount != null) {
-          _favoritePeopleCount = (_favoritePeopleCount! + (value ? 1 : -1)).clamp(0, 1 << 30).toInt();
+          _favoritePeopleCount =
+              (_favoritePeopleCount! + (value ? 1 : -1))
+                  .clamp(0, 1 << 30)
+                  .toInt();
         }
       });
     } catch (error) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString())));
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.toString())));
     } finally {
       if (mounted) setState(() => _favoriteBusyIds.remove(item.id));
     }
@@ -334,10 +342,13 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       builder: (context) => _LibraryOrderDialog(libraries: draft),
     );
     if (saved == null || !mounted) return;
-    await EmbyPcService.instance.saveLibraryOrder(saved.map((item) => item.id).toList());
+    await EmbyPcService.instance.saveLibraryOrder(
+      saved.map((item) => item.id).toList(),
+    );
     setState(() {
       _libraries = saved;
-      if (_view == 'library' && !_libraries.any((item) => item.id == _activeId)) {
+      if (_view == 'library' &&
+          !_libraries.any((item) => item.id == _activeId)) {
         _activeId = _libraries.isEmpty ? '' : _libraries.first.id;
       }
     });
@@ -352,23 +363,25 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     if (_view == 'favorite-people') {
       Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => EmbyPcPersonPage(personId: item.id, personName: item.name),
+          builder:
+              (_) => EmbyPcPersonPage(personId: item.id, personName: item.name),
         ),
       );
       return;
     }
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => EmbyPcDetailPage(item: item)),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => EmbyPcDetailPage(item: item)));
   }
 
   void _playItem(EmbyPcItem item) {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => EmbyPcPlayerPage(
-          item: item,
-          startPositionTicks: item.playbackPositionTicks,
-        ),
+        builder:
+            (_) => EmbyPcPlayerPage(
+              item: item,
+              startPositionTicks: item.playbackPositionTicks,
+            ),
       ),
     );
   }
@@ -387,50 +400,16 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       builder: (context, constraints) {
         final compact = constraints.maxWidth < 820;
         return Scaffold(
-          appBar: AppBar(
-            title: compact && _searchExpanded
-                ? _buildExpandedSearchField()
-                : Text(_pageTitle, maxLines: 1, overflow: TextOverflow.ellipsis),
-            leading: compact
-                ? PopupMenuButton<String>(
-                    tooltip: '切换内容',
-                    icon: const Icon(Icons.menu),
-                    onSelected: (value) {
-                      if (value == 'order') {
-                        _openOrderDialog();
-                      } else if (value == 'favorite-movies' || value == 'favorite-people') {
-                        _selectFavorites(value);
-                      } else {
-                        _selectLibrary(value);
-                      }
-                    },
-                    itemBuilder: (_) => [
-                      ..._libraries.map(
-                        (library) => PopupMenuItem(value: library.id, child: Text(library.name)),
-                      ),
-                      const PopupMenuDivider(),
-                      const PopupMenuItem(value: 'favorite-movies', child: Text('喜欢的影片')),
-                      const PopupMenuItem(value: 'favorite-people', child: Text('喜欢的演员')),
-                      const PopupMenuDivider(),
-                      const PopupMenuItem(value: 'order', child: Text('调整媒体库顺序')),
+          body:
+              _error.isNotEmpty && _libraries.isEmpty
+                  ? _WorkspaceError(message: _error, onRetry: _initialize)
+                  : Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (!compact) _buildSidebar(context),
+                      Expanded(child: _buildContent(context, compact: compact)),
                     ],
-                  )
-                : null,
-            actions: [
-              if (!compact || !_searchExpanded) _buildToolbarSearchAction(context),
-              _buildAccountMenu(context),
-              const SizedBox(width: 10),
-            ],
-          ),
-          body: _error.isNotEmpty && _libraries.isEmpty
-              ? _WorkspaceError(message: _error, onRetry: _initialize)
-              : Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (!compact) _buildSidebar(context),
-                    Expanded(child: _buildContent(context)),
-                  ],
-                ),
+                  ),
         );
       },
     );
@@ -445,106 +424,45 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     return '媒体库';
   }
 
-  Widget _buildToolbarSearchAction(BuildContext context) {
+  Widget _buildSearchField(double width) {
     final colors = Theme.of(context).colorScheme;
-    if (_searchExpanded) {
-      final searchWidth = (MediaQuery.sizeOf(context).width * 0.36).clamp(320.0, 520.0).toDouble();
-      return Padding(
-        padding: const EdgeInsets.only(right: 10),
-        child: _buildExpandedSearchField(width: searchWidth),
-      );
-    }
-
-    final hasKeyword = _searchController.text.trim().isNotEmpty;
-    return Padding(
-      padding: const EdgeInsets.only(right: 10),
-      child: IconButton(
-        tooltip: '搜索媒体',
-        onPressed: _loading ? null : _expandSearch,
-        style: IconButton.styleFrom(
-          fixedSize: const Size.square(44),
-          foregroundColor: hasKeyword ? colors.primary : colors.onSurfaceVariant,
-          backgroundColor: hasKeyword ? colors.primary.withValues(alpha: 0.12) : null,
-          side: BorderSide(color: hasKeyword ? colors.primary : colors.outlineVariant),
-        ),
-        icon: const Icon(Icons.search, size: 20),
-      ),
-    );
-  }
-
-  Widget _buildExpandedSearchField({double? width}) {
-    final colors = Theme.of(context).colorScheme;
-    final field = SizedBox(
+    return SizedBox(
+      width: width,
       height: 40,
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _searchController,
-              autofocus: true,
-              enabled: !_loading,
-              onChanged: (_) => setState(() {}),
-              onSubmitted: (_) => _applyQuery(),
-              decoration: InputDecoration(
-                isDense: true,
-                hintText: '搜索标题、文件名',
-                prefixIcon: const Icon(Icons.search, size: 20),
-                suffixIcon: _searchController.text.isEmpty
-                    ? null
-                    : IconButton(
-                        tooltip: '清除搜索',
-                        onPressed: _loading ? null : _clearSearch,
-                        icon: const Icon(Icons.clear, size: 18),
-                      ),
-                border: const OutlineInputBorder(
-                  borderRadius: BorderRadius.only(
-                    topLeft: Radius.circular(999),
-                    bottomLeft: Radius.circular(999),
+      child: TextField(
+        controller: _searchController,
+        enabled: !_loading,
+        onChanged: (_) => setState(() {}),
+        onSubmitted: (_) => _applyQuery(),
+        decoration: InputDecoration(
+          isDense: true,
+          filled: true,
+          fillColor: colors.surface,
+          hintText: '搜索标题、文件名',
+          prefixIcon: const Icon(Icons.search, size: 19),
+          suffixIcon:
+              _searchController.text.isEmpty
+                  ? IconButton(
+                    tooltip: '搜索',
+                    onPressed: _loading ? null : _applyQuery,
+                    icon: const Icon(Icons.arrow_forward, size: 18),
+                  )
+                  : IconButton(
+                    tooltip: '清除搜索',
+                    onPressed: _loading ? null : _clearSearch,
+                    icon: const Icon(Icons.clear, size: 18),
                   ),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: colors.outlineVariant),
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(999),
-                    bottomLeft: Radius.circular(999),
-                  ),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: colors.primary),
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(999),
-                    bottomLeft: Radius.circular(999),
-                  ),
-                ),
-              ),
-            ),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(7)),
+          enabledBorder: OutlineInputBorder(
+            borderSide: BorderSide(color: colors.outlineVariant),
+            borderRadius: BorderRadius.circular(7),
           ),
-          SizedBox(
-            width: 86,
-            height: 40,
-            child: FilledButton.icon(
-              onPressed: _loading ? null : _applyQuery,
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                shape: const RoundedRectangleBorder(
-                  borderRadius: BorderRadius.only(
-                    topRight: Radius.circular(999),
-                    bottomRight: Radius.circular(999),
-                  ),
-                ),
-              ),
-              icon: const Icon(Icons.search, size: 18),
-              label: const Text('搜索'),
-            ),
+          focusedBorder: OutlineInputBorder(
+            borderSide: BorderSide(color: colors.primary),
+            borderRadius: BorderRadius.circular(7),
           ),
-        ],
+        ),
       ),
-    );
-
-    // 点击搜索区域外时自动收起，已提交的关键词仍会保留并高亮搜索入口。
-    return TapRegion(
-      onTapOutside: (_) => _collapseSearch(),
-      child: width == null ? field : SizedBox(width: width, child: field),
     );
   }
 
@@ -570,51 +488,52 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
             } else if (value == 'order') {
               _openOrderDialog();
             } else if (value == 'settings') {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const SettingsPage()),
-              );
+              Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const SettingsPage()));
             } else if (value == 'logout') {
               _logout();
             }
           },
-          itemBuilder: (_) => [
-            PopupMenuItem(
-              enabled: false,
-              child: Text(EmbyPcService.instance.currentUserName),
-            ),
-            const PopupMenuDivider(),
-            PopupMenuItem(
-              value: 'refresh',
-              enabled: !_loading,
-              child: const ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.refresh),
-                title: Text('刷新'),
-              ),
-            ),
-            const PopupMenuItem(
-              value: 'order',
-              child: ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.swap_vert),
-                title: Text('调整媒体库顺序'),
-              ),
-            ),
-            const PopupMenuDivider(),
-            const PopupMenuItem(
-              value: 'settings',
-              child: ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.settings_outlined),
-                title: Text('应用设置'),
-              ),
-            ),
-            const PopupMenuDivider(),
-            const PopupMenuItem(value: 'logout', child: Text('退出登录')),
-          ],
+          itemBuilder:
+              (_) => [
+                PopupMenuItem(
+                  enabled: false,
+                  child: Text(EmbyPcService.instance.currentUserName),
+                ),
+                const PopupMenuDivider(),
+                PopupMenuItem(
+                  value: 'refresh',
+                  enabled: !_loading,
+                  child: const ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.refresh),
+                    title: Text('刷新'),
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'order',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.swap_vert),
+                    title: Text('调整媒体库顺序'),
+                  ),
+                ),
+                const PopupMenuDivider(),
+                const PopupMenuItem(
+                  value: 'settings',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.settings_outlined),
+                    title: Text('应用设置'),
+                  ),
+                ),
+                const PopupMenuDivider(),
+                const PopupMenuItem(value: 'logout', child: Text('退出登录')),
+              ],
         ),
       ),
     );
@@ -623,212 +542,319 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   Widget _buildSidebar(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     return SizedBox(
-      width: _sidebarCollapsed ? 64 : 236,
+      width: _sidebarCollapsed ? 68 : 236,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          // 侧栏是页面背景的一部分，不使用主题色生成的粉色表面层。
-          color: colors.surface,
+          // 侧栏使用中间表面层，与画布和媒体卡片形成三级层次。
+          color: colors.surfaceContainerLow,
           border: Border(right: BorderSide(color: colors.outlineVariant)),
         ),
         child: Column(
           children: [
-            Align(
-              alignment: Alignment.centerRight,
-              child: IconButton(
-                tooltip: _sidebarCollapsed ? '展开侧栏' : '收起侧栏',
-                onPressed: () => setState(() => _sidebarCollapsed = !_sidebarCollapsed),
-                icon: Icon(_sidebarCollapsed ? Icons.chevron_right : Icons.chevron_left),
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.fromLTRB(
+                  _sidebarCollapsed ? 8 : 10,
+                  12,
+                  _sidebarCollapsed ? 8 : 10,
+                  8,
+                ),
+                children: [
+                  if (!_sidebarCollapsed) const _SidebarSectionTitle('媒体库'),
+                  ..._libraries.map(
+                    (library) => _SidebarButton(
+                      icon: Icons.video_library_outlined,
+                      title: library.name,
+                      count: _libraryCounts[library.id],
+                      active: _view == 'library' && library.id == _activeId,
+                      collapsed: _sidebarCollapsed,
+                      onPressed: () => _selectLibrary(library.id),
+                    ),
+                  ),
+                  Divider(height: _sidebarCollapsed ? 18 : 28),
+                  if (!_sidebarCollapsed) const _SidebarSectionTitle('我喜欢的'),
+                  _SidebarButton(
+                    icon: Icons.movie_outlined,
+                    title: '影片',
+                    count: _favoriteMovieCount,
+                    active: _view == 'favorite-movies',
+                    loading: _favoriteMovieLoading,
+                    collapsed: _sidebarCollapsed,
+                    onPressed: () => _selectFavorites('favorite-movies'),
+                  ),
+                  _SidebarButton(
+                    icon: Icons.person_outline,
+                    title: '演员',
+                    count: _favoritePeopleCount,
+                    active: _view == 'favorite-people',
+                    loading: _favoritePeopleLoading,
+                    collapsed: _sidebarCollapsed,
+                    onPressed: () => _selectFavorites('favorite-people'),
+                  ),
+                ],
               ),
             ),
-            if (!_sidebarCollapsed)
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(10, 0, 10, 16),
-                  children: [
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(10, 10, 10, 8),
-                      child: Text(
-                        '媒体库',
-                        // 侧栏分组标题使用清晰的 Windows 中文 UI 字体。
-                        style: TextStyle(
-                          fontFamily: 'Microsoft YaHei UI',
-                          fontWeight: FontWeight.w600,
-                        ),
+            Padding(
+              padding: const EdgeInsets.all(8),
+              child: Align(
+                alignment:
+                    _sidebarCollapsed
+                        ? Alignment.center
+                        : Alignment.centerRight,
+                child: IconButton(
+                  tooltip: _sidebarCollapsed ? '展开侧栏' : '收起侧栏',
+                  onPressed:
+                      () => setState(
+                        () => _sidebarCollapsed = !_sidebarCollapsed,
                       ),
-                    ),
-                    ..._libraries.map(
-                      (library) => _SidebarButton(
-                        icon: Icons.folder_outlined,
-                        title: library.name,
-                        count: _libraryCounts[library.id],
-                        active: _view == 'library' && library.id == _activeId,
-                        onPressed: () => _selectLibrary(library.id),
-                      ),
-                    ),
-                    const Divider(height: 28),
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(10, 0, 10, 8),
-                      child: Text(
-                        '我喜欢的',
-                        // 与媒体库分组保持一致的字体和字重。
-                        style: TextStyle(
-                          fontFamily: 'Microsoft YaHei UI',
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    _SidebarButton(
-                      icon: Icons.movie_outlined,
-                      title: '影片',
-                      count: _favoriteMovieCount,
-                      active: _view == 'favorite-movies',
-                      loading: _favoriteMovieLoading,
-                      onPressed: () => _selectFavorites('favorite-movies'),
-                    ),
-                    _SidebarButton(
-                      icon: Icons.person_outline,
-                      title: '演员',
-                      count: _favoritePeopleCount,
-                      active: _view == 'favorite-people',
-                      loading: _favoritePeopleLoading,
-                      onPressed: () => _selectFavorites('favorite-people'),
-                    ),
-                  ],
+                  icon: Icon(
+                    _sidebarCollapsed
+                        ? Icons.keyboard_double_arrow_right
+                        : Icons.keyboard_double_arrow_left,
+                  ),
                 ),
               ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildContent(BuildContext context) {
+  Widget _buildContent(BuildContext context, {required bool compact}) {
     return Column(
       children: [
+        _buildWorkspaceHeader(context, compact: compact),
         _buildToolbar(context),
         if (_error.isNotEmpty)
           MaterialBanner(
             content: Text(_error),
             actions: [
-              TextButton(onPressed: () => _loadItems(reset: true), child: const Text('重试')),
+              TextButton(
+                onPressed: () => _loadItems(reset: true),
+                child: const Text('重试'),
+              ),
             ],
           ),
         Expanded(
-          child: _loading && _items.isEmpty
-              ? const Center(child: CircularProgressIndicator())
-              : _items.isEmpty
+          child:
+              _loading && _items.isEmpty
+                  ? const Center(child: CircularProgressIndicator())
+                  : _items.isEmpty
                   ? const _EmptyState()
-                  : GridView.builder(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
-                      gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-                        maxCrossAxisExtent: _imageStyle == 'backdrop' ? 320 : 220,
-                        crossAxisSpacing: 14,
-                        mainAxisSpacing: 14,
-                        childAspectRatio: _imageStyle == 'backdrop' ? 1.38 : 0.70,
+                  : CustomScrollView(
+                    controller: _scrollController,
+                    slivers: [
+                      if (_featureItem case final item?)
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(18, 16, 18, 8),
+                            child: EmbyPcFeatureBanner(
+                              item: item,
+                              onOpen: () => _openItem(item),
+                              onPlay: () => _playItem(item),
+                            ),
+                          ),
+                        ),
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: EdgeInsets.fromLTRB(
+                            18,
+                            _featureItem == null ? 16 : 12,
+                            18,
+                            10,
+                          ),
+                          child: Text(
+                            _featureItem == null ? '全部媒体' : '媒体库',
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                        ),
                       ),
-                      itemCount: _items.length + (_loadingMore ? 1 : 0),
-                      itemBuilder: (context, index) {
-                        if (index >= _items.length) {
-                          return const Center(child: CircularProgressIndicator());
-                        }
-                        final item = _items[index];
-                        return EmbyPcMediaTile(
-                          item: item,
-                          imageStyle: _imageStyle,
-                          favoriteBusy: _favoriteBusyIds.contains(item.id),
-                          onOpen: () => _openItem(item),
-                          onPlay: _view == 'favorite-people' ? null : () => _playItem(item),
-                          onFavorite: () => _toggleFavorite(item),
-                        );
-                      },
-                    ),
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(18, 0, 18, 24),
+                        sliver: SliverGrid.builder(
+                          gridDelegate:
+                              SliverGridDelegateWithMaxCrossAxisExtent(
+                                maxCrossAxisExtent:
+                                    _imageStyle == 'backdrop' ? 340 : 210,
+                                crossAxisSpacing: 14,
+                                mainAxisSpacing: 16,
+                                childAspectRatio:
+                                    _imageStyle == 'backdrop' ? 1.60 : 0.58,
+                              ),
+                          itemCount: _items.length,
+                          itemBuilder: (context, index) {
+                            final item = _items[index];
+                            return EmbyPcMediaTile(
+                              item: item,
+                              imageStyle: _imageStyle,
+                              favoriteBusy: _favoriteBusyIds.contains(item.id),
+                              onOpen: () => _openItem(item),
+                              onPlay:
+                                  _view == 'favorite-people'
+                                      ? null
+                                      : () => _playItem(item),
+                              onFavorite: () => _toggleFavorite(item),
+                            );
+                          },
+                        ),
+                      ),
+                      if (_loadingMore)
+                        const SliverToBoxAdapter(
+                          child: Padding(
+                            padding: EdgeInsets.only(bottom: 24),
+                            child: Center(child: CircularProgressIndicator()),
+                          ),
+                        ),
+                    ],
+                  ),
         ),
       ],
     );
   }
 
-  Widget _buildToolbar(BuildContext context) {
-    final compact = MediaQuery.sizeOf(context).width < 720;
-    final controls = Wrap(
-      spacing: 10,
-      runSpacing: 10,
-      children: [
-        _buildFilterMenu(context),
-        _buildSortMenu(context),
-        _buildLayoutMenu(context),
-      ],
+  // 优先展示可继续播放的真实 Backdrop，其次选择当前结果中评分最高的条目。
+  EmbyPcItem? get _featureItem {
+    if (_view == 'favorite-people') return null;
+    final candidates = _items.where((item) => item.hasBackdropImage).toList();
+    if (candidates.isEmpty) return null;
+    for (final item in candidates) {
+      if (item.playbackPositionTicks > 0 && !item.played) return item;
+    }
+    candidates.sort(
+      (a, b) => (b.communityRating ?? 0).compareTo(a.communityRating ?? 0),
     );
-    final total = Text(
-      _mediaTotalText,
-      textAlign: TextAlign.right,
-      style: TextStyle(
-        color: Theme.of(context).colorScheme.onSurfaceVariant,
-        fontSize: 13,
-      ),
-    );
+    return candidates.first;
+  }
 
+  Widget _buildWorkspaceHeader(BuildContext context, {required bool compact}) {
+    final colors = Theme.of(context).colorScheme;
     return Material(
-      color: Theme.of(context).colorScheme.surface,
+      color: colors.surfaceContainerLow,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(18, 8, 18, 14),
+        constraints: const BoxConstraints(minHeight: 66),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
         decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-          ),
+          border: Border(bottom: BorderSide(color: colors.outlineVariant)),
         ),
-        // 窄屏时加载信息独占一行，避免与查询按钮相互挤压。
-        child: compact
-            ? Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+        child: Row(
+          children: [
+            if (compact) ...[
+              _buildCompactLibraryMenu(),
+              const SizedBox(width: 8),
+            ],
+            Expanded(
+              child: Row(
                 children: [
-                  controls,
-                  const SizedBox(height: 10),
-                  Align(alignment: Alignment.centerRight, child: total),
-                ],
-              )
-            : Row(
-                children: [
-                  Expanded(child: controls),
-                  const SizedBox(width: 12),
-                  total,
+                  Flexible(
+                    child: Text(
+                      _pageTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    _loading && _items.isEmpty ? '加载中' : '$_total 项',
+                    style: TextStyle(
+                      color: colors.onSurfaceVariant,
+                      fontSize: 13,
+                    ),
+                  ),
                 ],
               ),
+            ),
+            const SizedBox(width: 16),
+            _buildSearchField(compact ? 230 : 320),
+            const SizedBox(width: 10),
+            _buildAccountMenu(context),
+          ],
+        ),
       ),
     );
   }
 
-  String get _mediaTotalText {
-    if (_loading && _items.isEmpty) return '加载中';
-    final loadingSuffix = _loadingMore ? '，加载中...' : '';
-    if (_total > 0) return '已加载 ${_items.length} / $_total 项$loadingSuffix';
-    return '共 ${_items.length} 项$loadingSuffix';
+  Widget _buildCompactLibraryMenu() => PopupMenuButton<String>(
+    tooltip: '切换内容',
+    icon: const Icon(Icons.menu),
+    onSelected: (value) {
+      if (value == 'order') {
+        _openOrderDialog();
+      } else if (value == 'favorite-movies' || value == 'favorite-people') {
+        _selectFavorites(value);
+      } else {
+        _selectLibrary(value);
+      }
+    },
+    itemBuilder:
+        (_) => [
+          ..._libraries.map(
+            (library) =>
+                PopupMenuItem(value: library.id, child: Text(library.name)),
+          ),
+          const PopupMenuDivider(),
+          const PopupMenuItem(value: 'favorite-movies', child: Text('喜欢的影片')),
+          const PopupMenuItem(value: 'favorite-people', child: Text('喜欢的演员')),
+          const PopupMenuDivider(),
+          const PopupMenuItem(value: 'order', child: Text('调整媒体库顺序')),
+        ],
+  );
+
+  Widget _buildToolbar(BuildContext context) {
+    return Material(
+      color: Theme.of(context).colorScheme.surfaceContainerLow,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 50),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: Theme.of(context).colorScheme.outlineVariant,
+            ),
+          ),
+        ),
+        child: Row(
+          children: [
+            _buildFilterMenu(context),
+            const SizedBox(width: 8),
+            _buildSortMenu(context),
+            const Spacer(),
+            _buildLayoutControl(context),
+          ],
+        ),
+      ),
+    );
   }
 
-  String get _filterButtonText {
-    const itemTypes = {'Movie': '电影', 'Series': '剧集', 'Video': '视频'};
-    const statuses = {'IsUnplayed': '未观看', 'IsPlayed': '已观看', 'IsResumable': '可继续'};
-    const marks = {'IsFavorite': '收藏', 'Likes': '喜欢', 'Dislikes': '不喜欢'};
-    const videoTypes = {'videofile': '视频文件', 'dvd': 'DVD', 'bluray': '蓝光', 'iso': 'ISO'};
-    final selected = <String?>[
-      itemTypes[_itemType],
-      statuses[_statusFilter],
-      marks[_markFilter],
-      videoTypes[_videoType],
-      if (_yearController.text.trim().isNotEmpty) _yearController.text.trim(),
-    ].whereType<String>().toList();
-    return selected.isEmpty ? '全部筛选' : selected.join(' / ');
-  }
+  int get _activeFilterCount =>
+      [
+        _itemType,
+        _statusFilter,
+        _markFilter,
+        _videoType,
+        _yearController.text.trim(),
+      ].where((value) => value.isNotEmpty).length;
 
   Widget _buildFilterMenu(BuildContext context) {
-    const itemTypes = {'': '全部类型', 'Movie': '电影', 'Series': '剧集', 'Video': '视频'};
+    const itemTypes = {
+      '': '全部类型',
+      'Movie': '电影',
+      'Series': '剧集',
+      'Video': '视频',
+    };
     const statuses = {
       '': '全部状态',
       'IsUnplayed': '未观看',
       'IsPlayed': '已观看',
       'IsResumable': '可继续',
     };
-    const marks = {'': '全部偏好', 'IsFavorite': '收藏', 'Likes': '喜欢', 'Dislikes': '不喜欢'};
+    const marks = {
+      '': '全部偏好',
+      'IsFavorite': '收藏',
+      'Likes': '喜欢',
+      'Dislikes': '不喜欢',
+    };
     const videoTypes = {
       '': '全部视频',
       'videofile': '视频文件',
@@ -840,7 +866,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     final panelWidth = availableWidth > 420 ? 420.0 : availableWidth;
     // 菜单内容左右各保留 14 像素内边距，选项宽度直接使用剩余空间计算。
     final contentWidth = panelWidth - 28;
-    final showAdvancedFilters = _view != 'favorite-movies' && _view != 'favorite-people';
+    final showAdvancedFilters =
+        _view != 'favorite-movies' && _view != 'favorite-people';
 
     // 多组低频筛选集中放入弹出面板，选中后仍按原逻辑立即刷新列表。
     return MenuAnchor(
@@ -942,13 +969,19 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
           ),
         ),
       ],
-      builder: (context, controller, child) => _buildQueryPill(
-        label: '筛选',
-        value: _filterButtonText,
-        onPressed: _loading
-            ? null
-            : () => controller.isOpen ? controller.close() : controller.open(),
-      ),
+      builder:
+          (context, controller, child) => _buildQueryPill(
+            label: _activeFilterCount == 0 ? '筛选' : '筛选 $_activeFilterCount',
+            icon: Icons.filter_list,
+            active: _activeFilterCount > 0,
+            onPressed:
+                _loading
+                    ? null
+                    : () =>
+                        controller.isOpen
+                            ? controller.close()
+                            : controller.open(),
+          ),
     );
   }
 
@@ -1013,56 +1046,59 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
           ),
         ),
       ],
-      builder: (context, controller, child) => _buildQueryPill(
-        label: '排序',
-        onPressed: _loading
-            ? null
-            : () => controller.isOpen ? controller.close() : controller.open(),
+      builder:
+          (context, controller, child) => _buildQueryPill(
+            label: '排序',
+            icon: Icons.swap_vert,
+            onPressed:
+                _loading
+                    ? null
+                    : () =>
+                        controller.isOpen
+                            ? controller.close()
+                            : controller.open(),
+          ),
+    );
+  }
+
+  Widget _buildLayoutControl(BuildContext context) {
+    return SegmentedButton<String>(
+      showSelectedIcon: false,
+      segments: const [
+        ButtonSegment(
+          value: 'backdrop',
+          icon: Tooltip(message: '背景图布局', child: Icon(Icons.view_day_outlined)),
+          label: Text('背景图'),
+        ),
+        ButtonSegment(
+          value: 'poster',
+          icon: Tooltip(
+            message: '海报布局',
+            child: Icon(Icons.view_agenda_outlined),
+          ),
+          label: Text('海报'),
+        ),
+      ],
+      selected: {_imageStyle},
+      onSelectionChanged:
+          _loading ? null : (selection) => _updateImageStyle(selection.first),
+      style: ButtonStyle(
+        visualDensity: VisualDensity.compact,
+        minimumSize: const WidgetStatePropertyAll(Size(0, 36)),
+        shape: WidgetStatePropertyAll(
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
+        ),
       ),
     );
   }
 
-  Widget _buildLayoutMenu(BuildContext context) {
-    const layoutOptions = {'backdrop': '背景图', 'poster': '海报'};
-    final availableWidth = MediaQuery.sizeOf(context).width - 24;
-    final panelWidth = availableWidth > 260 ? 260.0 : availableWidth;
-    // 菜单内容左右各保留 14 像素内边距，选项宽度直接使用剩余空间计算。
-    final contentWidth = panelWidth - 28;
-    return MenuAnchor(
-      controller: _layoutMenuController,
-      style: MenuStyle(
-        backgroundColor: WidgetStatePropertyAll(
-          Theme.of(context).colorScheme.surface,
-        ),
-        surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
-        padding: const WidgetStatePropertyAll(EdgeInsets.zero),
-        maximumSize: WidgetStatePropertyAll(Size(panelWidth, 220)),
-      ),
-      menuChildren: [
-        SizedBox(
-          width: panelWidth,
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: _buildQueryOptionGrid(
-              options: layoutOptions,
-              selected: _imageStyle,
-              availableWidth: contentWidth,
-              onSelected: (value) {
-                if (value == _imageStyle) return;
-                _layoutMenuController.close();
-                setState(() => _imageStyle = value);
-                _applyQuery();
-              },
-            ),
-          ),
-        ),
-      ],
-      builder: (context, controller, child) => _buildQueryPill(
-        label: '布局',
-        onPressed: _loading
-            ? null
-            : () => controller.isOpen ? controller.close() : controller.open(),
-      ),
+  Future<void> _updateImageStyle(String value) async {
+    if (value == _imageStyle) return;
+    setState(() => _imageStyle = value);
+    await EmbyPcService.instance.saveListPreferences(
+      sortBy: _sortBy,
+      sortOrder: _sortOrder,
+      imageStyle: _imageStyle,
     );
   }
 
@@ -1078,7 +1114,10 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+        Text(
+          title,
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        ),
         const SizedBox(height: 8),
         _buildQueryOptionGrid(
           options: options,
@@ -1105,70 +1144,83 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     return Wrap(
       spacing: spacing,
       runSpacing: spacing,
-      children: options.entries.map((entry) {
-        final active = entry.key == selected;
-        return SizedBox(
-          width: itemWidth,
-          child: OutlinedButton(
-            onPressed: _loading ? null : () => onSelected(entry.key),
-            style: OutlinedButton.styleFrom(
-              minimumSize: const Size(0, 36),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-              alignment: Alignment.centerLeft,
-              foregroundColor: active ? colors.primary : colors.onSurface,
-              backgroundColor: active ? colors.primary.withValues(alpha: 0.12) : null,
-              side: BorderSide(color: active ? colors.primary : colors.outlineVariant),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    entry.value,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 13),
+      children:
+          options.entries.map((entry) {
+            final active = entry.key == selected;
+            return SizedBox(
+              width: itemWidth,
+              child: OutlinedButton(
+                onPressed: _loading ? null : () => onSelected(entry.key),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(0, 36),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 7,
+                  ),
+                  alignment: Alignment.centerLeft,
+                  foregroundColor: active ? colors.primary : colors.onSurface,
+                  backgroundColor:
+                      active ? colors.primary.withValues(alpha: 0.12) : null,
+                  side: BorderSide(
+                    color: active ? colors.primary : colors.outlineVariant,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
                   ),
                 ),
-                if (active) ...[
-                  const SizedBox(width: 6),
-                  const Icon(Icons.check, size: 16),
-                ],
-              ],
-            ),
-          ),
-        );
-      }).toList(),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        entry.value,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                    ),
+                    if (active) ...[
+                      const SizedBox(width: 6),
+                      const Icon(Icons.check, size: 16),
+                    ],
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
     );
   }
 
   Widget _buildQueryPill({
     required String label,
-    String? value,
+    required IconData icon,
+    bool active = false,
     required VoidCallback? onPressed,
-  }) => OutlinedButton(
-    onPressed: onPressed,
-    style: OutlinedButton.styleFrom(
-      minimumSize: const Size(112, 38),
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-      shape: const StadiumBorder(),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
-        if (value != null) ...[
-          const SizedBox(width: 6),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 160),
-            child: Text(value, maxLines: 1, overflow: TextOverflow.ellipsis),
-          ),
+  }) {
+    final colors = Theme.of(context).colorScheme;
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size(0, 36),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        foregroundColor: active ? colors.primary : colors.onSurface,
+        backgroundColor:
+            active ? colors.primary.withValues(alpha: 0.10) : colors.surface,
+        side: BorderSide(
+          color: active ? colors.primary : colors.outlineVariant,
+        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
+      ),
+      icon: Icon(icon, size: 17),
+      label: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
+          const SizedBox(width: 4),
+          const Icon(Icons.keyboard_arrow_down, size: 17),
         ],
-        const SizedBox(width: 6),
-        const Icon(Icons.keyboard_arrow_down, size: 18),
-      ],
-    ),
-  );
+      ),
+    );
+  }
 }
 
 class _SidebarButton extends StatelessWidget {
@@ -1177,6 +1229,7 @@ class _SidebarButton extends StatelessWidget {
   final int? count;
   final bool active;
   final bool loading;
+  final bool collapsed;
   final VoidCallback onPressed;
 
   const _SidebarButton({
@@ -1185,32 +1238,124 @@ class _SidebarButton extends StatelessWidget {
     required this.count,
     required this.active,
     this.loading = false,
+    this.collapsed = false,
     required this.onPressed,
   });
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return Padding(
+    final button = Padding(
       padding: const EdgeInsets.only(bottom: 3),
-      // 为列表项提供独立的绘制层，避免外层侧栏背景遮挡选中效果和点击水波纹。
-      child: Material(
-        type: MaterialType.transparency,
-        child: ListTile(
-          dense: true,
-          selected: active,
-          selectedTileColor: colors.primary.withValues(alpha: 0.12),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-          leading: Icon(icon),
-          title: Text(title, overflow: TextOverflow.ellipsis),
-          trailing: loading
-              ? const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2))
-              : Text(count == null ? '-' : '$count'),
-          onTap: onPressed,
-        ),
+      child: Stack(
+        children: [
+          Material(
+            color:
+                active
+                    ? colors.primary.withValues(alpha: 0.10)
+                    : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: onPressed,
+              child: SizedBox(
+                height: 42,
+                child: Row(
+                  mainAxisAlignment:
+                      collapsed
+                          ? MainAxisAlignment.center
+                          : MainAxisAlignment.start,
+                  children: [
+                    SizedBox(width: collapsed ? 0 : 12),
+                    Icon(
+                      icon,
+                      size: 20,
+                      color: active ? colors.primary : colors.onSurfaceVariant,
+                    ),
+                    if (!collapsed) ...[
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight:
+                                active ? FontWeight.w600 : FontWeight.w400,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      if (loading)
+                        const SizedBox.square(
+                          dimension: 13,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      else
+                        Container(
+                          constraints: const BoxConstraints(minWidth: 24),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: colors.onSurface.withValues(alpha: 0.06),
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                          child: Text(
+                            count == null ? '-' : '$count',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: colors.onSurfaceVariant,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+                      const SizedBox(width: 9),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (active)
+            Positioned(
+              left: 0,
+              top: 8,
+              bottom: 8,
+              child: Container(
+                width: 3,
+                decoration: BoxDecoration(
+                  color: colors.primary,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+        ],
       ),
     );
+    return collapsed ? Tooltip(message: title, child: button) : button;
   }
+}
+
+class _SidebarSectionTitle extends StatelessWidget {
+  final String title;
+
+  const _SidebarSectionTitle(this.title);
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
+    child: Text(
+      title,
+      style: TextStyle(
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+      ),
+    ),
+  );
 }
 
 class _LibraryOrderDialog extends StatefulWidget {
@@ -1232,30 +1377,38 @@ class _LibraryOrderDialogState extends State<_LibraryOrderDialog> {
       width: 420,
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxHeight: 500),
-        child: _libraries.isEmpty
-            ? const Text('暂无媒体库')
-            : ReorderableListView.builder(
-                shrinkWrap: true,
-                itemCount: _libraries.length,
-                onReorder: (oldIndex, newIndex) {
-                  setState(() {
-                    if (newIndex > oldIndex) newIndex -= 1;
-                    final item = _libraries.removeAt(oldIndex);
-                    _libraries.insert(newIndex, item);
-                  });
-                },
-                itemBuilder: (context, index) => ListTile(
-                  key: ValueKey(_libraries[index].id),
-                  leading: const Icon(Icons.folder_outlined),
-                  title: Text(_libraries[index].name),
-                  trailing: const Icon(Icons.drag_handle),
+        child:
+            _libraries.isEmpty
+                ? const Text('暂无媒体库')
+                : ReorderableListView.builder(
+                  shrinkWrap: true,
+                  itemCount: _libraries.length,
+                  onReorder: (oldIndex, newIndex) {
+                    setState(() {
+                      if (newIndex > oldIndex) newIndex -= 1;
+                      final item = _libraries.removeAt(oldIndex);
+                      _libraries.insert(newIndex, item);
+                    });
+                  },
+                  itemBuilder:
+                      (context, index) => ListTile(
+                        key: ValueKey(_libraries[index].id),
+                        leading: const Icon(Icons.folder_outlined),
+                        title: Text(_libraries[index].name),
+                        trailing: const Icon(Icons.drag_handle),
+                      ),
                 ),
-              ),
       ),
     ),
     actions: [
-      TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
-      FilledButton(onPressed: () => Navigator.pop(context, _libraries), child: const Text('保存')),
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('取消'),
+      ),
+      FilledButton(
+        onPressed: () => Navigator.pop(context, _libraries),
+        child: const Text('保存'),
+      ),
     ],
   );
 }
@@ -1268,7 +1421,11 @@ class _EmptyState extends StatelessWidget {
     child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(Icons.movie_filter_outlined, size: 56, color: Theme.of(context).colorScheme.onSurfaceVariant),
+        Icon(
+          Icons.movie_filter_outlined,
+          size: 56,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
         const SizedBox(height: 12),
         const Text('没有找到媒体'),
       ],

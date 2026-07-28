@@ -11,8 +11,7 @@ class WindowsTitleBar extends StatefulWidget {
   State<WindowsTitleBar> createState() => _WindowsTitleBarState();
 }
 
-class _WindowsTitleBarState extends State<WindowsTitleBar>
-    with WindowListener {
+class _WindowsTitleBarState extends State<WindowsTitleBar> with WindowListener {
   bool _isMaximized = false;
   bool _isFullScreen = false;
 
@@ -78,11 +77,11 @@ class _WindowsTitleBarState extends State<WindowsTitleBar>
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    // 标题栏与下方内容统一使用表面色，避免出现背景色断层。
-    final titleBarColor = colors.surface;
+    // 标题栏使用中间表面层，下方页面画布和媒体卡片仍保留各自层级。
+    final titleBarColor = colors.surfaceContainerLow;
 
     return ColoredBox(
-      color: colors.surface,
+      color: colors.surfaceContainerLowest,
       child: Column(
         children: [
           if (!_isFullScreen)
@@ -170,9 +169,10 @@ class _TitleBar extends StatelessWidget {
             ),
             _WindowButton(
               tooltip: isMaximized ? '还原' : '最大化',
-              icon: isMaximized
-                  ? Icons.filter_none_rounded
-                  : Icons.crop_square_rounded,
+              icon:
+                  isMaximized
+                      ? Icons.filter_none_rounded
+                      : Icons.crop_square_rounded,
               iconSize: isMaximized ? 14 : 13,
               onPressed: onToggleMaximize,
             ),
@@ -215,12 +215,12 @@ class _WindowButtonState extends State<_WindowButton> {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final hoverColor = widget.isClose
-        ? const Color(0xFFC42B1C)
-        : colors.onSurface.withAlpha(18);
-    final foregroundColor = widget.isClose && _isHovered
-        ? Colors.white
-        : colors.onSurfaceVariant;
+    final hoverColor =
+        widget.isClose
+            ? const Color(0xFFC42B1C)
+            : colors.onSurface.withAlpha(18);
+    final foregroundColor =
+        widget.isClose && _isHovered ? Colors.white : colors.onSurfaceVariant;
 
     // 标题栏位于全局 Navigator 外层，避免使用依赖 Overlay 的 Tooltip。
     return MouseRegion(
