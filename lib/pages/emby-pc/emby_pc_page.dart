@@ -57,11 +57,13 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   final _scrollController = ScrollController();
   List<EmbyPcItem> _libraries = const [];
   List<EmbyPcItem> _items = const [];
+  List<EmbyPcItem> _recentlyPlayed = const [];
+  Map<String, List<EmbyPcItem>> _homeLibraryItems = const {};
   final Map<String, int?> _libraryCounts = {};
   int? _favoriteMovieCount;
   int? _favoritePeopleCount;
   String _activeId = '';
-  String _view = 'library';
+  String _view = 'home';
   String _itemType = '';
   String _statusFilter = '';
   String _markFilter = '';
@@ -72,11 +74,14 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   int _total = 0;
   bool _loading = true;
   bool _loadingMore = false;
+  bool _homeLoading = false;
+  bool _homeLoaded = false;
   bool _countsLoading = true;
   bool _favoritePeopleLoading = false;
   bool _favoriteMovieLoading = false;
   bool _sidebarCollapsed = false;
   String _error = '';
+  String _homeError = '';
   int _queryVersion = 0;
   final Set<String> _favoriteBusyIds = {};
 
@@ -103,11 +108,12 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         _sortOrder = preferences.sortOrder;
         _imageStyle =
             preferences.imageStyle == 'poster' ? 'poster' : 'backdrop';
-        _activeId = ordered.isEmpty ? '' : ordered.first.id;
+        // 工作台默认进入首页，媒体库详情仅在用户选择后再按需加载。
+        _activeId = '';
         _loading = false;
       });
       _loadCounts(ordered);
-      if (_activeId.isNotEmpty) await _loadItems(reset: true);
+      await _loadHome();
     } catch (error) {
       if (mounted) {
         setState(() {
@@ -115,6 +121,48 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
           _error = error.toString();
         });
       }
+    }
+  }
+
+  Future<void> _loadHome({bool force = false}) async {
+    if (_homeLoading || (_homeLoaded && !force)) return;
+    final libraries = List<EmbyPcItem>.of(_libraries);
+    setState(() {
+      _homeLoading = true;
+      _homeError = '';
+    });
+    try {
+      // 首页数据彼此独立，首次进入时并行获取最近播放和各媒体库前十条。
+      final results = await Future.wait<EmbyPcPage>([
+        EmbyPcService.instance.getItems(
+          filters: 'IsPlayed',
+          limit: 10,
+          sortBy: 'DatePlayed',
+          sortOrder: 'Descending',
+        ),
+        ...libraries.map(
+          (library) => EmbyPcService.instance.getItems(
+            libraryId: library.id,
+            limit: 10,
+          ),
+        ),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _recentlyPlayed = results.first.items;
+        _homeLibraryItems = {
+          for (var index = 0; index < libraries.length; index++)
+            libraries[index].id: results[index + 1].items,
+        };
+        _homeLoading = false;
+        _homeLoaded = true;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _homeLoading = false;
+        _homeError = error.toString();
+      });
     }
   }
 
@@ -242,11 +290,24 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   }
 
   void _onScroll() {
+    if (_view == 'home') return;
     if (_scrollController.position.extentAfter < 700 &&
         !_loading &&
         !_loadingMore) {
       _loadItems(reset: false);
     }
+  }
+
+  Future<void> _selectHome() async {
+    if (_view == 'home') return;
+    // 切换首页时使正在进行的媒体库分页请求失效，避免旧结果覆盖当前状态。
+    _queryVersion++;
+    setState(() {
+      _view = 'home';
+      _activeId = '';
+      _resetQueryControllers();
+    });
+    await _loadHome();
   }
 
   Future<void> _selectLibrary(String id) async {
@@ -416,6 +477,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   }
 
   String get _pageTitle {
+    if (_view == 'home') return '首页';
     if (_view == 'favorite-movies') return '收藏影片';
     if (_view == 'favorite-people') return '收藏演员';
     for (final library in _libraries) {
@@ -485,7 +547,11 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
           icon: const Icon(Icons.person_outline, size: 20),
           onSelected: (value) {
             if (value == 'refresh') {
-              _loadItems(reset: true);
+              if (_view == 'home') {
+                _loadHome(force: true);
+              } else {
+                _loadItems(reset: true);
+              }
             } else if (value == 'order') {
               _openOrderDialog();
             } else if (value == 'settings') {
@@ -505,7 +571,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                 const PopupMenuDivider(),
                 PopupMenuItem(
                   value: 'refresh',
-                  enabled: !_loading,
+                  enabled: _view == 'home' ? !_homeLoading : !_loading,
                   child: const ListTile(
                     dense: true,
                     contentPadding: EdgeInsets.zero,
@@ -565,6 +631,16 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                   8,
                 ),
                 children: [
+                  _SidebarButton(
+                    icon: Icons.home_outlined,
+                    title: '首页',
+                    count: null,
+                    showCount: false,
+                    active: _view == 'home',
+                    collapsed: _sidebarCollapsed,
+                    onPressed: _selectHome,
+                  ),
+                  Divider(height: _sidebarCollapsed ? 18 : 28),
                   if (!_sidebarCollapsed) const _SidebarSectionTitle('媒体库'),
                   ..._libraries.map(
                     (library) => _SidebarButton(
@@ -633,8 +709,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       child: Column(
         children: [
           _buildWorkspaceHeader(context, compact: compact),
-          _buildToolbar(context),
-          if (_error.isNotEmpty)
+          if (_view != 'home') _buildToolbar(context),
+          if (_view != 'home' && _error.isNotEmpty)
             MaterialBanner(
               content: Text(_error),
               actions: [
@@ -645,46 +721,18 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
               ],
             ),
           Expanded(
-            child:
-                _loading && _items.isEmpty
+            child: _view == 'home'
+                ? _buildHomeContent(context)
+                : _loading && _items.isEmpty
                     ? const Center(child: CircularProgressIndicator())
                     : _items.isEmpty
                     ? const _EmptyState()
                     : CustomScrollView(
                       controller: _scrollController,
                       slivers: [
-                        if (_featureItem case final item?)
-                          SliverToBoxAdapter(
-                            child: Padding(
-                              padding: const EdgeInsets.fromLTRB(
-                                26,
-                                14,
-                                26,
-                                10,
-                              ),
-                              child: EmbyPcFeatureBanner(
-                                item: item,
-                                onOpen: () => _openItem(item),
-                                onPlay: () => _playItem(item),
-                              ),
-                            ),
-                          ),
-                        SliverToBoxAdapter(
-                          child: Padding(
-                            padding: EdgeInsets.fromLTRB(
-                              26,
-                              _featureItem == null ? 18 : 14,
-                              26,
-                              12,
-                            ),
-                            child: Text(
-                              _featureItem == null ? '全部媒体' : '媒体库',
-                              style: Theme.of(context).textTheme.titleLarge,
-                            ),
-                          ),
-                        ),
                         SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(26, 0, 26, 30),
+                          // 媒体库详情仅展示视频网格，不再插入精选横幅。
+                          padding: const EdgeInsets.fromLTRB(26, 18, 26, 30),
                           sliver: SliverGrid.builder(
                             gridDelegate:
                                 SliverGridDelegateWithMaxCrossAxisExtent(
@@ -729,18 +777,157 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     );
   }
 
-  // 优先展示可继续播放的真实 Backdrop，其次选择当前结果中评分最高的条目。
-  EmbyPcItem? get _featureItem {
-    if (_view == 'favorite-people') return null;
-    final candidates = _items.where((item) => item.hasBackdropImage).toList();
-    if (candidates.isEmpty) return null;
-    for (final item in candidates) {
-      if (item.playbackPositionTicks > 0 && !item.played) return item;
+  Widget _buildHomeContent(BuildContext context) {
+    if (_homeLoading && !_homeLoaded) {
+      return const Center(child: CircularProgressIndicator());
     }
-    candidates.sort(
-      (a, b) => (b.communityRating ?? 0).compareTo(a.communityRating ?? 0),
+    if (_homeError.isNotEmpty && !_homeLoaded) {
+      return _WorkspaceError(
+        message: _homeError,
+        onRetry: () => _loadHome(force: true),
+      );
+    }
+    return CustomScrollView(
+      controller: _scrollController,
+      slivers: [
+        if (_homeError.isNotEmpty)
+          SliverToBoxAdapter(
+            child: MaterialBanner(
+              content: Text(_homeError),
+              actions: [
+                TextButton(
+                  onPressed: () => _loadHome(force: true),
+                  child: const Text('重试'),
+                ),
+              ],
+            ),
+          ),
+        SliverToBoxAdapter(child: _buildHomeLibraries(context)),
+        SliverToBoxAdapter(
+          child: _buildHomeMediaSection(
+            context,
+            title: '播放记录',
+            items: _recentlyPlayed,
+          ),
+        ),
+        ..._libraries.map(
+          (library) => SliverToBoxAdapter(
+            child: _buildHomeMediaSection(
+              context,
+              title: library.name,
+              items: _homeLibraryItems[library.id] ?? const [],
+              onOpenLibrary: () => _selectLibrary(library.id),
+            ),
+          ),
+        ),
+        const SliverToBoxAdapter(child: SizedBox(height: 30)),
+      ],
     );
-    return candidates.first;
+  }
+
+  Widget _buildHomeLibraries(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(26, 18, 26, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('媒体库', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 12),
+          if (_libraries.isEmpty)
+            const SizedBox(height: 80, child: Center(child: Text('暂无媒体库')))
+          else
+            SizedBox(
+              height: 164,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _libraries.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 16),
+                itemBuilder: (context, index) {
+                  final library = _libraries[index];
+                  return _HomeLibraryTile(
+                    library: library,
+                    onPressed: () => _selectLibrary(library.id),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHomeMediaSection(
+    BuildContext context, {
+    required String title,
+    required List<EmbyPcItem> items,
+    VoidCallback? onOpenLibrary,
+  }) {
+    final titleWidget = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(
+          child: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+        ),
+        if (onOpenLibrary != null) ...[
+          const SizedBox(width: 3),
+          const Icon(Icons.chevron_right, size: 21),
+        ],
+      ],
+    );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(26, 18, 26, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (onOpenLibrary == null)
+            titleWidget
+          else
+            InkWell(
+              onTap: onOpenLibrary,
+              borderRadius: BorderRadius.circular(6),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: titleWidget,
+              ),
+            ),
+          const SizedBox(height: 12),
+          if (items.isEmpty)
+            const SizedBox(
+              height: 72,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('暂无内容'),
+              ),
+            )
+          else
+            SizedBox(
+              height: 205,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: items.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 18),
+                itemBuilder: (context, index) {
+                  final item = items[index];
+                  return SizedBox(
+                    width: 270,
+                    child: EmbyPcMediaTile(
+                      item: item,
+                      imageStyle: 'backdrop',
+                      onOpen: () => _openItem(item),
+                      onPlay: () => _playItem(item),
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   Widget _buildWorkspaceHeader(BuildContext context, {required bool compact}) {
@@ -768,25 +955,29 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                           ?.copyWith(fontSize: 20, fontWeight: FontWeight.w600),
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  // 加载进度紧跟页面标题，并微调字面位置以与大字号标题视觉居中。
-                  Transform.translate(
-                    offset: const Offset(0, 2),
-                    child: Text(
-                      _loading && _items.isEmpty
-                          ? '加载中'
-                          : '已加载 ${_items.length} 条 /  $_total 条',
-                      style: TextStyle(
-                        color: colors.onSurfaceVariant,
-                        fontSize: 12,
+                  if (_view != 'home') ...[
+                    const SizedBox(width: 10),
+                    // 加载进度紧跟页面标题，并微调字面位置以与大字号标题视觉居中。
+                    Transform.translate(
+                      offset: const Offset(0, 2),
+                      child: Text(
+                        _loading && _items.isEmpty
+                            ? '加载中'
+                            : '已加载 ${_items.length} 条 /  $_total 条',
+                        style: TextStyle(
+                          color: colors.onSurfaceVariant,
+                          fontSize: 12,
+                        ),
                       ),
                     ),
-                  ),
+                  ],
                 ],
               ),
             ),
-            const SizedBox(width: 16),
-            _buildSearchField(compact ? 230 : 340),
+            if (_view != 'home') ...[
+              const SizedBox(width: 16),
+              _buildSearchField(compact ? 230 : 340),
+            ],
             const SizedBox(width: 12),
             _buildAccountMenu(context),
           ],
@@ -801,6 +992,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     onSelected: (value) {
       if (value == 'order') {
         _openOrderDialog();
+      } else if (value == 'home') {
+        _selectHome();
       } else if (value == 'favorite-movies' || value == 'favorite-people') {
         _selectFavorites(value);
       } else {
@@ -809,6 +1002,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     },
     itemBuilder:
         (_) => [
+          const PopupMenuItem(value: 'home', child: Text('首页')),
+          const PopupMenuDivider(),
           ..._libraries.map(
             (library) =>
                 PopupMenuItem(value: library.id, child: Text(library.name)),
@@ -1307,6 +1502,7 @@ class _SidebarButton extends StatelessWidget {
   final IconData icon;
   final String title;
   final int? count;
+  final bool showCount;
   final bool active;
   final bool loading;
   final bool collapsed;
@@ -1316,6 +1512,7 @@ class _SidebarButton extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.count,
+    this.showCount = true,
     required this.active,
     this.loading = false,
     this.collapsed = false,
@@ -1374,7 +1571,7 @@ class _SidebarButton extends StatelessWidget {
                           dimension: 13,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      else
+                      else if (showCount)
                         Container(
                           constraints: const BoxConstraints(minWidth: 24),
                           padding: const EdgeInsets.symmetric(
@@ -1419,6 +1616,71 @@ class _SidebarButton extends StatelessWidget {
       ),
     );
     return collapsed ? Tooltip(message: title, child: button) : button;
+  }
+}
+
+// 首页媒体库使用横向封面入口，点击后仍复用现有媒体库详情加载逻辑。
+class _HomeLibraryTile extends StatelessWidget {
+  final EmbyPcItem library;
+  final VoidCallback onPressed;
+
+  const _HomeLibraryTile({required this.library, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final imageUrl = EmbyPcService.instance.imageUrl(
+      library.id,
+      type: 'Primary',
+      maxWidth: 640,
+    );
+    return SizedBox(
+      width: 246,
+      child: Semantics(
+        button: true,
+        label: '打开媒体库 ${library.name}',
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onPressed,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: colors.outlineVariant),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(5),
+                      child: EmbyPcNetworkImage(
+                        url: library.hasPrimaryImage ? imageUrl : '',
+                      ),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 9, 4, 3),
+                  child: Text(
+                    library.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
