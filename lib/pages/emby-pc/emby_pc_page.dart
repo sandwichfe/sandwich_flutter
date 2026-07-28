@@ -769,14 +769,17 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  // 加载进度紧跟页面标题，切换媒体库后可直接确认当前已展示数量。
-                  Text(
-                    _loading && _items.isEmpty
-                        ? '加载中'
-                        : '已加载 ${_items.length} 条 /  $_total 条',
-                    style: TextStyle(
-                      color: colors.onSurfaceVariant,
-                      fontSize: 12,
+                  // 加载进度紧跟页面标题，并微调字面位置以与大字号标题视觉居中。
+                  Transform.translate(
+                    offset: const Offset(0, 2),
+                    child: Text(
+                      _loading && _items.isEmpty
+                          ? '加载中'
+                          : '已加载 ${_items.length} 条 /  $_total 条',
+                      style: TextStyle(
+                        color: colors.onSurfaceVariant,
+                        fontSize: 12,
+                      ),
                     ),
                   ),
                 ],
