@@ -146,7 +146,7 @@ class _TitleBar extends StatelessWidget {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          '媒体中心',
+                          'Sandwich Player',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
