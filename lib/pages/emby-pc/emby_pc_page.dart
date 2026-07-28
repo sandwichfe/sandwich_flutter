@@ -988,11 +988,9 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       'Runtime': '播放时长',
       'SortName': '文件名',
     };
-    const orderOptions = {'Descending': '降序', 'Ascending': '升序'};
     final availableWidth = MediaQuery.sizeOf(context).width - 24;
-    final panelWidth = availableWidth > 460 ? 460.0 : availableWidth;
-    // 菜单内容左右各保留 14 像素内边距，选项宽度直接使用剩余空间计算。
-    final contentWidth = panelWidth - 28;
+    final panelWidth = availableWidth > 320 ? 320.0 : availableWidth;
+    final colors = Theme.of(context).colorScheme;
 
     return MenuAnchor(
       style: MenuStyle(
@@ -1011,29 +1009,99 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _buildQueryGroup(
-                  title: '排序字段',
-                  options: sortOptions,
-                  selected: _sortBy,
-                  availableWidth: contentWidth,
-                  columns: panelWidth >= 400 ? 3 : 2,
-                  onSelected: (value) {
-                    if (value == _sortBy) return;
-                    setState(() => _sortBy = value);
-                    _applyQuery();
-                  },
+                Text(
+                  '排序字段',
+                  style: Theme.of(context).textTheme.titleMedium,
                 ),
-                _buildQueryGroup(
-                  title: '顺序',
-                  options: orderOptions,
-                  selected: _sortOrder,
-                  availableWidth: contentWidth,
-                  onSelected: (value) {
-                    if (value == _sortOrder) return;
-                    setState(() => _sortOrder = value);
-                    _applyQuery();
-                  },
-                ),
+                const SizedBox(height: 8),
+                // 当前字段再次点击时切换方向，其他字段沿用当前排序方向。
+                ...sortOptions.entries.map((entry) {
+                  final active = entry.key == _sortBy;
+                  final ascending = _sortOrder == 'Ascending';
+                  final currentOrder = ascending ? '升序' : '降序';
+                  final nextOrder = ascending ? '降序' : '升序';
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: Semantics(
+                      button: true,
+                      selected: active,
+                      excludeSemantics: true,
+                      label:
+                          active
+                              ? '${entry.value}，当前$currentOrder，点击切换为$nextOrder'
+                              : '${entry.value}，点击按此字段排序',
+                      child: Material(
+                        color:
+                            active
+                                ? colors.primary.withValues(alpha: 0.10)
+                                : Colors.transparent,
+                        borderRadius: BorderRadius.circular(6),
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          onTap:
+                              _loading
+                                  ? null
+                                  : () {
+                                    setState(() {
+                                      if (active) {
+                                        _sortOrder =
+                                            ascending
+                                                ? 'Descending'
+                                                : 'Ascending';
+                                      } else {
+                                        _sortBy = entry.key;
+                                      }
+                                    });
+                                    _applyQuery();
+                                  },
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(minHeight: 44),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
+                              ),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      entry.value,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.bodyMedium?.copyWith(
+                                        color:
+                                            active
+                                                ? colors.primary
+                                                : colors.onSurface,
+                                        fontWeight:
+                                            active
+                                                ? FontWeight.w600
+                                                : FontWeight.w400,
+                                      ),
+                                    ),
+                                  ),
+                                  if (active)
+                                    Tooltip(
+                                      message: currentOrder,
+                                      child: Icon(
+                                        ascending
+                                            ? Icons.arrow_upward_rounded
+                                            : Icons.arrow_downward_rounded,
+                                        size: 18,
+                                        color: colors.primary,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }),
               ],
             ),
           ),
