@@ -708,32 +708,6 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         ),
         child: Column(
           children: [
-            // 折叠控制和账号入口固定在侧栏两端，中间导航区域保持独立滚动。
-            Padding(
-              padding: const EdgeInsets.all(8),
-              child: Align(
-                alignment:
-                    _sidebarCollapsed
-                        ? Alignment.center
-                        : Alignment.centerRight,
-                child: IconButton(
-                  tooltip: _sidebarCollapsed ? '展开侧栏' : '收起侧栏',
-                  onPressed:
-                      () => setState(
-                        () => _sidebarCollapsed = !_sidebarCollapsed,
-                      ),
-                  icon: Icon(
-                    _sidebarCollapsed
-                        ? Icons.keyboard_double_arrow_right
-                        : Icons.keyboard_double_arrow_left,
-                  ),
-                ),
-              ),
-            ),
-            Divider(
-              height: 1,
-              color: colors.outlineVariant.withValues(alpha: 0.72),
-            ),
             Expanded(
               child: ListView(
                 padding: EdgeInsets.fromLTRB(
@@ -796,12 +770,71 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                 ],
               ),
             ),
+            // 折叠入口固定在账号区上方，避免顶部形成缺少标题的独立工具栏。
+            _buildSidebarToggle(context),
             _buildAccountMenu(
               context,
               sidebar: true,
               collapsed: _sidebarCollapsed,
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSidebarToggle(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final label = _sidebarCollapsed ? '展开侧栏' : '收起侧栏';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 4, 10, 8),
+      child: Tooltip(
+        message: label,
+        child: Semantics(
+          button: true,
+          label: label,
+          excludeSemantics: true,
+          child: Material(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap:
+                  () => setState(
+                    () => _sidebarCollapsed = !_sidebarCollapsed,
+                  ),
+              child: SizedBox(
+                height: 40,
+                child: Row(
+                  mainAxisAlignment:
+                      _sidebarCollapsed
+                          ? MainAxisAlignment.center
+                          : MainAxisAlignment.start,
+                  children: [
+                    if (!_sidebarCollapsed) const SizedBox(width: 12),
+                    Icon(
+                      _sidebarCollapsed
+                          ? Icons.chevron_right_rounded
+                          : Icons.chevron_left_rounded,
+                      size: 20,
+                      color: colors.onSurfaceVariant,
+                    ),
+                    if (!_sidebarCollapsed) ...[
+                      const SizedBox(width: 11),
+                      Text(
+                        label,
+                        style: TextStyle(
+                          color: colors.onSurfaceVariant,
+                          fontFamily: 'Microsoft YaHei UI',
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );
