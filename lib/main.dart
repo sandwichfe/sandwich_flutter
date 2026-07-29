@@ -29,7 +29,6 @@ void main() async {
   // Windows 使用 Flutter 自绘标题栏，其他平台继续沿用系统默认窗口样式。
   final isWindowsDesktop =
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
-  Future<void>? windowReady;
   if (isWindowsDesktop) {
     await windowManager.ensureInitialized();
 
@@ -43,15 +42,11 @@ void main() async {
       windowButtonVisibility: false,
     );
 
-    // 先安排窗口样式初始化，让 runApp 可以立即开始绘制首帧，避免显示空白窗口。
-    windowReady = windowManager.waitUntilReadyToShow(windowOptions, () async {
-      await windowManager.show();
-      await windowManager.focus();
-    });
+    // 在首帧绘制前完成窗口尺寸和位置设置，避免窗口显示后再跳动。
+    await windowManager.waitUntilReadyToShow(windowOptions);
   }
 
   runApp(MyApp(token: token));
-  if (windowReady != null) await windowReady;
 }
 
 class MyApp extends StatelessWidget {
