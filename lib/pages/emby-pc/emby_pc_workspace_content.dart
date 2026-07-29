@@ -70,10 +70,24 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
                           ),
                         ),
                         if (_loadingMore)
-                          const SliverToBoxAdapter(
-                            child: Padding(
-                              padding: EdgeInsets.only(bottom: 24),
-                              child: Center(child: CircularProgressIndicator()),
+                          SliverPadding(
+                            padding: const EdgeInsets.fromLTRB(26, 0, 26, 30),
+                            sliver: SliverGrid.builder(
+                              gridDelegate:
+                                  SliverGridDelegateWithMaxCrossAxisExtent(
+                                    maxCrossAxisExtent:
+                                        _imageStyle == 'backdrop' ? 320 : 196,
+                                    crossAxisSpacing: 20,
+                                    mainAxisSpacing: 22,
+                                    childAspectRatio:
+                                        _imageStyle == 'backdrop' ? 1.40 : 0.56,
+                                  ),
+                              itemCount: 6, // 显示 6 个骨架屏占位符
+                              itemBuilder: (context, index) {
+                                return EmbyPcLoadingPlaceholder(
+                                  isBackdrop: _imageStyle == 'backdrop',
+                                );
+                              },
                             ),
                           ),
                       ],

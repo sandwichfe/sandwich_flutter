@@ -93,6 +93,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   String _homeError = '';
   int _queryVersion = 0;
   final Set<String> _favoriteBusyIds = {};
+  Timer? _loadMoreDebounceTimer;
+  DateTime? _lastLoadMoreTime;
 
   @override
   void initState() {
@@ -301,10 +303,30 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
 
   void _onScroll() {
     if (_view == 'home') return;
-    if (_scrollController.position.extentAfter < 700 &&
-        !_loading &&
-        !_loadingMore) {
-      _loadItems(reset: false);
+    // 正在加载时不处理滚动事件，避免创建无用的定时器
+    if (_loading || _loadingMore) return;
+
+    if (_scrollController.position.extentAfter < 700) {
+      final now = DateTime.now();
+      // 节流：如果距离上次加载不到 1000ms，使用防抖延迟执行
+      if (_lastLoadMoreTime != null &&
+          now.difference(_lastLoadMoreTime!).inMilliseconds < 1000) {
+        // 防抖：取消旧定时器，延迟到节流间隔结束后执行
+        _loadMoreDebounceTimer?.cancel();
+        final remainingTime = 800 - now.difference(_lastLoadMoreTime!).inMilliseconds;
+        _loadMoreDebounceTimer = Timer(Duration(milliseconds: remainingTime + 100), () {
+          // 定时器触发时再次检查状态，避免在加载过程中重复触发
+          if (!_loading && !_loadingMore) {
+            _lastLoadMoreTime = DateTime.now();
+            _loadItems(reset: false);
+          }
+        });
+      } else {
+        // 节流间隔已过，立即执行并记录时间
+        _loadMoreDebounceTimer?.cancel();
+        _lastLoadMoreTime = now;
+        _loadItems(reset: false);
+      }
     }
   }
 
@@ -527,6 +549,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     _searchController.dispose();
     _yearController.dispose();
     _scrollController.dispose();
+    _loadMoreDebounceTimer?.cancel();
     super.dispose();
   }
 

@@ -769,3 +769,62 @@ class _MediaBadge extends StatelessWidget {
     ),
   );
 }
+
+// 加载占位符：在分页加载时显示骨架屏，提供更流畅的视觉反馈
+class EmbyPcLoadingPlaceholder extends StatelessWidget {
+  final bool isBackdrop;
+
+  const EmbyPcLoadingPlaceholder({super.key, required this.isBackdrop});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: colors.outlineVariant.withValues(alpha: 0.5),
+              ),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(5),
+              child: _ImageLoadingSkeleton(
+                color: colors.surfaceContainerHigh,
+              ),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(2, 9, 2, 1),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                height: 14,
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: colors.surfaceContainerHigh,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Container(
+                height: 12,
+                width: 100,
+                decoration: BoxDecoration(
+                  color: colors.surfaceContainerHigh.withValues(alpha: 0.7),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
