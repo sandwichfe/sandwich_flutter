@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../settings_page.dart';
@@ -53,12 +55,14 @@ class EmbyPcWorkspace extends StatefulWidget {
 
 class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   final _searchController = TextEditingController();
+  final _globalSearchController = TextEditingController();
   final _yearController = TextEditingController();
   final _scrollController = ScrollController();
   List<EmbyPcItem> _libraries = const [];
   List<EmbyPcItem> _items = const [];
   List<EmbyPcItem> _recentlyPlayed = const [];
   Map<String, List<EmbyPcItem>> _homeLibraryItems = const {};
+  List<EmbyPcItem> _globalSearchItems = const [];
   final Map<String, int?> _libraryCounts = {};
   int? _favoriteMovieCount;
   int? _favoritePeopleCount;
@@ -72,18 +76,26 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   String _sortOrder = 'Descending';
   String _imageStyle = 'backdrop';
   int _total = 0;
+  int _globalSearchTotal = 0;
   bool _loading = true;
   bool _loadingMore = false;
   bool _homeLoading = false;
   bool _homeLoaded = false;
+  bool _globalSearchLoading = false;
   bool _countsLoading = true;
   bool _favoritePeopleLoading = false;
   bool _favoriteMovieLoading = false;
   bool _sidebarCollapsed = false;
   String _error = '';
   String _homeError = '';
+  String _globalSearchError = '';
   int _queryVersion = 0;
+  int _globalSearchVersion = 0;
+  Timer? _globalSearchDebounce;
   final Set<String> _favoriteBusyIds = {};
+
+  bool get _globalSearchActive =>
+      _view == 'home' && _globalSearchController.text.trim().isNotEmpty;
 
   @override
   void initState() {
@@ -300,7 +312,10 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   }
 
   Future<void> _selectHome() async {
-    if (_view == 'home') return;
+    if (_view == 'home') {
+      if (_globalSearchActive) _clearGlobalSearch();
+      return;
+    }
     // 切换首页时使正在进行的媒体库分页请求失效，避免旧结果覆盖当前状态。
     _queryVersion++;
     setState(() {
@@ -347,6 +362,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   void _resetQueryControllers() {
     _searchController.clear();
     _yearController.clear();
+    _resetGlobalSearchState();
     _itemType = '';
     _statusFilter = '';
     _markFilter = '';
@@ -367,6 +383,70 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     setState(_searchController.clear);
     await _applyQuery();
   }
+
+  void _scheduleGlobalSearch(String value) {
+    _startGlobalSearch(value, debounce: true);
+  }
+
+  void _submitGlobalSearch(String value) {
+    _startGlobalSearch(value);
+  }
+
+  void _startGlobalSearch(String value, {bool debounce = false}) {
+    _globalSearchDebounce?.cancel();
+    final query = value.trim();
+    final requestVersion = ++_globalSearchVersion;
+    setState(() {
+      _globalSearchItems = const [];
+      _globalSearchTotal = 0;
+      _globalSearchError = '';
+      _globalSearchLoading = query.isNotEmpty;
+    });
+    if (query.isEmpty) return;
+    if (!debounce) {
+      _loadGlobalSearch(query, requestVersion);
+      return;
+    }
+    // 输入短暂停顿后再请求，降低远程 Emby 服务器上的无效查询数量。
+    _globalSearchDebounce = Timer(
+      const Duration(milliseconds: 300),
+      () => _loadGlobalSearch(query, requestVersion),
+    );
+  }
+
+  Future<void> _loadGlobalSearch(String query, int requestVersion) async {
+    try {
+      final page = await EmbyPcService.instance.searchItems(query);
+      if (!mounted ||
+          requestVersion != _globalSearchVersion ||
+          _globalSearchController.text.trim() != query) {
+        return;
+      }
+      setState(() {
+        _globalSearchItems = page.items;
+        _globalSearchTotal = page.total;
+        _globalSearchLoading = false;
+      });
+    } catch (error) {
+      if (!mounted || requestVersion != _globalSearchVersion) return;
+      setState(() {
+        _globalSearchLoading = false;
+        _globalSearchError = error.toString();
+      });
+    }
+  }
+
+  void _resetGlobalSearchState() {
+    _globalSearchDebounce?.cancel();
+    _globalSearchVersion++;
+    _globalSearchController.clear();
+    _globalSearchItems = const [];
+    _globalSearchTotal = 0;
+    _globalSearchLoading = false;
+    _globalSearchError = '';
+  }
+
+  void _clearGlobalSearch() => setState(_resetGlobalSearchState);
 
   Future<void> _toggleFavorite(EmbyPcItem item) async {
     if (_favoriteBusyIds.contains(item.id)) return;
@@ -435,7 +515,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   }
 
   void _openItem(EmbyPcItem item) {
-    if (_view == 'favorite-people') {
+    if (item.type == 'Person' || _view == 'favorite-people') {
       Navigator.of(context).push(
         embyPcFadeRoute(
           context,
@@ -463,7 +543,9 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
 
   @override
   void dispose() {
+    _globalSearchDebounce?.cancel();
     _searchController.dispose();
+    _globalSearchController.dispose();
     _yearController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -537,6 +619,54 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
           focusedBorder: OutlineInputBorder(
             borderSide: BorderSide(color: colors.primary, width: 1.4),
             borderRadius: BorderRadius.circular(6),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGlobalSearchField(double maxWidth) {
+    final colors = Theme.of(context).colorScheme;
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: maxWidth),
+      child: SizedBox(
+        width: double.infinity,
+        height: 42,
+        child: TextField(
+          controller: _globalSearchController,
+          textInputAction: TextInputAction.search,
+          onChanged: _scheduleGlobalSearch,
+          onSubmitted: _submitGlobalSearch,
+          decoration: InputDecoration(
+            isDense: true,
+            filled: true,
+            fillColor: colors.surface.withValues(alpha: 0.82),
+            hintText: '搜索电影、剧集、视频和演员',
+            prefixIcon: const Icon(Icons.search_rounded, size: 19),
+            suffixIcon:
+                _globalSearchLoading
+                    ? const Center(
+                      child: SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                    : _globalSearchController.text.trim().isEmpty
+                    ? null
+                    : IconButton(
+                      tooltip: '清除搜索',
+                      onPressed: _clearGlobalSearch,
+                      icon: const Icon(Icons.clear, size: 18),
+                    ),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+            enabledBorder: OutlineInputBorder(
+              borderSide: BorderSide(color: colors.outlineVariant),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderSide: BorderSide(color: colors.primary, width: 1.4),
+              borderRadius: BorderRadius.circular(6),
+            ),
           ),
         ),
       ),
@@ -860,7 +990,9 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
             ),
           Expanded(
             child: _view == 'home'
-                ? _buildHomeContent(context)
+                ? _globalSearchActive
+                    ? _buildGlobalSearchResults(context)
+                    : _buildHomeContent(context)
                 : _loading && _items.isEmpty
                     ? const Center(child: CircularProgressIndicator())
                     : _items.isEmpty
@@ -965,6 +1097,136 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
           ),
         ),
         const SliverToBoxAdapter(child: SizedBox(height: 30)),
+      ],
+    );
+  }
+
+  Widget _buildGlobalSearchResults(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final query = _globalSearchController.text.trim();
+    if (_globalSearchLoading && _globalSearchItems.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_globalSearchError.isNotEmpty) {
+      return _WorkspaceError(
+        message: _globalSearchError,
+        onRetry: () => _submitGlobalSearch(query),
+      );
+    }
+    if (_globalSearchItems.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.search_off_rounded,
+                size: 44,
+                color: colors.onSurfaceVariant,
+              ),
+              const SizedBox(height: 14),
+              Text(
+                '没有找到“$query”',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '请尝试更短的关键词，或检查影片和演员名称',
+                style: TextStyle(color: colors.onSurfaceVariant),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final people =
+        _globalSearchItems.where((item) => item.type == 'Person').toList();
+    final media =
+        _globalSearchItems.where((item) => item.type != 'Person').toList();
+    return ListView(
+      controller: _scrollController,
+      padding: const EdgeInsets.fromLTRB(26, 18, 26, 32),
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                '“$query”的搜索结果',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ),
+            const SizedBox(width: 16),
+            Text(
+              _globalSearchTotal > _globalSearchItems.length
+                  ? '共 $_globalSearchTotal 项，展示前 ${_globalSearchItems.length} 项'
+                  : '共 $_globalSearchTotal 项',
+              style: TextStyle(
+                color: colors.onSurfaceVariant,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 22),
+        if (media.isNotEmpty)
+          _buildGlobalSearchSection(
+            context,
+            title: '影视内容',
+            items: media,
+          ),
+        if (media.isNotEmpty && people.isNotEmpty) const SizedBox(height: 28),
+        if (people.isNotEmpty)
+          _buildGlobalSearchSection(
+            context,
+            title: '演员',
+            items: people,
+          ),
+      ],
+    );
+  }
+
+  Widget _buildGlobalSearchSection(
+    BuildContext context, {
+    required String title,
+    required List<EmbyPcItem> items,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '$title  ${items.length}',
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 12),
+        // 全局结果统一使用主海报，电影和人物可以共享现有卡片交互。
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: 196,
+            childAspectRatio: 0.56,
+            crossAxisSpacing: 20,
+            mainAxisSpacing: 22,
+          ),
+          itemCount: items.length,
+          itemBuilder: (context, index) {
+            final item = items[index];
+            final isPerson = item.type == 'Person';
+            return EmbyPcMediaTile(
+              item: item,
+              imageStyle: 'poster',
+              secondaryLabel: isPerson ? '演员' : '',
+              onOpen: () => _openItem(item),
+              onPlay: isPerson ? null : () => _playItem(item),
+            );
+          },
+        ),
       ],
     );
   }
@@ -1076,6 +1338,17 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
 
   Widget _buildWorkspaceHeader(BuildContext context, {required bool compact}) {
     final colors = Theme.of(context).colorScheme;
+    final pageTitle = Text(
+      _pageTitle,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: Theme.of(
+        context,
+      ).textTheme.headlineSmall?.copyWith(
+        fontSize: 20,
+        fontWeight: FontWeight.w600,
+      ),
+    );
     return Material(
       color: colors.surfaceContainerLowest,
       child: Container(
@@ -1087,19 +1360,20 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
               _buildCompactLibraryMenu(),
               const SizedBox(width: 8),
             ],
-            Expanded(
-              child: Row(
-                children: [
-                  Flexible(
-                    child: Text(
-                      _pageTitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.headlineSmall
-                          ?.copyWith(fontSize: 20, fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                  if (_view != 'home') ...[
+            if (_view == 'home') ...[
+              pageTitle,
+              const SizedBox(width: 24),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: _buildGlobalSearchField(420),
+                ),
+              ),
+            ] else ...[
+              Expanded(
+                child: Row(
+                  children: [
+                    Flexible(child: pageTitle),
                     const SizedBox(width: 10),
                     // 加载进度紧跟页面标题，并微调字面位置以与大字号标题视觉居中。
                     Transform.translate(
@@ -1115,10 +1389,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                       ),
                     ),
                   ],
-                ],
+                ),
               ),
-            ),
-            if (_view != 'home') ...[
               const SizedBox(width: 16),
               _buildSearchField(compact ? 230 : 340),
             ],

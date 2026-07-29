@@ -149,6 +149,30 @@ class EmbyPcService {
     );
   }
 
+  Future<EmbyPcPage> searchItems(String searchTerm, {int limit = 60}) async {
+    final queryText = searchTerm.trim();
+    if (queryText.isEmpty) {
+      return const EmbyPcPage(items: [], total: 0);
+    }
+    // 全局搜索省略 ParentId，让 Emby 从用户可访问的全部媒体库递归检索。
+    return EmbyPcPage.fromJson(
+      await _get(
+        '/emby/Users/$userId/Items',
+        query: {
+          'SearchTerm': queryText,
+          'Recursive': 'true',
+          'IncludeItemTypes': 'Movie,Series,Video,Person',
+          'Fields':
+              'ProductionYear,PremiereDate,CommunityRating,RunTimeTicks,Width,Height',
+          'EnableUserData': 'true',
+          'EnableImageTypes': 'Primary,Backdrop',
+          'StartIndex': '0',
+          'Limit': '${limit.clamp(1, 100)}',
+        },
+      ),
+    );
+  }
+
   Future<EmbyPcItem> getItemDetail(String itemId) async {
     const fields =
         'Genres,Tags,Studios,People,MediaSources,Overview,Path,ProductionYear,'
