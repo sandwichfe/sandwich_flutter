@@ -57,6 +57,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                 ),
               ),
               const SizedBox(width: 16),
+              // 窄屏下允许搜索框随剩余空间收缩，避免固定宽度挤出工具栏。
               Flexible(
                 child: _EmbyPcWorkspaceNavigation(
                   this,
@@ -74,9 +75,9 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
   }
 
   Widget _buildGlobalSearchButton(
-    BuildContext context, {
-    required bool compact,
-  }) {
+      BuildContext context, {
+        required bool compact,
+      }) {
     final colors = Theme.of(context).colorScheme;
     if (compact) {
       return IconButton.outlined(
@@ -119,22 +120,22 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
     },
     itemBuilder:
         (_) => [
-          const PopupMenuItem(value: 'home', child: Text('首页')),
-          const PopupMenuItem(
-            value: 'recently-played',
-            child: Text('播放记录'),
-          ),
-          const PopupMenuDivider(),
-          ..._libraries.map(
+      const PopupMenuItem(value: 'home', child: Text('首页')),
+      const PopupMenuItem(
+        value: 'recently-played',
+        child: Text('播放记录'),
+      ),
+      const PopupMenuDivider(),
+      ..._libraries.map(
             (library) =>
-                PopupMenuItem(value: library.id, child: Text(library.name)),
-          ),
-          const PopupMenuDivider(),
-          const PopupMenuItem(value: 'favorite-movies', child: Text('收藏影片')),
-          const PopupMenuItem(value: 'favorite-people', child: Text('收藏演员')),
-          const PopupMenuDivider(),
-          const PopupMenuItem(value: 'order', child: Text('调整媒体库顺序')),
-        ],
+            PopupMenuItem(value: library.id, child: Text(library.name)),
+      ),
+      const PopupMenuDivider(),
+      const PopupMenuItem(value: 'favorite-movies', child: Text('收藏影片')),
+      const PopupMenuItem(value: 'favorite-people', child: Text('收藏演员')),
+      const PopupMenuDivider(),
+      const PopupMenuItem(value: 'order', child: Text('调整媒体库顺序')),
+    ],
   );
 
   Widget _buildToolbar(BuildContext context) {
@@ -151,14 +152,23 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
             ),
           ),
         ),
-        child: Row(
-          children: [
-            _buildFilterMenu(context),
-            const SizedBox(width: 8),
-            _buildSortMenu(context),
-            const Spacer(),
-            _buildLayoutControl(context),
-          ],
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            // 安卓窄屏仅显示布局图标，完整含义继续由 Tooltip 提供。
+            final compactLayoutControl = constraints.maxWidth < 420;
+            return Row(
+              children: [
+                _buildFilterMenu(context),
+                const SizedBox(width: 8),
+                _buildSortMenu(context),
+                const Spacer(),
+                _buildLayoutControl(
+                  context,
+                  compact: compactLayoutControl,
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -199,8 +209,8 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
     final contentWidth = panelWidth - 28;
     final showAdvancedFilters =
         _view != 'favorite-movies' &&
-        _view != 'favorite-people' &&
-        _view != 'recently-played';
+            _view != 'favorite-people' &&
+            _view != 'recently-played';
 
     // 多组低频筛选集中放入弹出面板，选中后仍按原逻辑立即刷新列表。
     return MenuAnchor(
@@ -282,17 +292,17 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
       ],
       builder:
           (context, controller, child) => _buildQueryPill(
-            label: _activeFilterCount == 0 ? '筛选' : '筛选 $_activeFilterCount',
-            icon: Icons.filter_list,
-            active: _activeFilterCount > 0,
-            onPressed:
-                _loading
-                    ? null
-                    : () =>
-                        controller.isOpen
-                            ? controller.close()
-                            : controller.open(),
-          ),
+        label: _activeFilterCount == 0 ? '筛选' : '筛选 $_activeFilterCount',
+        icon: Icons.filter_list,
+        active: _activeFilterCount > 0,
+        onPressed:
+        _loading
+            ? null
+            : () =>
+        controller.isOpen
+            ? controller.close()
+            : controller.open(),
+      ),
     );
   }
 
@@ -342,33 +352,33 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                       selected: active,
                       excludeSemantics: true,
                       label:
-                          active
-                              ? '${entry.value}，当前$currentOrder，点击切换为$nextOrder'
-                              : '${entry.value}，点击按此字段排序',
+                      active
+                          ? '${entry.value}，当前$currentOrder，点击切换为$nextOrder'
+                          : '${entry.value}，点击按此字段排序',
                       child: Material(
                         color:
-                            active
-                                ? colors.primary.withValues(alpha: 0.10)
-                                : Colors.transparent,
+                        active
+                            ? colors.primary.withValues(alpha: 0.10)
+                            : Colors.transparent,
                         borderRadius: BorderRadius.circular(6),
                         clipBehavior: Clip.antiAlias,
                         child: InkWell(
                           onTap:
-                              _loading
-                                  ? null
-                                  : () {
-                                    setState(() {
-                                      if (active) {
-                                        _sortOrder =
-                                            ascending
-                                                ? 'Descending'
-                                                : 'Ascending';
-                                      } else {
-                                        _sortBy = entry.key;
-                                      }
-                                    });
-                                    _applyQuery();
-                                  },
+                          _loading
+                              ? null
+                              : () {
+                            setState(() {
+                              if (active) {
+                                _sortOrder =
+                                ascending
+                                    ? 'Descending'
+                                    : 'Ascending';
+                              } else {
+                                _sortBy = entry.key;
+                              }
+                            });
+                            _applyQuery();
+                          },
                           child: ConstrainedBox(
                             constraints: const BoxConstraints(minHeight: 44),
                             child: Padding(
@@ -387,13 +397,13 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                                         context,
                                       ).textTheme.bodyMedium?.copyWith(
                                         color:
-                                            active
-                                                ? colors.primary
-                                                : colors.onSurface,
+                                        active
+                                            ? colors.primary
+                                            : colors.onSurface,
                                         fontWeight:
-                                            active
-                                                ? FontWeight.w600
-                                                : FontWeight.w400,
+                                        active
+                                            ? FontWeight.w600
+                                            : FontWeight.w400,
                                       ),
                                     ),
                                   ),
@@ -424,63 +434,87 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
       ],
       builder:
           (context, controller, child) => _buildQueryPill(
-            label: '排序',
-            icon: Icons.swap_vert,
-            onPressed:
-                _loading
-                    ? null
-                    : () =>
-                        controller.isOpen
-                            ? controller.close()
-                            : controller.open(),
-          ),
+        label: '排序',
+        icon: Icons.swap_vert,
+        onPressed:
+        _loading
+            ? null
+            : () =>
+        controller.isOpen
+            ? controller.close()
+            : controller.open(),
+      ),
     );
   }
 
-  Widget _buildLayoutControl(BuildContext context) {
+  Widget _buildLayoutControl(
+    BuildContext context, {
+    required bool compact,
+  }) {
     final colors = Theme.of(context).colorScheme;
     return SegmentedButton<String>(
       showSelectedIcon: false,
-      segments: const [
-        ButtonSegment(
-          value: 'backdrop',
-          icon: Tooltip(message: '背景图布局', child: Icon(Icons.view_day_outlined)),
-          label: Text('背景图'),
-        ),
-        ButtonSegment(
-          value: 'poster',
-          icon: Tooltip(
-            message: '海报布局',
-            child: Icon(Icons.view_agenda_outlined),
-          ),
-          label: Text('海报'),
-        ),
-      ],
+      segments:
+          compact
+              ? const [
+                ButtonSegment(
+                  value: 'backdrop',
+                  icon: Tooltip(
+                    message: '背景图布局',
+                    child: Icon(Icons.view_day_outlined),
+                  ),
+                ),
+                ButtonSegment(
+                  value: 'poster',
+                  icon: Tooltip(
+                    message: '海报布局',
+                    child: Icon(Icons.view_agenda_outlined),
+                  ),
+                ),
+              ]
+              : const [
+                ButtonSegment(
+                  value: 'backdrop',
+                  icon: Tooltip(
+                    message: '背景图布局',
+                    child: Icon(Icons.view_day_outlined),
+                  ),
+                  label: Text('背景图'),
+                ),
+                ButtonSegment(
+                  value: 'poster',
+                  icon: Tooltip(
+                    message: '海报布局',
+                    child: Icon(Icons.view_agenda_outlined),
+                  ),
+                  label: Text('海报'),
+                ),
+              ],
       selected: {_imageStyle},
       onSelectionChanged:
-          _loading ? null : (selection) => _updateImageStyle(selection.first),
+      _loading ? null : (selection) => _updateImageStyle(selection.first),
       style: ButtonStyle(
         visualDensity: VisualDensity.compact,
         minimumSize: const WidgetStatePropertyAll(Size(0, 38)),
         // 布局选中态与侧栏、筛选项统一使用用户设置的主题色。
         foregroundColor: WidgetStateProperty.resolveWith(
-          (states) =>
-              states.contains(WidgetState.selected)
-                  ? colors.onPrimary
-                  : colors.onSurface,
+              (states) =>
+          states.contains(WidgetState.selected)
+              ? colors.onPrimary
+              : colors.onSurface,
         ),
         backgroundColor: WidgetStateProperty.resolveWith(
-          (states) =>
-              states.contains(WidgetState.selected)
-                  ? colors.primary
-                  : Colors.transparent,
+              (states) =>
+          states.contains(WidgetState.selected)
+              ? colors.primary
+              : Colors.transparent,
         ),
         side: WidgetStateProperty.resolveWith(
-          (states) => BorderSide(
+              (states) => BorderSide(
             color:
-                states.contains(WidgetState.selected)
-                    ? colors.primary
-                    : colors.outlineVariant,
+            states.contains(WidgetState.selected)
+                ? colors.primary
+                : colors.outlineVariant,
           ),
         ),
         shape: WidgetStatePropertyAll(
@@ -543,48 +577,48 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
       spacing: spacing,
       runSpacing: spacing,
       children:
-          options.entries.map((entry) {
-            final active = entry.key == selected;
-            return SizedBox(
-              width: itemWidth,
-              child: OutlinedButton(
-                onPressed: _loading ? null : () => onSelected(entry.key),
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size(0, 36),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 7,
-                  ),
-                  alignment: Alignment.centerLeft,
-                  foregroundColor: active ? colors.primary : colors.onSurface,
-                  backgroundColor:
-                      active ? colors.primary.withValues(alpha: 0.12) : null,
-                  side: BorderSide(
-                    color: active ? colors.primary : colors.outlineVariant,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        entry.value,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 13),
-                      ),
-                    ),
-                    if (active) ...[
-                      const SizedBox(width: 6),
-                      const Icon(Icons.check, size: 16),
-                    ],
-                  ],
-                ),
+      options.entries.map((entry) {
+        final active = entry.key == selected;
+        return SizedBox(
+          width: itemWidth,
+          child: OutlinedButton(
+            onPressed: _loading ? null : () => onSelected(entry.key),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(0, 36),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 7,
               ),
-            );
-          }).toList(),
+              alignment: Alignment.centerLeft,
+              foregroundColor: active ? colors.primary : colors.onSurface,
+              backgroundColor:
+              active ? colors.primary.withValues(alpha: 0.12) : null,
+              side: BorderSide(
+                color: active ? colors.primary : colors.outlineVariant,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    entry.value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                ),
+                if (active) ...[
+                  const SizedBox(width: 6),
+                  const Icon(Icons.check, size: 16),
+                ],
+              ],
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 
@@ -602,7 +636,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
         padding: const EdgeInsets.symmetric(horizontal: 12),
         foregroundColor: active ? colors.primary : colors.onSurface,
         backgroundColor:
-            active ? colors.primary.withValues(alpha: 0.10) : colors.surface,
+        active ? colors.primary.withValues(alpha: 0.10) : colors.surface,
         side: BorderSide(
           color: active ? colors.primary : colors.outlineVariant,
         ),
