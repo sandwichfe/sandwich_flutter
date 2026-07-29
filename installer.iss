@@ -2,10 +2,10 @@
 AppId=395630db-c0b3-4fa0-8de3-bb6265cb1f6d
 AppName=sandwichPlayer
 AppVersion=1.0.0
-DefaultDirName={autopf}\MediaCenter
+DefaultDirName={autopf}\sandwichPlayer
 DefaultGroupName=sandwichPlayer
 OutputDir=dist
-OutputBaseFilename=MediaCenter-Setup-1.0.0
+OutputBaseFilename=sandwichPlayer-Setup-1.0.0
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
