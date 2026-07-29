@@ -4,13 +4,15 @@ part of 'emby_pc_page.dart';
 extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
   Widget _buildContent(BuildContext context, {required bool compact}) {
     final colors = Theme.of(context).colorScheme;
-    final toolbar = _EmbyPcWorkspaceToolbar(this);
     return ColoredBox(
       color: colors.surfaceContainerLowest,
       child: Column(
         children: [
-          toolbar._buildWorkspaceHeader(context, compact: compact),
-          if (_view != 'home') toolbar._buildToolbar(context),
+          _EmbyPcWorkspaceToolbar(
+            this,
+          )._buildWorkspaceHeader(context, compact: compact),
+          if (_view != 'home')
+            _EmbyPcWorkspaceToolbar(this)._buildToolbar(context),
           if (_view != 'home' && _error.isNotEmpty)
             MaterialBanner(
               content: Text(_error),

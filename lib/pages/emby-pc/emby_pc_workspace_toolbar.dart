@@ -4,9 +4,8 @@ part of 'emby_pc_page.dart';
 extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
   Widget _buildWorkspaceHeader(BuildContext context, {required bool compact}) {
     final colors = Theme.of(context).colorScheme;
-    final navigation = _EmbyPcWorkspaceNavigation(this);
     final pageTitle = Text(
-      navigation._pageTitle,
+      _EmbyPcWorkspaceNavigation(this)._pageTitle,
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       style: Theme.of(
@@ -54,11 +53,13 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                 ),
               ),
               const SizedBox(width: 16),
-              navigation._buildSearchField(compact ? 230 : 340),
+              _EmbyPcWorkspaceNavigation(
+                this,
+              )._buildSearchField(compact ? 230 : 340),
             ],
             if (compact) ...[
               const SizedBox(width: 12),
-              navigation._buildAccountMenu(context),
+              _EmbyPcWorkspaceNavigation(this)._buildAccountMenu(context),
             ],
           ],
         ),

@@ -535,8 +535,6 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final compact = constraints.maxWidth < 820;
-        final navigation = _EmbyPcWorkspaceNavigation(this);
-        final content = _EmbyPcWorkspaceContent(this);
         return Scaffold(
           body:
               _error.isNotEmpty && _libraries.isEmpty
@@ -544,9 +542,10 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                   : Row(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      if (!compact) navigation._buildSidebar(context),
+                      if (!compact)
+                        _EmbyPcWorkspaceNavigation(this)._buildSidebar(context),
                       Expanded(
-                        child: content._buildContent(
+                        child: _EmbyPcWorkspaceContent(this)._buildContent(
                           context,
                           compact: compact,
                         ),
