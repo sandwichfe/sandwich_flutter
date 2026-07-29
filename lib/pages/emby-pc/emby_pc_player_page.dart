@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -25,13 +26,17 @@ class EmbyPcPlayerPage extends StatefulWidget {
 }
 
 class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
+  static const double _defaultVolume = 5.0;
+
   late final Player _player;
   late final VideoController _videoController;
   final List<StreamSubscription<dynamic>> _playerSubscriptions = [];
   bool _loading = true;
+  bool _buffering = false;
   bool _muted = false;
-  double _volume = 100.0;
-  double _volumeBeforeMute = 100.0;
+  double _volume = _defaultVolume;
+  double _volumeBeforeMute = _defaultVolume;
+  double? _networkSpeedBytesPerSecond;
   String _error = '';
   bool _playerReady = false;
   bool _isPlaying = false;
@@ -75,6 +80,11 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
         if (mounted) setState(() => _duration = duration);
       }),
     );
+    _playerSubscriptions.add(
+      _player.stream.buffering.listen((buffering) {
+        if (mounted) setState(() => _buffering = buffering);
+      }),
+    );
     // 音量状态由播放器事件统一回写，保证按钮、滑条和底层实际音量一致。
     _playerSubscriptions.add(
       _player.stream.volume.listen((volume) {
@@ -111,6 +121,38 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
     );
   }
 
+  Future<void> _observeNetworkSpeed() async {
+    if (kIsWeb) return;
+
+    try {
+      // mpv 的原始输入速率单位为字节/秒，可直接反映当前视频流下载速度。
+      await (_player.platform as dynamic).observeProperty(
+        'demuxer-cache-state',
+        (String value) async {
+          if (!mounted || value.isEmpty) return;
+          try {
+            final cacheState = jsonDecode(value);
+            if (cacheState is! Map<String, dynamic>) return;
+            final rawInputRate = cacheState['raw-input-rate'];
+            if (rawInputRate is! num) return;
+
+            final speed = math.max(0.0, rawInputRate.toDouble());
+            if (_networkSpeedBytesPerSecond == speed) return;
+            if (_loading || _buffering) {
+              setState(() => _networkSpeedBytesPerSecond = speed);
+            } else {
+              _networkSpeedBytesPerSecond = speed;
+            }
+          } catch (_) {
+            // 缓存属性短暂不可解析时保留上一次速率，不影响视频播放。
+          }
+        },
+      );
+    } catch (_) {
+      // 非 mpv 平台不提供该属性时仅隐藏具体速率，保留加载状态提示。
+    }
+  }
+
   // 章节和继续播放都换算为 Emby ticks 后从指定位置起播。
   Future<void> _initializePlayer() async {
     try {
@@ -125,6 +167,9 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
         EmbyPcService.instance.streamUrl(widget.item.id),
         start: startPosition,
       );
+      // 在打开媒体前同步默认音量，避免起播瞬间短暂使用播放器的满音量默认值。
+      await _player.setVolume(_defaultVolume);
+      await _observeNetworkSpeed();
       await _player.open(media);
       if (!mounted) {
         await _player.dispose();
@@ -232,7 +277,12 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
       ),
       body:
           _loading
-              ? const Center(child: CircularProgressIndicator())
+              ? Center(
+                child: _PlayerLoadingIndicator(
+                  statusText: '正在加载',
+                  networkSpeedBytesPerSecond: _networkSpeedBytesPerSecond,
+                ),
+              )
               : _error.isNotEmpty
               ? Center(
                 child: _PlayerMessage(icon: Icons.error_outline, text: _error),
@@ -266,6 +316,9 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
                         position: _position,
                         duration: _duration,
                         isPlaying: _isPlaying,
+                        buffering: _buffering,
+                        networkSpeedBytesPerSecond:
+                            _networkSpeedBytesPerSecond,
                         thumbnailPreviewController: _thumbnailPreviewController,
                         muted: _muted,
                         volume: _volume,
@@ -418,6 +471,8 @@ class _PlayerControls extends StatelessWidget {
   final Duration position;
   final Duration duration;
   final bool isPlaying;
+  final bool buffering;
+  final double? networkSpeedBytesPerSecond;
   final _ThumbnailPreviewController thumbnailPreviewController;
   final bool muted;
   final double volume;
@@ -430,6 +485,8 @@ class _PlayerControls extends StatelessWidget {
     required this.position,
     required this.duration,
     required this.isPlaying,
+    required this.buffering,
+    required this.networkSpeedBytesPerSecond,
     required this.thumbnailPreviewController,
     required this.muted,
     required this.volume,
@@ -469,7 +526,7 @@ class _PlayerControls extends StatelessWidget {
                     switchInCurve: Curves.easeOut,
                     switchOutCurve: Curves.easeIn,
                     child:
-                        isPlaying
+                        isPlaying || buffering
                             ? const SizedBox.shrink(key: ValueKey('playing'))
                             : Container(
                               key: const ValueKey('paused'),
@@ -499,6 +556,24 @@ class _PlayerControls extends StatelessWidget {
                   ),
                 ),
               ),
+            ),
+          ),
+        ),
+        Positioned.fill(
+          child: IgnorePointer(
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              switchInCurve: Curves.easeOut,
+              switchOutCurve: Curves.easeIn,
+              child: buffering
+                  ? Center(
+                      key: const ValueKey('buffering'),
+                      child: _PlayerLoadingIndicator(
+                        statusText: '正在缓冲',
+                        networkSpeedBytesPerSecond: networkSpeedBytesPerSecond,
+                      ),
+                    )
+                  : const SizedBox.shrink(key: ValueKey('buffered')),
             ),
           ),
         ),
@@ -620,6 +695,78 @@ class _PlayerControls extends StatelessWidget {
     final minutes = value.inMinutes.remainder(60).toString().padLeft(2, '0');
     final seconds = value.inSeconds.remainder(60).toString().padLeft(2, '0');
     return hours > 0 ? '$hours:$minutes:$seconds' : '$minutes:$seconds';
+  }
+}
+
+class _PlayerLoadingIndicator extends StatelessWidget {
+  final String statusText;
+  final double? networkSpeedBytesPerSecond;
+
+  const _PlayerLoadingIndicator({
+    required this.statusText,
+    required this.networkSpeedBytesPerSecond,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final speedText = _formatNetworkSpeed(networkSpeedBytesPerSecond);
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      label: '$statusText，当前网速 $speedText',
+      child: ExcludeSemantics(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(
+              width: 32,
+              height: 32,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: const Color(0xA6000000),
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: Colors.white12),
+              ),
+              child: Text(
+                '$statusText  ·  $speedText',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  shadows: [Shadow(color: Colors.black87, blurRadius: 6)],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 使用二进制进位并控制小数位，兼顾低速可读性与高速数值稳定性。
+  String _formatNetworkSpeed(double? bytesPerSecond) {
+    if (bytesPerSecond == null) return '-- KB/s';
+    if (bytesPerSecond <= 0) return '0 KB/s';
+
+    const kilobyte = 1024.0;
+    const megabyte = kilobyte * 1024;
+    const gigabyte = megabyte * 1024;
+    if (bytesPerSecond >= gigabyte) {
+      return '${(bytesPerSecond / gigabyte).toStringAsFixed(1)} GB/s';
+    }
+    if (bytesPerSecond >= megabyte) {
+      final speed = bytesPerSecond / megabyte;
+      return '${speed.toStringAsFixed(speed < 10 ? 1 : 0)} MB/s';
+    }
+    final speed = bytesPerSecond / kilobyte;
+    return '${speed.toStringAsFixed(speed < 10 ? 1 : 0)} KB/s';
   }
 }
 
