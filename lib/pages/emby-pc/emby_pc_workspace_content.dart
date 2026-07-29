@@ -1,0 +1,240 @@
+part of 'emby_pc_page.dart';
+
+// 工作台内容区域负责首页摘要与媒体库列表的视图组装。
+extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
+  Widget _buildContent(BuildContext context, {required bool compact}) {
+    final colors = Theme.of(context).colorScheme;
+    final toolbar = _EmbyPcWorkspaceToolbar(this);
+    return ColoredBox(
+      color: colors.surfaceContainerLowest,
+      child: Column(
+        children: [
+          toolbar._buildWorkspaceHeader(context, compact: compact),
+          if (_view != 'home') toolbar._buildToolbar(context),
+          if (_view != 'home' && _error.isNotEmpty)
+            MaterialBanner(
+              content: Text(_error),
+              actions: [
+                TextButton(
+                  onPressed: () => _loadItems(reset: true),
+                  child: const Text('重试'),
+                ),
+              ],
+            ),
+          Expanded(
+            child: _view == 'home'
+                ? _buildHomeContent(context)
+                : _loading && _items.isEmpty
+                    ? const Center(child: CircularProgressIndicator())
+                    : _items.isEmpty
+                    ? const _EmptyState()
+                    : CustomScrollView(
+                      controller: _scrollController,
+                      slivers: [
+                        SliverPadding(
+                          // 媒体库详情仅展示视频网格，不再插入精选横幅。
+                          padding: const EdgeInsets.fromLTRB(26, 18, 26, 30),
+                          sliver: SliverGrid.builder(
+                            gridDelegate:
+                                SliverGridDelegateWithMaxCrossAxisExtent(
+                                  maxCrossAxisExtent:
+                                      _imageStyle == 'backdrop' ? 320 : 196,
+                                  crossAxisSpacing: 20,
+                                  mainAxisSpacing: 22,
+                                  childAspectRatio:
+                                      _imageStyle == 'backdrop' ? 1.40 : 0.56,
+                                ),
+                            itemCount: _items.length,
+                            itemBuilder: (context, index) {
+                              final item = _items[index];
+                              return EmbyPcMediaTile(
+                                item: item,
+                                imageStyle: _imageStyle,
+                                secondaryLabel:
+                                    _view == 'recently-played'
+                                        ? item.lastPlayedLabel
+                                        : '',
+                                favoriteBusy: _favoriteBusyIds.contains(
+                                  item.id,
+                                ),
+                                onOpen: () => _openItem(item),
+                                onPlay:
+                                    _view == 'favorite-people'
+                                        ? null
+                                        : () => _playItem(item),
+                                onFavorite: () => _toggleFavorite(item),
+                              );
+                            },
+                          ),
+                        ),
+                        if (_loadingMore)
+                          const SliverToBoxAdapter(
+                            child: Padding(
+                              padding: EdgeInsets.only(bottom: 24),
+                              child: Center(child: CircularProgressIndicator()),
+                            ),
+                          ),
+                      ],
+                    ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHomeContent(BuildContext context) {
+    if (_homeLoading && !_homeLoaded) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_homeError.isNotEmpty && !_homeLoaded) {
+      return _WorkspaceError(
+        message: _homeError,
+        onRetry: () => _loadHome(force: true),
+      );
+    }
+    return CustomScrollView(
+      controller: _scrollController,
+      slivers: [
+        if (_homeError.isNotEmpty)
+          SliverToBoxAdapter(
+            child: MaterialBanner(
+              content: Text(_homeError),
+              actions: [
+                TextButton(
+                  onPressed: () => _loadHome(force: true),
+                  child: const Text('重试'),
+                ),
+              ],
+            ),
+          ),
+        SliverToBoxAdapter(child: _buildHomeLibraries(context)),
+        SliverToBoxAdapter(
+          child: _buildHomeMediaSection(
+            context,
+            title: '播放记录',
+            items: _recentlyPlayed,
+            showLastPlayedTime: true,
+            onOpenSection: _selectRecentlyPlayed,
+          ),
+        ),
+        ..._libraries.map(
+          (library) => SliverToBoxAdapter(
+            child: _buildHomeMediaSection(
+              context,
+              title: library.name,
+              items: _homeLibraryItems[library.id] ?? const [],
+              onOpenSection: () => _selectLibrary(library.id),
+            ),
+          ),
+        ),
+        const SliverToBoxAdapter(child: SizedBox(height: 30)),
+      ],
+    );
+  }
+
+  Widget _buildHomeLibraries(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(26, 18, 26, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('媒体库', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 12),
+          if (_libraries.isEmpty)
+            const SizedBox(height: 80, child: Center(child: Text('暂无媒体库')))
+          else
+            EmbyPcHorizontalCarousel(
+              height: 164,
+              itemWidth: 246,
+              itemCount: _libraries.length,
+              spacing: 16,
+              navigationLabel: '媒体库',
+              padding: EdgeInsets.zero,
+              itemBuilder: (context, index) {
+                final library = _libraries[index];
+                return _HomeLibraryTile(
+                  library: library,
+                  onPressed: () => _selectLibrary(library.id),
+                );
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHomeMediaSection(
+    BuildContext context, {
+    required String title,
+    required List<EmbyPcItem> items,
+    bool showLastPlayedTime = false,
+    VoidCallback? onOpenSection,
+  }) {
+    final titleWidget = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(
+          child: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+        ),
+        if (onOpenSection != null) ...[
+          const SizedBox(width: 3),
+          const Icon(Icons.chevron_right, size: 21),
+        ],
+      ],
+    );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(26, 18, 26, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (onOpenSection == null)
+            titleWidget
+          else
+            InkWell(
+              onTap: onOpenSection,
+              borderRadius: BorderRadius.circular(6),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: titleWidget,
+              ),
+            ),
+          const SizedBox(height: 12),
+          if (items.isEmpty)
+            const SizedBox(
+              height: 72,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('暂无内容'),
+              ),
+            )
+          else
+            EmbyPcHorizontalCarousel(
+              height: 205,
+              itemWidth: 270,
+              itemCount: items.length,
+              spacing: 18,
+              navigationLabel: title,
+              padding: EdgeInsets.zero,
+              itemBuilder: (context, index) {
+                final item = items[index];
+                return EmbyPcMediaTile(
+                  item: item,
+                  imageStyle: 'backdrop',
+                  secondaryLabel:
+                      showLastPlayedTime ? item.lastPlayedLabel : '',
+                  onOpen: () => _openItem(item),
+                  onPlay: () => _playItem(item),
+                );
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+}
