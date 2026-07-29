@@ -543,79 +543,150 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     );
   }
 
-  Widget _buildAccountMenu(BuildContext context) {
+  Widget _buildAccountMenu(
+    BuildContext context, {
+    bool sidebar = false,
+    bool collapsed = false,
+  }) {
     final colors = Theme.of(context).colorScheme;
-    // 刷新、媒体库排序和应用设置收进用户菜单，顶部只保留搜索和用户两个主要入口。
-    return SizedBox.square(
-      dimension: 42,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: colors.surface.withValues(alpha: 0.82),
-          border: Border.all(color: colors.outlineVariant),
-          borderRadius: BorderRadius.circular(6),
+    final userName = EmbyPcService.instance.currentUserName.trim();
+    final displayName = userName.isEmpty ? '当前用户' : userName;
+    // 刷新、媒体库排序和应用设置统一收进用户菜单，桌面端入口固定在侧栏底部。
+    final menu = PopupMenuButton<String>(
+      tooltip: '账号：$displayName',
+      padding: EdgeInsets.zero,
+      color: colors.surface,
+      surfaceTintColor: Colors.transparent,
+      icon: sidebar ? null : const Icon(Icons.person_outline, size: 20),
+      onSelected: (value) {
+        if (value == 'refresh') {
+          if (_view == 'home') {
+            _loadHome(force: true);
+          } else {
+            _loadItems(reset: true);
+          }
+        } else if (value == 'order') {
+          _openOrderDialog();
+        } else if (value == 'settings') {
+          Navigator.of(
+            context,
+          ).push(embyPcFadeRoute(context, (_) => const SettingsPage()));
+        } else if (value == 'logout') {
+          _logout();
+        }
+      },
+      itemBuilder:
+          (_) => [
+            PopupMenuItem(enabled: false, child: Text(displayName)),
+            const PopupMenuDivider(),
+            PopupMenuItem(
+              value: 'refresh',
+              enabled: _view == 'home' ? !_homeLoading : !_loading,
+              child: const ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.refresh),
+                title: Text('刷新'),
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'order',
+              child: ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.swap_vert),
+                title: Text('调整媒体库顺序'),
+              ),
+            ),
+            const PopupMenuDivider(),
+            const PopupMenuItem(
+              value: 'settings',
+              child: ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.settings_outlined),
+                title: Text('应用设置'),
+              ),
+            ),
+            const PopupMenuDivider(),
+            const PopupMenuItem(value: 'logout', child: Text('退出登录')),
+          ],
+      child:
+          sidebar
+              ? Semantics(
+                button: true,
+                label: '用户 $displayName，打开账号菜单',
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 44,
+                  child: Row(
+                    mainAxisAlignment:
+                        collapsed
+                            ? MainAxisAlignment.center
+                            : MainAxisAlignment.start,
+                    children: [
+                      SizedBox(width: collapsed ? 0 : 12),
+                      Icon(
+                        Icons.account_circle_outlined,
+                        size: 22,
+                        color: colors.onSurfaceVariant,
+                      ),
+                      if (!collapsed) ...[
+                        const SizedBox(width: 11),
+                        Expanded(
+                          child: Text(
+                            displayName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontFamily: 'Microsoft YaHei UI',
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        Icon(
+                          Icons.more_horiz,
+                          size: 19,
+                          color: colors.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 12),
+                      ],
+                    ],
+                  ),
+                ),
+              )
+              : null,
+    );
+
+    if (!sidebar) {
+      return SizedBox.square(
+        dimension: 42,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: colors.surface.withValues(alpha: 0.82),
+            border: Border.all(color: colors.outlineVariant),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: menu,
         ),
-        child: PopupMenuButton<String>(
-          tooltip: '账号',
-          padding: EdgeInsets.zero,
-          color: colors.surface,
-          surfaceTintColor: Colors.transparent,
-          icon: const Icon(Icons.person_outline, size: 20),
-          onSelected: (value) {
-            if (value == 'refresh') {
-              if (_view == 'home') {
-                _loadHome(force: true);
-              } else {
-                _loadItems(reset: true);
-              }
-            } else if (value == 'order') {
-              _openOrderDialog();
-            } else if (value == 'settings') {
-              Navigator.of(
-                context,
-              ).push(embyPcFadeRoute(context, (_) => const SettingsPage()));
-            } else if (value == 'logout') {
-              _logout();
-            }
-          },
-          itemBuilder:
-              (_) => [
-                PopupMenuItem(
-                  enabled: false,
-                  child: Text(EmbyPcService.instance.currentUserName),
-                ),
-                const PopupMenuDivider(),
-                PopupMenuItem(
-                  value: 'refresh',
-                  enabled: _view == 'home' ? !_homeLoading : !_loading,
-                  child: const ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.refresh),
-                    title: Text('刷新'),
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: 'order',
-                  child: ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.swap_vert),
-                    title: Text('调整媒体库顺序'),
-                  ),
-                ),
-                const PopupMenuDivider(),
-                const PopupMenuItem(
-                  value: 'settings',
-                  child: ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.settings_outlined),
-                    title: Text('应用设置'),
-                  ),
-                ),
-                const PopupMenuDivider(),
-                const PopupMenuItem(value: 'logout', child: Text('退出登录')),
-              ],
+      );
+    }
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(
+            color: colors.outlineVariant.withValues(alpha: 0.72),
+          ),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+          clipBehavior: Clip.antiAlias,
+          child: menu,
         ),
       ),
     );
@@ -637,11 +708,37 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         ),
         child: Column(
           children: [
+            // 折叠控制和账号入口固定在侧栏两端，中间导航区域保持独立滚动。
+            Padding(
+              padding: const EdgeInsets.all(8),
+              child: Align(
+                alignment:
+                    _sidebarCollapsed
+                        ? Alignment.center
+                        : Alignment.centerRight,
+                child: IconButton(
+                  tooltip: _sidebarCollapsed ? '展开侧栏' : '收起侧栏',
+                  onPressed:
+                      () => setState(
+                        () => _sidebarCollapsed = !_sidebarCollapsed,
+                      ),
+                  icon: Icon(
+                    _sidebarCollapsed
+                        ? Icons.keyboard_double_arrow_right
+                        : Icons.keyboard_double_arrow_left,
+                  ),
+                ),
+              ),
+            ),
+            Divider(
+              height: 1,
+              color: colors.outlineVariant.withValues(alpha: 0.72),
+            ),
             Expanded(
               child: ListView(
                 padding: EdgeInsets.fromLTRB(
                   _sidebarCollapsed ? 8 : 10,
-                  16,
+                  12,
                   _sidebarCollapsed ? 8 : 10,
                   8,
                 ),
@@ -699,26 +796,10 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                 ],
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.all(8),
-              child: Align(
-                alignment:
-                    _sidebarCollapsed
-                        ? Alignment.center
-                        : Alignment.centerRight,
-                child: IconButton(
-                  tooltip: _sidebarCollapsed ? '展开侧栏' : '收起侧栏',
-                  onPressed:
-                      () => setState(
-                        () => _sidebarCollapsed = !_sidebarCollapsed,
-                      ),
-                  icon: Icon(
-                    _sidebarCollapsed
-                        ? Icons.keyboard_double_arrow_right
-                        : Icons.keyboard_double_arrow_left,
-                  ),
-                ),
-              ),
+            _buildAccountMenu(
+              context,
+              sidebar: true,
+              collapsed: _sidebarCollapsed,
             ),
           ],
         ),
@@ -1008,8 +1089,10 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
               const SizedBox(width: 16),
               _buildSearchField(compact ? 230 : 340),
             ],
-            const SizedBox(width: 12),
-            _buildAccountMenu(context),
+            if (compact) ...[
+              const SizedBox(width: 12),
+              _buildAccountMenu(context),
+            ],
           ],
         ),
       ),
