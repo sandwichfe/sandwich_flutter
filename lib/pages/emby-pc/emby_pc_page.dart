@@ -386,7 +386,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
             child: Padding(
               padding: const EdgeInsets.all(24),
               child: Align(
-                alignment: const Alignment(0, -0.25),
+                // 搜索浮层固定在页面上方，查询前后保持位置稳定。
+                alignment: Alignment.topCenter,
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(
                     maxWidth: 720,
@@ -1154,9 +1155,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
             ],
             if (_view == 'home') ...[
               pageTitle,
-              const SizedBox(width: 24),
-              _buildGlobalSearchButton(context, compact: compact),
               const Spacer(),
+              _buildGlobalSearchButton(context, compact: compact),
             ] else ...[
               Expanded(
                 child: Row(
