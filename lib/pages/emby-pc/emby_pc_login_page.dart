@@ -80,11 +80,6 @@ class _EmbyPcLoginPageState extends State<EmbyPcLoginPage> {
         color: colors.surfaceContainerLowest,
         child: Stack(
           children: [
-            // 左侧色带延续项目的绿色 Emby 入口，但不干扰表单阅读。
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Container(width: 12, color: colors.primary),
-            ),
             Center(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(32),
