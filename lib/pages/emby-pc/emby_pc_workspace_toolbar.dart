@@ -27,8 +27,8 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
               const SizedBox(width: 8),
             ],
             if (_view == 'home') ...[
-              pageTitle,
-              const Spacer(),
+              Expanded(child: pageTitle),
+              const SizedBox(width: 8),
               _buildGlobalSearchButton(context, compact: compact),
             ] else ...[
               Expanded(
@@ -37,15 +37,19 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                     Flexible(child: pageTitle),
                     const SizedBox(width: 10),
                     // 加载进度紧跟页面标题，并微调字面位置以与大字号标题视觉居中。
-                    Transform.translate(
-                      offset: const Offset(0, 2),
-                      child: Text(
-                        _loading && _items.isEmpty
-                            ? '加载中'
-                            : '已加载 ${_items.length} 条 /  $_total 条',
-                        style: TextStyle(
-                          color: colors.onSurfaceVariant,
-                          fontSize: 12,
+                    Flexible(
+                      child: Transform.translate(
+                        offset: const Offset(0, 2),
+                        child: Text(
+                          _loading && _items.isEmpty
+                              ? '加载中'
+                              : '已加载 ${_items.length} 条 /  $_total 条',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: colors.onSurfaceVariant,
+                            fontSize: 12,
+                          ),
                         ),
                       ),
                     ),
@@ -53,9 +57,11 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                 ),
               ),
               const SizedBox(width: 16),
-              _EmbyPcWorkspaceNavigation(
-                this,
-              )._buildSearchField(compact ? 230 : 340),
+              Flexible(
+                child: _EmbyPcWorkspaceNavigation(
+                  this,
+                )._buildSearchField(compact ? 230 : 340),
+              ),
             ],
             if (compact) ...[
               const SizedBox(width: 12),
