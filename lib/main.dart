@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -62,6 +63,10 @@ class MyApp extends StatelessWidget {
           (context, _) => MaterialApp(
             title: '媒体中心',
             theme: ThemeManager().themeData,
+            // 应用界面固定使用简体中文，日期和时间选择器会继承此设置。
+            locale: const Locale('zh', 'CN'),
+            localizationsDelegates: GlobalMaterialLocalizations.delegates,
+            supportedLocales: const [Locale('zh', 'CN')],
             // 应用仅提供 EmbyPc 功能，启动后直接交由入口页恢复会话或展示登录页。
             home: const EmbyPcEntryPage(),
             // 标题栏放在 Navigator 外层，确保弹窗和所有子页面都共用同一窗口框架。

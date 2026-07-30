@@ -30,10 +30,13 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # 提供 Material、Cupertino 和 Widgets 的中文本地化资源。
+  flutter_localizations:
+    sdk: flutter
   http: ^1.1.0
   json_annotation: ^4.5.0
   json_serializable: ^6.0.1
-  intl: ^0.18.1  # 添加 intl 包依赖
+  intl: ^0.20.2  # 与当前 Flutter SDK 的本地化资源版本保持一致。
   cupertino_icons: ^1.0.8
   shared_preferences: ^2.0.7
   flutter_colorpicker: ^1.1.0
@@ -44,6 +47,8 @@ dependencies:
   media_kit_libs_windows_video: ^1.0.11
   video_player: ^2.8.6
   cached_network_image: ^3.3.1
+  # 媒体库图像管理需要从桌面端和移动端选择本地图片。
+  file_picker: ^10.3.10
   # Windows 桌面端使用自定义标题栏，同时保留原生窗口拖动、缩放和控制能力。
   window_manager: ^0.5.2
   # The following adds the Cupertino Icons font to your application.
