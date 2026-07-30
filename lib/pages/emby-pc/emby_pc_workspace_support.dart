@@ -124,7 +124,7 @@ class _SidebarButton extends StatelessWidget {
 }
 
 // 首页媒体库使用横向封面入口，点击后仍复用现有媒体库详情加载逻辑。
-class _HomeLibraryTile extends StatelessWidget {
+class _HomeLibraryTile extends StatefulWidget {
   final EmbyPcItem library;
   final bool busy;
   final VoidCallback onPressed;
@@ -138,27 +138,35 @@ class _HomeLibraryTile extends StatelessWidget {
   });
 
   @override
+  State<_HomeLibraryTile> createState() => _HomeLibraryTileState();
+}
+
+class _HomeLibraryTileState extends State<_HomeLibraryTile> {
+  bool _hovered = false;
+
+  @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final imageUrl = EmbyPcService.instance.imageUrl(
-      library.id,
+      widget.library.id,
       type: 'Primary',
       maxWidth: 640,
-      cacheKey: library.primaryImageTag.isNotEmpty
-          ? library.primaryImageTag
-          : library.imageTags['Primary']?.toString() ?? '',
+      cacheKey: widget.library.primaryImageTag.isNotEmpty
+          ? widget.library.primaryImageTag
+          : widget.library.imageTags['Primary']?.toString() ?? '',
     );
     return SizedBox(
       width: 246,
       child: Semantics(
         button: true,
-        label: '打开媒体库 ${library.name}',
+        label: '打开媒体库 ${widget.library.name}',
         child: Material(
           color: Colors.transparent,
           borderRadius: BorderRadius.circular(6),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
-            onTap: onPressed,
+            onTap: widget.onPressed,
+            onHover: (hovered) => setState(() => _hovered = hovered),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -174,66 +182,76 @@ class _HomeLibraryTile extends StatelessWidget {
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(5),
                           child: EmbyPcNetworkImage(
-                            url: library.hasPrimaryImage ? imageUrl : '',
+                            url: widget.library.hasPrimaryImage ? imageUrl : '',
                           ),
                         ),
                       ),
                       Positioned(
                         right: 8,
                         bottom: 8,
-                        child: PopupMenuButton<_LibraryAction>(
-                          enabled: !busy,
-                          tooltip: '媒体库操作',
-                          onSelected: onAction,
-                          padding: EdgeInsets.zero,
-                          itemBuilder: (context) => const [
-                            PopupMenuItem(
-                              value: _LibraryAction.editImages,
-                              child: _LibraryMenuEntry(
-                                icon: Icons.image_outlined,
-                                label: '编辑图像',
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: _LibraryAction.scan,
-                              child: _LibraryMenuEntry(
-                                icon: Icons.manage_search_outlined,
-                                label: '扫描媒体库',
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: _LibraryAction.refreshMetadata,
-                              child: _LibraryMenuEntry(
-                                icon: Icons.refresh_outlined,
-                                label: '刷新元数据',
-                              ),
-                            ),
-                          ],
-                          // 触发按钮单独固定尺寸，菜单宽度继续按菜单项内容自适应。
-                          child: SizedBox.square(
-                            dimension: 38,
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                color: colors.surfaceContainerHighest.withValues(
-                                  alpha: 0.94,
-                                ),
-                                shape: BoxShape.circle,
-                                boxShadow: const [
-                                  BoxShadow(
-                                    color: Color(0x24000000),
-                                    blurRadius: 5,
+                        // 卡片操作仅在鼠标悬浮时显示，隐藏期间禁用点击避免误触。
+                        child: IgnorePointer(
+                          ignoring: !_hovered,
+                          child: AnimatedOpacity(
+                            opacity: _hovered ? 1 : 0,
+                            duration: const Duration(milliseconds: 180),
+                            child: PopupMenuButton<_LibraryAction>(
+                              enabled: !widget.busy,
+                              tooltip: '媒体库操作',
+                              onSelected: widget.onAction,
+                              padding: EdgeInsets.zero,
+                              itemBuilder: (context) => const [
+                                PopupMenuItem(
+                                  value: _LibraryAction.editImages,
+                                  child: _LibraryMenuEntry(
+                                    icon: Icons.image_outlined,
+                                    label: '编辑图像',
                                   ),
-                                ],
-                              ),
-                              child: Center(
-                                child: busy
-                                    ? const SizedBox.square(
-                                        dimension: 17,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    : const Icon(Icons.more_horiz, size: 23),
+                                ),
+                                PopupMenuItem(
+                                  value: _LibraryAction.scan,
+                                  child: _LibraryMenuEntry(
+                                    icon: Icons.manage_search_outlined,
+                                    label: '扫描媒体库',
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: _LibraryAction.refreshMetadata,
+                                  child: _LibraryMenuEntry(
+                                    icon: Icons.refresh_outlined,
+                                    label: '刷新元数据',
+                                  ),
+                                ),
+                              ],
+                              // 触发按钮单独固定尺寸，菜单宽度继续按菜单项内容自适应。
+                              child: SizedBox.square(
+                                dimension: 38,
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: colors.surfaceContainerHighest
+                                        .withValues(alpha: 0.94),
+                                    shape: BoxShape.circle,
+                                    boxShadow: const [
+                                      BoxShadow(
+                                        color: Color(0x24000000),
+                                        blurRadius: 5,
+                                      ),
+                                    ],
+                                  ),
+                                  child: Center(
+                                    child: widget.busy
+                                        ? const SizedBox.square(
+                                            dimension: 17,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                            ),
+                                          )
+                                        : const Icon(
+                                            Icons.more_horiz,
+                                            size: 23,
+                                          ),
+                                  ),
+                                ),
                               ),
                             ),
                           ),
@@ -245,7 +263,7 @@ class _HomeLibraryTile extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(4, 9, 4, 3),
                   child: Text(
-                    library.name,
+                    widget.library.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     textAlign: TextAlign.center,
