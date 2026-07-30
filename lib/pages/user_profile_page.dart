@@ -7,14 +7,27 @@ import 'package:flutter/material.dart';
 
 import 'emby-pc/emby_pc_service.dart';
 
-class UserProfilePage extends StatefulWidget {
-  const UserProfilePage({super.key});
-
-  @override
-  State<UserProfilePage> createState() => _UserProfilePageState();
+// 头像修改采用底部弹层承载轻量操作，裁剪时再进入专注的全屏页面。
+Future<bool> showAvatarEditorBottomSheet(BuildContext context) async {
+  return await showModalBottomSheet<bool>(
+        context: context,
+        useSafeArea: true,
+        isScrollControlled: true,
+        showDragHandle: true,
+        constraints: const BoxConstraints(maxWidth: 480),
+        builder: (_) => const _AvatarEditorSheet(),
+      ) ??
+      false;
 }
 
-class _UserProfilePageState extends State<UserProfilePage> {
+class _AvatarEditorSheet extends StatefulWidget {
+  const _AvatarEditorSheet();
+
+  @override
+  State<_AvatarEditorSheet> createState() => _AvatarEditorSheetState();
+}
+
+class _AvatarEditorSheetState extends State<_AvatarEditorSheet> {
   bool _uploading = false;
 
   Future<void> _chooseAvatar() async {
@@ -46,8 +59,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
         contentType: 'image/png',
       );
       if (!mounted) return;
-      setState(() {});
-      _showMessage('头像已更新');
+      Navigator.of(context).pop(true);
     } catch (error) {
       if (mounted) _showMessage(error.toString());
     } finally {
@@ -66,67 +78,51 @@ class _UserProfilePageState extends State<UserProfilePage> {
     final service = EmbyPcService.instance;
     final colors = Theme.of(context).colorScheme;
     final userName = service.currentUserName.trim();
-    return Scaffold(
-      appBar: AppBar(title: const Text('用户信息')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        24,
+        0,
+        24,
+        24 + MediaQuery.viewInsetsOf(context).bottom,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Center(
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                CircleAvatar(
-                  radius: 56,
-                  backgroundColor: colors.surfaceContainerHighest,
-                  foregroundImage: NetworkImage(
-                    service.userAvatarUrl(maxWidth: 224),
-                  ),
-                  onForegroundImageError: (_, _) {},
-                  child: Icon(
-                    Icons.person_outline,
-                    size: 48,
-                    color: colors.onSurfaceVariant,
-                  ),
-                ),
-                Positioned(
-                  right: -4,
-                  bottom: -4,
-                  child: IconButton.filled(
-                    tooltip: '选择头像',
-                    onPressed: _uploading ? null : _chooseAvatar,
-                    icon: const Icon(Icons.photo_camera_outlined),
-                  ),
-                ),
-              ],
+          Text('修改头像', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 20),
+          CircleAvatar(
+            radius: 48,
+            backgroundColor: colors.surfaceContainerHighest,
+            foregroundImage: NetworkImage(service.userAvatarUrl(maxWidth: 192)),
+            onForegroundImageError: (_, _) {},
+            child: Icon(
+              Icons.person_outline,
+              size: 40,
+              color: colors.onSurfaceVariant,
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
           Text(
             userName.isEmpty ? '当前用户' : userName,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.titleLarge,
+            style: Theme.of(context).textTheme.titleMedium,
           ),
-          const SizedBox(height: 6),
-          Text(
-            service.serverUrl,
-            textAlign: TextAlign.center,
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(color: colors.onSurfaceVariant),
-          ),
-          const SizedBox(height: 28),
-          Center(
-            child: FilledButton.icon(
-              onPressed: _uploading ? null : _chooseAvatar,
-              icon: _uploading
-                  ? const SizedBox.square(
-                    dimension: 18,
+          const SizedBox(height: 20),
+          const Divider(height: 1),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.photo_library_outlined),
+            title: Text(_uploading ? '正在上传' : '从设备选择图片'),
+            subtitle: const Text('选择后可裁剪头像范围'),
+            trailing: _uploading
+                ? const SizedBox.square(
+                    dimension: 20,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                  : const Icon(Icons.upload_outlined),
-              label: Text(_uploading ? '上传中' : '选择并裁剪头像'),
-            ),
+                : const Icon(Icons.chevron_right),
+            enabled: !_uploading,
+            onTap: _uploading ? null : _chooseAvatar,
           ),
+          const Divider(height: 1),
         ],
       ),
     );
@@ -158,15 +154,15 @@ class _AvatarCropPageState extends State<_AvatarCropPage> {
       bitmap.dispose();
       if (data == null) throw StateError('无法生成裁剪图片');
       if (!mounted) return;
-      Navigator.of(context).pop(
-        data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
-      );
+      Navigator.of(
+        context,
+      ).pop(data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes));
     } catch (error) {
       if (!mounted) return;
       setState(() => _cropping = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('裁剪失败：$error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('裁剪失败：$error')));
     }
   }
 
@@ -188,9 +184,9 @@ class _AvatarCropPageState extends State<_AvatarCropPage> {
             onPressed: _cropping ? null : _crop,
             icon: _cropping
                 ? const SizedBox.square(
-                  dimension: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
+                    dimension: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
                 : const Icon(Icons.check),
           ),
           const SizedBox(width: 8),
