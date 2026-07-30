@@ -44,7 +44,9 @@ class _DetailContent extends StatelessWidget {
   final EmbyPcItem detail;
   final List<EmbyPcItem> similar;
   final bool favoriteBusy;
+  final bool actionBusy;
   final VoidCallback onFavorite;
+  final ValueChanged<EmbyPcMediaAction> onAction;
   final void Function(int? ticks) onPlay;
   final ValueChanged<EmbyPcItem> onOpenSimilar;
   final ValueChanged<EmbyPcPerson> onOpenPerson;
@@ -53,7 +55,9 @@ class _DetailContent extends StatelessWidget {
     required this.detail,
     required this.similar,
     required this.favoriteBusy,
+    required this.actionBusy,
     required this.onFavorite,
+    required this.onAction,
     required this.onPlay,
     required this.onOpenSimilar,
     required this.onOpenPerson,
@@ -75,6 +79,8 @@ class _DetailContent extends StatelessWidget {
         detail: detail,
         onFavorite: onFavorite,
         favoriteBusy: favoriteBusy,
+        actionBusy: actionBusy,
+        onAction: onAction,
         onPlay: onPlay,
       );
       // Primary 竖版海报保留在标题旁，和页面背景使用的 Backdrop 区分展示。
@@ -164,13 +170,17 @@ class _DetailContent extends StatelessWidget {
 class _Summary extends StatelessWidget {
   final EmbyPcItem detail;
   final bool favoriteBusy;
+  final bool actionBusy;
   final VoidCallback onFavorite;
+  final ValueChanged<EmbyPcMediaAction> onAction;
   final void Function(int? ticks) onPlay;
 
   const _Summary({
     required this.detail,
     required this.favoriteBusy,
+    required this.actionBusy,
     required this.onFavorite,
+    required this.onAction,
     required this.onPlay,
   });
 
@@ -355,6 +365,60 @@ class _Summary extends StatelessWidget {
                             : Icons.favorite_border_rounded,
                       ),
               label: Text(detail.isFavorite ? '已收藏' : '收藏'),
+            ),
+            PopupMenuButton<EmbyPcMediaAction>(
+              tooltip: '更多',
+              enabled: !actionBusy,
+              onSelected: onAction,
+              itemBuilder: (context) => const [
+                PopupMenuItem(
+                  value: EmbyPcMediaAction.editMetadata,
+                  child: Row(
+                    children: [
+                      Icon(Icons.edit_outlined, size: 20),
+                      SizedBox(width: 12),
+                      Text('编辑元数据'),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: EmbyPcMediaAction.editImages,
+                  child: Row(
+                    children: [
+                      Icon(Icons.image_outlined, size: 20),
+                      SizedBox(width: 12),
+                      Text('编辑图像'),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: EmbyPcMediaAction.refreshMetadata,
+                  child: Row(
+                    children: [
+                      Icon(Icons.refresh_outlined, size: 20),
+                      SizedBox(width: 12),
+                      Text('刷新元数据'),
+                    ],
+                  ),
+                ),
+              ],
+              child: SizedBox.square(
+                dimension: 40,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: colors.surfaceContainerHighest,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: actionBusy
+                        ? const SizedBox.square(
+                            dimension: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.more_horiz),
+                  ),
+                ),
+              ),
             ),
           ],
         ),

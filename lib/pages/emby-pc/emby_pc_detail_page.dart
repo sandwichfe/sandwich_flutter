@@ -103,8 +103,13 @@ class EmbyPcImmersiveTopBar extends StatelessWidget {
 
 class EmbyPcDetailPage extends StatefulWidget {
   final EmbyPcItem item;
+  final Future<bool> Function(EmbyPcItem, EmbyPcMediaAction) onMediaAction;
 
-  const EmbyPcDetailPage({super.key, required this.item});
+  const EmbyPcDetailPage({
+    super.key,
+    required this.item,
+    required this.onMediaAction,
+  });
 
   @override
   State<EmbyPcDetailPage> createState() => _EmbyPcDetailPageState();
@@ -115,6 +120,7 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
   List<EmbyPcItem> _similar = const [];
   bool _loading = true;
   bool _favoriteBusy = false;
+  bool _actionBusy = false;
   String _error = '';
 
   @override
@@ -163,6 +169,19 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
       }
     } finally {
       if (mounted) setState(() => _favoriteBusy = false);
+    }
+  }
+
+  Future<void> _handleAction(EmbyPcMediaAction action) async {
+    final detail = _detail;
+    if (detail == null || _actionBusy) return;
+    setState(() => _actionBusy = true);
+    try {
+      // 管理动作复用工作台逻辑，详情页只在内容变更后重新加载展示数据。
+      final changed = await widget.onMediaAction(detail, action);
+      if (changed && mounted) await _loadDetail();
+    } finally {
+      if (mounted) setState(() => _actionBusy = false);
     }
   }
 
@@ -220,13 +239,18 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
                     detail: detail,
                     similar: _similar,
                     favoriteBusy: _favoriteBusy,
+                    actionBusy: _actionBusy,
                     onFavorite: _toggleFavorite,
+                    onAction: _handleAction,
                     onPlay: _play,
                     onOpenSimilar:
                         (item) => Navigator.of(context).push(
                           embyPcFadeRoute(
                             context,
-                            (_) => EmbyPcDetailPage(item: item),
+                            (_) => EmbyPcDetailPage(
+                              item: item,
+                              onMediaAction: widget.onMediaAction,
+                            ),
                           ),
                         ),
                     onOpenPerson:
@@ -236,6 +260,7 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
                             (_) => EmbyPcPersonPage(
                               personId: person.id,
                               personName: person.name,
+                              onMediaAction: widget.onMediaAction,
                             ),
                           ),
                         ),

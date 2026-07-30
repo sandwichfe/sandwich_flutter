@@ -498,28 +498,28 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     }
   }
 
-  Future<void> _handleMediaAction(
+  Future<bool> _handleMediaAction(
     EmbyPcItem item,
     EmbyPcMediaAction action,
   ) async {
-    if (_mediaActionBusyIds.contains(item.id)) return;
+    if (_mediaActionBusyIds.contains(item.id)) return false;
     setState(() => _mediaActionBusyIds.add(item.id));
     try {
       if (action == EmbyPcMediaAction.editMetadata) {
         final metadata = await EmbyPcService.instance.getItemForEditing(
           item.id,
         );
-        if (!mounted) return;
+        if (!mounted) return false;
         final changed = await showDialog<bool>(
           context: context,
           barrierDismissible: false,
           builder: (context) =>
               _ItemMetadataDialog(itemId: item.id, item: metadata),
         );
-        if (changed != true || !mounted) return;
+        if (changed != true || !mounted) return false;
         _showWorkspaceMessage('元数据已保存');
         await _reloadMediaAfterChange();
-        return;
+        return true;
       }
 
       if (action == EmbyPcMediaAction.editImages) {
@@ -529,7 +529,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
           builder: (context) => EmbyPcItemImagesDialog(item: item),
         );
         if (changed == true && mounted) await _reloadMediaAfterChange();
-        return;
+        return changed == true;
       }
 
       final response = await EmbyPcService.instance.refreshMetadata(
@@ -541,8 +541,10 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       if (mounted) {
         _showWorkspaceMessage(response.isEmpty ? '元数据刷新请求已提交' : response);
       }
+      return false;
     } catch (error) {
       if (mounted) _showWorkspaceMessage(error.toString());
+      return false;
     } finally {
       if (mounted) setState(() => _mediaActionBusyIds.remove(item.id));
     }
@@ -670,14 +672,26 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       Navigator.of(context).push(
         embyPcFadeRoute(
           context,
-          (_) => EmbyPcPersonPage(personId: item.id, personName: item.name),
+          (_) => EmbyPcPersonPage(
+            personId: item.id,
+            personName: item.name,
+            onMediaAction: _handleMediaAction,
+          ),
         ),
       );
       return;
     }
     Navigator.of(
       context,
-    ).push(embyPcFadeRoute(context, (_) => EmbyPcDetailPage(item: item)));
+    ).push(
+      embyPcFadeRoute(
+        context,
+        (_) => EmbyPcDetailPage(
+          item: item,
+          onMediaAction: _handleMediaAction,
+        ),
+      ),
+    );
   }
 
   void _playItem(EmbyPcItem item) {

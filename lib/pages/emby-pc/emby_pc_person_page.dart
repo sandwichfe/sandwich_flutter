@@ -9,11 +9,13 @@ import 'emby_pc_widgets.dart';
 class EmbyPcPersonPage extends StatefulWidget {
   final String personId;
   final String personName;
+  final Future<bool> Function(EmbyPcItem, EmbyPcMediaAction) onMediaAction;
 
   const EmbyPcPersonPage({
     super.key,
     required this.personId,
     required this.personName,
+    required this.onMediaAction,
   });
 
   @override
@@ -182,7 +184,10 @@ class _EmbyPcPersonPageState extends State<EmbyPcPersonPage> {
                     onOpenItem: (item) => Navigator.of(context).push(
                       embyPcFadeRoute(
                         context,
-                        (_) => EmbyPcDetailPage(item: item),
+                        (_) => EmbyPcDetailPage(
+                          item: item,
+                          onMediaAction: widget.onMediaAction,
+                        ),
                       ),
                     ),
                   ),
