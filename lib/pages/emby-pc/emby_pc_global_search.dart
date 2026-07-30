@@ -115,10 +115,18 @@ class _GlobalSearchDialogState extends State<_GlobalSearchDialog> {
             children: [
               // 输入区直接作为浮层头部，避免再套一层带边框的输入容器。
               SizedBox(height: 60, child: _buildSearchField(context)),
-              if (hasQuery) ...[
-                Divider(height: 1, color: colors.outlineVariant),
-                Expanded(child: _buildBody(context)),
-              ],
+              if (hasQuery)
+                Expanded(
+                  // 使用绘制边框避免展开动画起始帧额外占用 1 像素高度。
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      border: Border(
+                        top: BorderSide(color: colors.outlineVariant),
+                      ),
+                    ),
+                    child: _buildBody(context),
+                  ),
+                ),
             ],
           ),
         ),
