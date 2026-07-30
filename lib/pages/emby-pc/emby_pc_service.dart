@@ -65,6 +65,13 @@ class EmbyPcService {
       },
       body: jsonEncode({'Username': username.trim(), 'Pw': password}),
     );
+    // 登录接口的鉴权失败代表凭据或账号权限问题，不应提示已有会话失效。
+    if (response.statusCode == 401) {
+      throw const EmbyPcException('用户名或密码错误');
+    }
+    if (response.statusCode == 403) {
+      throw const EmbyPcException('该账号不允许登录');
+    }
     final data = _decodeResponse(response, 'Emby 登录失败');
     final user = _asMap(data['User']);
     final token = data['AccessToken']?.toString() ?? '';

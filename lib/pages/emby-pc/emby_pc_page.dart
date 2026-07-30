@@ -36,8 +36,14 @@ class _EmbyPcEntryPageState extends State<EmbyPcEntryPage> {
   }
 
   Future<void> _restoreSession() async {
-    await EmbyPcService.instance.restoreSession();
-    if (mounted) setState(() => _loading = false);
+    try {
+      await EmbyPcService.instance.restoreSession();
+    } catch (_) {
+      // 本地会话读取失败时清除残留状态，确保入口页可以回到登录界面。
+      await EmbyPcService.instance.logout();
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override
@@ -125,12 +131,12 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       });
       _loadCounts(ordered);
       await _loadHome();
-    } catch (error) {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-          _error = error.toString();
-        });
+    } catch (_) {
+      // 恢复的会话无法完成首次请求时视为失效，返回登录页重新连接。
+      try {
+        await EmbyPcService.instance.logout();
+      } finally {
+        if (mounted) widget.onLogout();
       }
     }
   }
