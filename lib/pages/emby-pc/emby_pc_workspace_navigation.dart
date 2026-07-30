@@ -63,26 +63,38 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
     final colors = Theme.of(context).colorScheme;
     final userName = EmbyPcService.instance.currentUserName.trim();
     final displayName = userName.isEmpty ? '当前用户' : userName;
-    final avatar = CircleAvatar(
-      radius: 14,
+    final avatarImage = NetworkImage(EmbyPcService.instance.userAvatarUrl());
+    // 菜单入口和账号信息区共用头像样式，仅通过半径区分信息层级。
+    Widget buildAvatar(double radius) => CircleAvatar(
+      radius: radius,
       backgroundColor: colors.surfaceContainerHighest,
-      foregroundImage: NetworkImage(
-        EmbyPcService.instance.userAvatarUrl(),
-      ),
+      foregroundImage: avatarImage,
       // 用户未设置头像或图片请求失败时显示稳定的账号占位图标。
       onForegroundImageError: (_, _) {},
       child: Icon(
         Icons.person_outline,
-        size: 18,
+        size: radius + 4,
         color: colors.onSurfaceVariant,
       ),
     );
-    // 账号菜单固定在侧栏底部，仅保留账号相关操作和设置入口。
+    final avatar = buildAvatar(14);
+    // 账号菜单保持统一的账号信息层级，仅保留设置和退出登录入口。
     final menu = PopupMenuButton<String>(
       tooltip: '账号：$displayName',
       padding: EdgeInsets.zero,
       color: colors.surface,
       surfaceTintColor: Colors.transparent,
+      constraints: const BoxConstraints.tightFor(width: 224),
+      position: PopupMenuPosition.under,
+      offset: const Offset(0, 6),
+      elevation: 8,
+      shadowColor: colors.shadow.withValues(alpha: 0.18),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: BorderSide(
+          color: colors.outlineVariant.withValues(alpha: 0.8),
+        ),
+      ),
       icon: sidebar ? null : avatar,
       onSelected: (value) {
         if (value == 'settings') {
@@ -100,19 +112,76 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
       },
       itemBuilder:
           (_) => [
-            PopupMenuItem(enabled: false, child: Text(displayName)),
-            const PopupMenuDivider(),
-            const PopupMenuItem(
-              value: 'settings',
-              child: ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.settings_outlined),
-                title: Text('设置'),
+            PopupMenuItem(
+              enabled: false,
+              height: 64,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Semantics(
+                container: true,
+                label: 'Emby 账号 $displayName',
+                child: Row(
+                  children: [
+                    buildAvatar(18),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            displayName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: colors.onSurface,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Emby 账号',
+                            style: TextStyle(
+                              color: colors.onSurfaceVariant,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-            const PopupMenuDivider(),
-            const PopupMenuItem(value: 'logout', child: Text('退出登录')),
+            const PopupMenuDivider(height: 1),
+            const PopupMenuItem(
+              value: 'settings',
+              height: 44,
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  Icon(Icons.settings_outlined, size: 20),
+                  SizedBox(width: 12),
+                  Text('设置', style: TextStyle(fontSize: 14)),
+                ],
+              ),
+            ),
+            const PopupMenuDivider(height: 1),
+            PopupMenuItem(
+              value: 'logout',
+              height: 44,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  Icon(Icons.logout, size: 20, color: colors.error),
+                  const SizedBox(width: 12),
+                  Text(
+                    '退出登录',
+                    style: TextStyle(color: colors.error, fontSize: 14),
+                  ),
+                ],
+              ),
+            ),
           ],
       child:
           sidebar
