@@ -403,9 +403,8 @@ class _ItemMetadataDialogState extends State<_ItemMetadataDialog> {
   Future<void> _editPerson([int? index]) async {
     final person = await showDialog<_EditablePerson>(
       context: context,
-      builder: (context) => _PersonEditorDialog(
-        person: index == null ? null : _people[index],
-      ),
+      builder: (context) =>
+          _PersonEditorDialog(person: index == null ? null : _people[index]),
     );
     if (person == null || !mounted) return;
     setState(() {
@@ -501,123 +500,124 @@ class _ItemMetadataDialogState extends State<_ItemMetadataDialog> {
                             ? (constraints.maxWidth - 16) / 2
                             : constraints.maxWidth;
                         return Wrap(
-                        spacing: 16,
-                        runSpacing: 16,
-                        children: [
-                          SizedBox(
-                            width: fieldWidth,
-                            child: TextFormField(
-                              controller: _titleController,
-                              decoration: const InputDecoration(
-                                labelText: '标题',
-                                border: OutlineInputBorder(),
-                              ),
-                              validator: (value) =>
-                                  value == null || value.trim().isEmpty
-                                      ? '请输入标题'
-                                      : null,
-                            ),
-                          ),
-                          SizedBox(
-                            width: fieldWidth,
-                            child: _dateField(
-                              controller: _dateCreatedController,
-                              label: '加入日期',
-                              includeTime: true,
-                            ),
-                          ),
-                          SizedBox(
-                            width: fieldWidth,
-                            child: TextFormField(
-                              controller: _ratingController,
-                              keyboardType: const TextInputType.numberWithOptions(
-                                decimal: true,
-                              ),
-                              decoration: const InputDecoration(
-                                labelText: '影视评分',
-                                hintText: '0 - 10',
-                                border: OutlineInputBorder(),
-                              ),
-                              validator: _validateRating,
-                            ),
-                          ),
-                          SizedBox(
-                            width: fieldWidth,
-                            child: _dateField(
-                              controller: _premiereDateController,
-                              label: '发行日期',
-                            ),
-                          ),
-                          SizedBox(
-                            width: constraints.maxWidth,
-                            child: TextFormField(
-                              controller: _overviewController,
-                              minLines: 4,
-                              maxLines: 7,
-                              decoration: const InputDecoration(
-                                labelText: '概要',
-                                alignLabelWithHint: true,
-                                border: OutlineInputBorder(),
+                          spacing: 16,
+                          runSpacing: 16,
+                          children: [
+                            SizedBox(
+                              width: fieldWidth,
+                              child: TextFormField(
+                                controller: _titleController,
+                                decoration: const InputDecoration(
+                                  labelText: '标题',
+                                  border: OutlineInputBorder(),
+                                ),
+                                validator: (value) =>
+                                    value == null || value.trim().isEmpty
+                                    ? '请输入标题'
+                                    : null,
                               ),
                             ),
-                          ),
-                          SizedBox(
-                            width: fieldWidth,
-                            child: TextFormField(
-                              controller: _imdbController,
-                              decoration: const InputDecoration(
-                                labelText: 'IMDb',
-                                border: OutlineInputBorder(),
+                            SizedBox(
+                              width: fieldWidth,
+                              child: _dateField(
+                                controller: _dateCreatedController,
+                                label: '加入日期',
+                                includeTime: true,
                               ),
                             ),
-                          ),
-                          SizedBox(
-                            width: fieldWidth,
-                            child: TextFormField(
-                              controller: _tmdbController,
-                              decoration: const InputDecoration(
-                                labelText: 'TMDB / MovieDB',
-                                border: OutlineInputBorder(),
+                            SizedBox(
+                              width: fieldWidth,
+                              child: TextFormField(
+                                controller: _ratingController,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                decoration: const InputDecoration(
+                                  labelText: '影视评分',
+                                  hintText: '0 - 10',
+                                  border: OutlineInputBorder(),
+                                ),
+                                validator: _validateRating,
                               ),
                             ),
-                          ),
-                          SizedBox(
-                            width: fieldWidth,
-                            child: TextFormField(
-                              controller: _tvdbController,
-                              decoration: const InputDecoration(
-                                labelText: 'TVDB',
-                                border: OutlineInputBorder(),
+                            SizedBox(
+                              width: fieldWidth,
+                              child: _dateField(
+                                controller: _premiereDateController,
+                                label: '发行日期',
                               ),
                             ),
-                          ),
-                          SizedBox(
-                            width: fieldWidth,
-                            child: TextFormField(
-                              controller: _genresController,
-                              decoration: const InputDecoration(
-                                labelText: '类型',
-                                hintText: '多个类型用逗号分隔',
-                                border: OutlineInputBorder(),
+                            SizedBox(
+                              width: constraints.maxWidth,
+                              child: TextFormField(
+                                controller: _overviewController,
+                                minLines: 4,
+                                maxLines: 7,
+                                decoration: const InputDecoration(
+                                  labelText: '概要',
+                                  alignLabelWithHint: true,
+                                  border: OutlineInputBorder(),
+                                ),
                               ),
                             ),
-                          ),
-                          SizedBox(
-                            width: constraints.maxWidth,
-                            child: _buildPeopleSection(context),
-                          ),
-                          SizedBox(
-                            width: constraints.maxWidth,
-                            child: TextFormField(
-                              controller: _tagsController,
-                              decoration: const InputDecoration(
-                                labelText: '标签',
-                                hintText: '多个标签用逗号分隔',
-                                border: OutlineInputBorder(),
+                            SizedBox(
+                              width: fieldWidth,
+                              child: TextFormField(
+                                controller: _imdbController,
+                                decoration: const InputDecoration(
+                                  labelText: 'IMDb',
+                                  border: OutlineInputBorder(),
+                                ),
                               ),
                             ),
-                          ),
-                        ],
+                            SizedBox(
+                              width: fieldWidth,
+                              child: TextFormField(
+                                controller: _tmdbController,
+                                decoration: const InputDecoration(
+                                  labelText: 'TMDB / MovieDB',
+                                  border: OutlineInputBorder(),
+                                ),
+                              ),
+                            ),
+                            SizedBox(
+                              width: fieldWidth,
+                              child: TextFormField(
+                                controller: _tvdbController,
+                                decoration: const InputDecoration(
+                                  labelText: 'TVDB',
+                                  border: OutlineInputBorder(),
+                                ),
+                              ),
+                            ),
+                            SizedBox(
+                              width: fieldWidth,
+                              child: TextFormField(
+                                controller: _genresController,
+                                decoration: const InputDecoration(
+                                  labelText: '类型',
+                                  hintText: '多个类型用逗号分隔',
+                                  border: OutlineInputBorder(),
+                                ),
+                              ),
+                            ),
+                            SizedBox(
+                              width: constraints.maxWidth,
+                              child: _buildPeopleSection(context),
+                            ),
+                            SizedBox(
+                              width: constraints.maxWidth,
+                              child: TextFormField(
+                                controller: _tagsController,
+                                decoration: const InputDecoration(
+                                  labelText: '标签',
+                                  hintText: '多个标签用逗号分隔',
+                                  border: OutlineInputBorder(),
+                                ),
+                              ),
+                            ),
+                          ],
                         );
                       },
                     ),
@@ -790,12 +790,13 @@ class _EditablePerson {
     required this.type,
   });
 
-  factory _EditablePerson.fromJson(Map<String, dynamic> json) => _EditablePerson(
-    source: Map<String, dynamic>.from(json),
-    name: _text(json['Name']),
-    role: _text(json['Role']),
-    type: _text(json['Type']).isEmpty ? 'Actor' : _text(json['Type']),
-  );
+  factory _EditablePerson.fromJson(Map<String, dynamic> json) =>
+      _EditablePerson(
+        source: Map<String, dynamic>.from(json),
+        name: _text(json['Name']),
+        role: _text(json['Role']),
+        type: _text(json['Type']).isEmpty ? 'Actor' : _text(json['Type']),
+      );
 
   Map<String, dynamic> toJson() => Map<String, dynamic>.from(source)
     ..['Name'] = name
@@ -861,9 +862,8 @@ class _PersonEditorDialogState extends State<_PersonEditorDialog> {
                 labelText: '名称',
                 border: OutlineInputBorder(),
               ),
-              validator: (value) => value == null || value.trim().isEmpty
-                  ? '请输入名称'
-                  : null,
+              validator: (value) =>
+                  value == null || value.trim().isEmpty ? '请输入名称' : null,
             ),
             const SizedBox(height: 14),
             TextFormField(
@@ -952,7 +952,8 @@ String _formatDate(String value, {bool includeTime = false}) {
 
 String _formatLocalDate(DateTime value, {bool includeTime = false}) {
   String twoDigits(int number) => number.toString().padLeft(2, '0');
-  final date = '${value.year}-${twoDigits(value.month)}-${twoDigits(value.day)}';
+  final date =
+      '${value.year}-${twoDigits(value.month)}-${twoDigits(value.day)}';
   if (!includeTime) return date;
   return '$date ${twoDigits(value.hour)}:${twoDigits(value.minute)}:'
       '${twoDigits(value.second)}';
@@ -1080,417 +1081,6 @@ class _MetadataRefreshDialogState extends State<_MetadataRefreshDialog> {
       ),
     ],
   );
-}
-
-class _ItemImageSlot {
-  final String type;
-  final String label;
-
-  const _ItemImageSlot(this.type, this.label);
-}
-
-const _itemImageSlots = [
-  _ItemImageSlot('Primary', '海报'),
-  _ItemImageSlot('Logo', '徽标'),
-  _ItemImageSlot('Thumb', '缩略图'),
-  _ItemImageSlot('Banner', '横幅图'),
-  _ItemImageSlot('Disc', '光盘封面'),
-  _ItemImageSlot('Art', '艺术图'),
-];
-
-// Emby 允许同一项目保存多张背景图，不能像其他类型一样压缩成单个槽位。
-const _backdropImageSlot = _ItemImageSlot('Backdrop', '背景图');
-
-class _ItemImagesDialog extends StatefulWidget {
-  final EmbyPcItem item;
-
-  const _ItemImagesDialog({required this.item});
-
-  @override
-  State<_ItemImagesDialog> createState() => _ItemImagesDialogState();
-}
-
-class _ItemImagesDialogState extends State<_ItemImagesDialog> {
-  List<EmbyPcImageInfo> _images = const [];
-  final Set<String> _busyTypes = {};
-  bool _loading = true;
-  bool _changed = false;
-  int _imageRevision = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    // 图像列表仅在用户打开编辑弹窗时按需获取。
-    _loadImages();
-  }
-
-  Future<void> _loadImages({bool showProgress = true}) async {
-    if (showProgress && mounted) setState(() => _loading = true);
-    try {
-      final images = await EmbyPcService.instance.getItemImages(
-        widget.item.id,
-      );
-      if (!mounted) return;
-      setState(() {
-        _images = images;
-        _loading = false;
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() => _loading = false);
-      _showMessage(error.toString());
-    }
-  }
-
-  EmbyPcImageInfo? _imageFor(String type) {
-    for (final image in _images) {
-      if (image.type == type) return image;
-    }
-    return null;
-  }
-
-  List<EmbyPcImageInfo> _imagesFor(String type) {
-    final images = _images.where((image) => image.type == type).toList();
-    images.sort((a, b) => a.index.compareTo(b.index));
-    return images;
-  }
-
-  Future<void> _upload(
-    _ItemImageSlot slot,
-    EmbyPcImageInfo? currentImage,
-  ) async {
-    if (_busyTypes.contains(slot.type)) return;
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.image,
-      allowMultiple: false,
-      withData: true,
-    );
-    if (result == null || result.files.isEmpty) return;
-    final file = result.files.single;
-    final bytes = file.bytes;
-    if (bytes == null) {
-      _showMessage('无法读取所选图片');
-      return;
-    }
-
-    setState(() => _busyTypes.add(slot.type));
-    try {
-      await EmbyPcService.instance.uploadItemImage(
-        widget.item.id,
-        type: slot.type,
-        index: currentImage?.index,
-        bytes: bytes,
-        contentType: _imageContentType(file.extension),
-      );
-      _changed = true;
-      _imageRevision++;
-      await _loadImages(showProgress: false);
-      if (mounted) _showMessage('${slot.label}上传成功');
-    } catch (error) {
-      if (mounted) _showMessage(error.toString());
-    } finally {
-      if (mounted) setState(() => _busyTypes.remove(slot.type));
-    }
-  }
-
-  Future<void> _delete(_ItemImageSlot slot, EmbyPcImageInfo image) async {
-    if (_busyTypes.contains(slot.type)) return;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('删除${slot.label}？'),
-        content: const Text('删除后无法撤销。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('删除'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-
-    setState(() => _busyTypes.add(slot.type));
-    try {
-      await EmbyPcService.instance.deleteItemImage(
-        widget.item.id,
-        type: image.type,
-        index: image.index,
-      );
-      _changed = true;
-      _imageRevision++;
-      await _loadImages(showProgress: false);
-      if (mounted) _showMessage('${slot.label}已删除');
-    } catch (error) {
-      if (mounted) _showMessage(error.toString());
-    } finally {
-      if (mounted) setState(() => _busyTypes.remove(slot.type));
-    }
-  }
-
-  String _imageContentType(String? extension) {
-    switch (extension?.toLowerCase()) {
-      case 'png':
-        return 'image/png';
-      case 'gif':
-        return 'image/gif';
-      case 'webp':
-        return 'image/webp';
-      case 'bmp':
-        return 'image/bmp';
-      default:
-        return 'image/jpeg';
-    }
-  }
-
-  void _showMessage(String message) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final size = MediaQuery.sizeOf(context);
-    final dialogWidth = (size.width - 32).clamp(300.0, 1000.0).toDouble();
-    final dialogHeight = (size.height - 32).clamp(420.0, 760.0).toDouble();
-    final backdropImages = _imagesFor(_backdropImageSlot.type);
-    const gridDelegate = SliverGridDelegateWithMaxCrossAxisExtent(
-      maxCrossAxisExtent: 230,
-      mainAxisExtent: 224,
-      crossAxisSpacing: 16,
-      mainAxisSpacing: 16,
-    );
-    return Dialog(
-      insetPadding: const EdgeInsets.all(16),
-      child: SizedBox(
-        width: dialogWidth,
-        height: dialogHeight,
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 20, 8),
-              child: Row(
-                children: [
-                  IconButton(
-                    tooltip: '关闭',
-                    onPressed: () => Navigator.pop(context, _changed),
-                    icon: const Icon(Icons.close),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '编辑图像 · ${widget.item.name}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: _loading
-                  ? const Center(child: CircularProgressIndicator())
-                  : CustomScrollView(
-                      slivers: [
-                        SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-                          sliver: SliverGrid.builder(
-                            gridDelegate: gridDelegate,
-                            itemCount: _itemImageSlots.length,
-                            itemBuilder: (context, index) {
-                              final slot = _itemImageSlots[index];
-                              return _buildImageSlot(
-                                slot,
-                                _imageFor(slot.type),
-                              );
-                            },
-                          ),
-                        ),
-                        SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(20, 24, 20, 12),
-                          sliver: SliverToBoxAdapter(
-                            child: Text(
-                              _backdropImageSlot.label,
-                              style: Theme.of(context).textTheme.titleLarge,
-                            ),
-                          ),
-                        ),
-                        SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                          sliver: SliverGrid.builder(
-                            gridDelegate: gridDelegate,
-                            itemCount: backdropImages.length + 1,
-                            itemBuilder: (context, index) {
-                              if (index == backdropImages.length) {
-                                return _buildAddBackdropSlot();
-                              }
-                              final image = backdropImages[index];
-                              final title = image.fileName.trim().isEmpty
-                                  ? '${_backdropImageSlot.label} ${index + 1}'
-                                  : image.fileName;
-                              return _buildImageSlot(
-                                _backdropImageSlot,
-                                image,
-                                title: title,
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // 新增入口作为背景图列表的最后一格，位置不会随图片数量变化而产生歧义。
-  Widget _buildAddBackdropSlot() {
-    final colors = Theme.of(context).colorScheme;
-    final busy = _busyTypes.contains(_backdropImageSlot.type);
-    return Semantics(
-      button: true,
-      enabled: !busy,
-      label: '添加背景图',
-      child: Material(
-        color: colors.surfaceContainerLowest,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(6),
-          side: BorderSide(color: colors.outlineVariant),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: busy ? null : () => _upload(_backdropImageSlot, null),
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: colors.primary.withValues(alpha: 0.10),
-                    shape: BoxShape.circle,
-                  ),
-                  alignment: Alignment.center,
-                  child: busy
-                      ? const SizedBox.square(
-                          dimension: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Icon(Icons.add, size: 30, color: colors.primary),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  busy ? '处理中...' : '添加背景图',
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildImageSlot(
-    _ItemImageSlot slot,
-    EmbyPcImageInfo? image, {
-    String? title,
-  }) {
-    final colors = Theme.of(context).colorScheme;
-    final busy = _busyTypes.contains(slot.type);
-    final imageUrl = image == null
-        ? ''
-        : EmbyPcService.instance.imageUrl(
-            widget.item.id,
-            type: image.type,
-            index: image.index,
-            maxWidth: 520,
-            cacheKey: '$_imageRevision',
-          );
-    return Material(
-      color: colors.surfaceContainerLow,
-      borderRadius: BorderRadius.circular(6),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: image == null
-                ? Center(
-                    child: Icon(
-                      Icons.image_outlined,
-                      size: 36,
-                      color: colors.onSurfaceVariant,
-                    ),
-                  )
-                : EmbyPcNetworkImage(url: imageUrl),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 9, 6, 7),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title ?? slot.label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                      if (image?.dimensions.isNotEmpty == true)
-                        Text(
-                          image!.dimensions,
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                    ],
-                  ),
-                ),
-                if (busy)
-                  const Padding(
-                    padding: EdgeInsets.all(10),
-                    child: SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  )
-                else ...[
-                  IconButton(
-                    tooltip: image == null
-                        ? '上传${slot.label}'
-                        : '替换${slot.label}',
-                    onPressed: () => _upload(slot, image),
-                    icon: Icon(
-                      image == null
-                          ? Icons.add_circle_outline
-                          : Icons.upload_outlined,
-                    ),
-                  ),
-                  if (image != null)
-                    IconButton(
-                      tooltip: '删除${slot.label}',
-                      onPressed: () => _delete(slot, image),
-                      icon: const Icon(Icons.delete_outline),
-                    ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _SidebarSectionTitle extends StatelessWidget {

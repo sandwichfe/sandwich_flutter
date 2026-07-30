@@ -1,11 +1,11 @@
 import 'dart:async';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../settings_page.dart';
 import 'emby_pc_detail_page.dart';
+import 'emby_pc_item_images_dialog.dart';
 import 'emby_pc_login_page.dart';
 import 'emby_pc_models.dart';
 import 'emby_pc_person_page.dart';
@@ -506,15 +506,15 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     setState(() => _mediaActionBusyIds.add(item.id));
     try {
       if (action == EmbyPcMediaAction.editMetadata) {
-        final metadata = await EmbyPcService.instance.getItemForEditing(item.id);
+        final metadata = await EmbyPcService.instance.getItemForEditing(
+          item.id,
+        );
         if (!mounted) return;
         final changed = await showDialog<bool>(
           context: context,
           barrierDismissible: false,
-          builder: (context) => _ItemMetadataDialog(
-            itemId: item.id,
-            item: metadata,
-          ),
+          builder: (context) =>
+              _ItemMetadataDialog(itemId: item.id, item: metadata),
         );
         if (changed != true || !mounted) return;
         _showWorkspaceMessage('元数据已保存');
@@ -526,7 +526,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         final changed = await showDialog<bool>(
           context: context,
           barrierDismissible: false,
-          builder: (context) => _ItemImagesDialog(item: item),
+          builder: (context) => EmbyPcItemImagesDialog(item: item),
         );
         if (changed == true && mounted) await _reloadMediaAfterChange();
         return;
@@ -539,9 +539,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         replaceThumbnailImages: false,
       );
       if (mounted) {
-        _showWorkspaceMessage(
-          response.isEmpty ? '元数据刷新请求已提交' : response,
-        );
+        _showWorkspaceMessage(response.isEmpty ? '元数据刷新请求已提交' : response);
       }
     } catch (error) {
       if (mounted) _showWorkspaceMessage(error.toString());
@@ -572,7 +570,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       final changed = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
-        builder: (context) => _ItemImagesDialog(item: library),
+        builder: (context) => EmbyPcItemImagesDialog(item: library),
       );
       if (changed == true && mounted) await _reloadLibrariesAfterImageChange();
       return;
