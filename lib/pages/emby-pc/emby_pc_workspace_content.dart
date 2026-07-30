@@ -4,6 +4,10 @@ part of 'emby_pc_page.dart';
 extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
   Widget _buildContent(BuildContext context, {required bool compact}) {
     final colors = Theme.of(context).colorScheme;
+    // 背景图卡片沿用首页约 270 x 205 的视觉比例，并放宽列宽阈值，
+    // 避免临界宽度下过早增加列数。
+    final mediaGridMaxExtent = _imageStyle == 'backdrop' ? 360.0 : 220.0;
+    final mediaGridAspectRatio = _imageStyle == 'backdrop' ? 1.32 : 0.58;
     return ColoredBox(
       color: colors.surfaceContainerLowest,
       child: Column(
@@ -39,14 +43,10 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
                         sliver: SliverGrid.builder(
                           gridDelegate:
                               SliverGridDelegateWithMaxCrossAxisExtent(
-                                maxCrossAxisExtent: _imageStyle == 'backdrop'
-                                    ? 320
-                                    : 196,
+                                maxCrossAxisExtent: mediaGridMaxExtent,
                                 crossAxisSpacing: 20,
                                 mainAxisSpacing: 22,
-                                childAspectRatio: _imageStyle == 'backdrop'
-                                    ? 1.40
-                                    : 0.56,
+                                childAspectRatio: mediaGridAspectRatio,
                               ),
                           itemCount: _items.length,
                           itemBuilder: (context, index) {
@@ -76,14 +76,10 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
                           sliver: SliverGrid.builder(
                             gridDelegate:
                                 SliverGridDelegateWithMaxCrossAxisExtent(
-                                  maxCrossAxisExtent: _imageStyle == 'backdrop'
-                                      ? 320
-                                      : 196,
+                                  maxCrossAxisExtent: mediaGridMaxExtent,
                                   crossAxisSpacing: 20,
                                   mainAxisSpacing: 22,
-                                  childAspectRatio: _imageStyle == 'backdrop'
-                                      ? 1.40
-                                      : 0.56,
+                                  childAspectRatio: mediaGridAspectRatio,
                                 ),
                             itemCount: 6, // 显示 6 个骨架屏占位符
                             itemBuilder: (context, index) {
