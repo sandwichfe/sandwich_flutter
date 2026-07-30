@@ -185,10 +185,6 @@ class _HomeLibraryTile extends StatelessWidget {
                           enabled: !busy,
                           tooltip: '媒体库操作',
                           onSelected: onAction,
-                          constraints: const BoxConstraints.tightFor(
-                            width: 38,
-                            height: 38,
-                          ),
                           padding: EdgeInsets.zero,
                           itemBuilder: (context) => const [
                             PopupMenuItem(
@@ -213,28 +209,32 @@ class _HomeLibraryTile extends StatelessWidget {
                               ),
                             ),
                           ],
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              color: colors.surfaceContainerHighest.withValues(
-                                alpha: 0.94,
-                              ),
-                              shape: BoxShape.circle,
-                              boxShadow: const [
-                                BoxShadow(
-                                  color: Color(0x24000000),
-                                  blurRadius: 5,
+                          // 触发按钮单独固定尺寸，菜单宽度继续按菜单项内容自适应。
+                          child: SizedBox.square(
+                            dimension: 38,
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: colors.surfaceContainerHighest.withValues(
+                                  alpha: 0.94,
                                 ),
-                              ],
-                            ),
-                            child: Center(
-                              child: busy
-                                  ? const SizedBox.square(
-                                      dimension: 17,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Icon(Icons.more_horiz, size: 23),
+                                shape: BoxShape.circle,
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Color(0x24000000),
+                                    blurRadius: 5,
+                                  ),
+                                ],
+                              ),
+                              child: Center(
+                                child: busy
+                                    ? const SizedBox.square(
+                                        dimension: 17,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Icon(Icons.more_horiz, size: 23),
+                              ),
                             ),
                           ),
                         ),
