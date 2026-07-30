@@ -3,7 +3,9 @@ import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import '../utils/theme_manager.dart';
 
 class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key});
+  final Future<void> Function() onAdjustLibraryOrder;
+
+  const SettingsPage({super.key, required this.onAdjustLibraryOrder});
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -59,6 +61,15 @@ class _SettingsPageState extends State<SettingsPage> {
             (context, _) => ListView(
               padding: const EdgeInsets.symmetric(vertical: 8),
               children: [
+                const _SettingsSectionTitle('媒体库'),
+                ListTile(
+                  leading: const Icon(Icons.swap_vert),
+                  title: const Text('调整媒体库顺序'),
+                  trailing: const Icon(Icons.chevron_right),
+                  // 排序状态仍由媒体工作台维护，设置页只承载功能入口。
+                  onTap: widget.onAdjustLibraryOrder,
+                ),
+                const Divider(height: 1, indent: 72),
                 const _SettingsSectionTitle('显示'),
                 SwitchListTile(
                   secondary: const Icon(Icons.dark_mode_outlined),

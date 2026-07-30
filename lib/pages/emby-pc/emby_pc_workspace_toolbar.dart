@@ -106,9 +106,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
     tooltip: '切换内容',
     icon: const Icon(Icons.menu),
     onSelected: (value) {
-      if (value == 'order') {
-        _openOrderDialog();
-      } else if (value == 'home') {
+      if (value == 'home') {
         _selectHome();
       } else if (value == 'recently-played') {
         _selectRecentlyPlayed();
@@ -133,8 +131,6 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
       const PopupMenuDivider(),
       const PopupMenuItem(value: 'favorite-movies', child: Text('收藏影片')),
       const PopupMenuItem(value: 'favorite-people', child: Text('收藏演员')),
-      const PopupMenuDivider(),
-      const PopupMenuItem(value: 'order', child: Text('调整媒体库顺序')),
     ],
   );
 

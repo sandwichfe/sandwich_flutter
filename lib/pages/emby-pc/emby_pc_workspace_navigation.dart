@@ -63,26 +63,37 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
     final colors = Theme.of(context).colorScheme;
     final userName = EmbyPcService.instance.currentUserName.trim();
     final displayName = userName.isEmpty ? '当前用户' : userName;
-    // 刷新、媒体库排序和应用设置统一收进用户菜单，桌面端入口固定在侧栏底部。
+    final avatar = CircleAvatar(
+      radius: 14,
+      backgroundColor: colors.surfaceContainerHighest,
+      foregroundImage: NetworkImage(
+        EmbyPcService.instance.userAvatarUrl(),
+      ),
+      // 用户未设置头像或图片请求失败时显示稳定的账号占位图标。
+      onForegroundImageError: (_, _) {},
+      child: Icon(
+        Icons.person_outline,
+        size: 18,
+        color: colors.onSurfaceVariant,
+      ),
+    );
+    // 账号菜单固定在侧栏底部，仅保留账号相关操作和设置入口。
     final menu = PopupMenuButton<String>(
       tooltip: '账号：$displayName',
       padding: EdgeInsets.zero,
       color: colors.surface,
       surfaceTintColor: Colors.transparent,
-      icon: sidebar ? null : const Icon(Icons.person_outline, size: 20),
+      icon: sidebar ? null : avatar,
       onSelected: (value) {
-        if (value == 'refresh') {
-          if (_view == 'home') {
-            _loadHome(force: true);
-          } else {
-            _loadItems(reset: true);
-          }
-        } else if (value == 'order') {
-          _openOrderDialog();
-        } else if (value == 'settings') {
+        if (value == 'settings') {
           Navigator.of(
             context,
-          ).push(embyPcFadeRoute(context, (_) => const SettingsPage()));
+          ).push(
+            embyPcFadeRoute(
+              context,
+              (_) => SettingsPage(onAdjustLibraryOrder: _openOrderDialog),
+            ),
+          );
         } else if (value == 'logout') {
           _logout();
         }
@@ -91,33 +102,13 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
           (_) => [
             PopupMenuItem(enabled: false, child: Text(displayName)),
             const PopupMenuDivider(),
-            PopupMenuItem(
-              value: 'refresh',
-              enabled: _view == 'home' ? !_homeLoading : !_loading,
-              child: const ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.refresh),
-                title: Text('刷新'),
-              ),
-            ),
-            const PopupMenuItem(
-              value: 'order',
-              child: ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.swap_vert),
-                title: Text('调整媒体库顺序'),
-              ),
-            ),
-            const PopupMenuDivider(),
             const PopupMenuItem(
               value: 'settings',
               child: ListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
                 leading: Icon(Icons.settings_outlined),
-                title: Text('应用设置'),
+                title: Text('设置'),
               ),
             ),
             const PopupMenuDivider(),
@@ -138,11 +129,7 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
                             : MainAxisAlignment.start,
                     children: [
                       SizedBox(width: collapsed ? 0 : 12),
-                      Icon(
-                        Icons.account_circle_outlined,
-                        size: 22,
-                        color: colors.onSurfaceVariant,
-                      ),
+                      avatar,
                       if (!collapsed) ...[
                         const SizedBox(width: 11),
                         Expanded(

@@ -368,6 +368,14 @@ class EmbyPcService {
     }).toString();
   }
 
+  // 用户头像使用 Swagger 的 Users/{Id}/Images/{Type} 接口，请求当前登录用户的主图。
+  String userAvatarUrl({int maxWidth = 96}) =>
+      _uri('/emby/Users/$userId/Images/Primary', {
+        'api_key': accessToken,
+        'MaxWidth': '$maxWidth',
+        'Quality': '82',
+      }).toString();
+
   String streamUrl(String itemId) => _uri('/emby/Videos/$itemId/stream', {
     'api_key': accessToken,
     'static': 'true',
