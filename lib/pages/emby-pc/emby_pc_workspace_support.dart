@@ -379,8 +379,10 @@ const _libraryImageSlots = [
   _LibraryImageSlot('Banner', '横幅图'),
   _LibraryImageSlot('Disc', '光盘封面'),
   _LibraryImageSlot('Art', '艺术图'),
-  _LibraryImageSlot('Backdrop', '背景图'),
 ];
+
+// Emby 允许同一项目保存多张背景图，不能像其他类型一样压缩成单个槽位。
+const _backdropImageSlot = _LibraryImageSlot('Backdrop', '背景图');
 
 class _LibraryImagesDialog extends StatefulWidget {
   final EmbyPcItem library;
@@ -401,6 +403,7 @@ class _LibraryImagesDialogState extends State<_LibraryImagesDialog> {
   @override
   void initState() {
     super.initState();
+    // 图像列表仅在用户打开编辑弹窗时按需获取。
     _loadImages();
   }
 
@@ -427,6 +430,12 @@ class _LibraryImagesDialogState extends State<_LibraryImagesDialog> {
       if (image.type == type) return image;
     }
     return null;
+  }
+
+  List<EmbyPcImageInfo> _imagesFor(String type) {
+    final images = _images.where((image) => image.type == type).toList();
+    images.sort((a, b) => a.index.compareTo(b.index));
+    return images;
   }
 
   Future<void> _upload(
@@ -532,6 +541,13 @@ class _LibraryImagesDialogState extends State<_LibraryImagesDialog> {
     final size = MediaQuery.sizeOf(context);
     final dialogWidth = (size.width - 32).clamp(300.0, 1000.0).toDouble();
     final dialogHeight = (size.height - 32).clamp(420.0, 760.0).toDouble();
+    final backdropImages = _imagesFor(_backdropImageSlot.type);
+    const gridDelegate = SliverGridDelegateWithMaxCrossAxisExtent(
+      maxCrossAxisExtent: 230,
+      mainAxisExtent: 224,
+      crossAxisSpacing: 16,
+      mainAxisSpacing: 16,
+    );
     return Dialog(
       insetPadding: const EdgeInsets.all(16),
       child: SizedBox(
@@ -564,20 +580,53 @@ class _LibraryImagesDialogState extends State<_LibraryImagesDialog> {
             Expanded(
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
-                  : GridView.builder(
-                      padding: const EdgeInsets.all(20),
-                      gridDelegate:
-                          const SliverGridDelegateWithMaxCrossAxisExtent(
-                            maxCrossAxisExtent: 230,
-                            mainAxisExtent: 224,
-                            crossAxisSpacing: 16,
-                            mainAxisSpacing: 16,
+                  : CustomScrollView(
+                      slivers: [
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                          sliver: SliverGrid.builder(
+                            gridDelegate: gridDelegate,
+                            itemCount: _libraryImageSlots.length,
+                            itemBuilder: (context, index) {
+                              final slot = _libraryImageSlots[index];
+                              return _buildImageSlot(
+                                slot,
+                                _imageFor(slot.type),
+                              );
+                            },
                           ),
-                      itemCount: _libraryImageSlots.length,
-                      itemBuilder: (context, index) {
-                        final slot = _libraryImageSlots[index];
-                        return _buildImageSlot(slot, _imageFor(slot.type));
-                      },
+                        ),
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(20, 24, 20, 12),
+                          sliver: SliverToBoxAdapter(
+                            child: Text(
+                              _backdropImageSlot.label,
+                              style: Theme.of(context).textTheme.titleLarge,
+                            ),
+                          ),
+                        ),
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                          sliver: SliverGrid.builder(
+                            gridDelegate: gridDelegate,
+                            itemCount: backdropImages.length + 1,
+                            itemBuilder: (context, index) {
+                              if (index == backdropImages.length) {
+                                return _buildAddBackdropSlot();
+                              }
+                              final image = backdropImages[index];
+                              final title = image.fileName.trim().isEmpty
+                                  ? '${_backdropImageSlot.label} ${index + 1}'
+                                  : image.fileName;
+                              return _buildImageSlot(
+                                _backdropImageSlot,
+                                image,
+                                title: title,
+                              );
+                            },
+                          ),
+                        ),
+                      ],
                     ),
             ),
           ],
@@ -586,7 +635,60 @@ class _LibraryImagesDialogState extends State<_LibraryImagesDialog> {
     );
   }
 
-  Widget _buildImageSlot(_LibraryImageSlot slot, EmbyPcImageInfo? image) {
+  // 新增入口作为背景图列表的最后一格，位置不会随图片数量变化而产生歧义。
+  Widget _buildAddBackdropSlot() {
+    final colors = Theme.of(context).colorScheme;
+    final busy = _busyTypes.contains(_backdropImageSlot.type);
+    return Semantics(
+      button: true,
+      enabled: !busy,
+      label: '添加背景图',
+      child: Material(
+        color: colors.surfaceContainerLowest,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(6),
+          side: BorderSide(color: colors.outlineVariant),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: busy ? null : () => _upload(_backdropImageSlot, null),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: colors.primary.withValues(alpha: 0.10),
+                    shape: BoxShape.circle,
+                  ),
+                  alignment: Alignment.center,
+                  child: busy
+                      ? const SizedBox.square(
+                          dimension: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Icon(Icons.add, size: 30, color: colors.primary),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  busy ? '处理中...' : '添加背景图',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildImageSlot(
+    _LibraryImageSlot slot,
+    EmbyPcImageInfo? image, {
+    String? title,
+  }) {
     final colors = Theme.of(context).colorScheme;
     final busy = _busyTypes.contains(slot.type);
     final imageUrl = image == null
@@ -625,7 +727,7 @@ class _LibraryImagesDialogState extends State<_LibraryImagesDialog> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        slot.label,
+                        title ?? slot.label,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontWeight: FontWeight.w600),
