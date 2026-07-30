@@ -28,6 +28,7 @@ class EmbyPcService {
   String userId = '';
   String accessToken = '';
   String currentUserName = '';
+  int _userAvatarRevision = 0;
 
   bool get isLoggedIn => accessToken.isNotEmpty && userId.isNotEmpty;
 
@@ -175,6 +176,20 @@ class EmbyPcService {
       body: base64Encode(bytes),
     );
     _ensureSuccess(response, '上传图像失败');
+  }
+
+  Future<void> uploadUserAvatar({
+    required Uint8List bytes,
+    required String contentType,
+  }) async {
+    final response = await http.post(
+      _uri('/emby/Users/$userId/Images/Primary'),
+      headers: {..._tokenHeader, 'Content-Type': contentType},
+      // Swagger 要求用户图像正文使用 Base64 编码，和媒体图像上传规则一致。
+      body: base64Encode(bytes),
+    );
+    _ensureSuccess(response, '上传头像失败');
+    _userAvatarRevision++;
   }
 
   Future<void> deleteItemImage(
@@ -374,6 +389,8 @@ class EmbyPcService {
         'api_key': accessToken,
         'MaxWidth': '$maxWidth',
         'Quality': '82',
+        // 上传后改变地址，避免 Flutter 的网络图片缓存继续显示旧头像。
+        'v': '$_userAvatarRevision',
       }).toString();
 
   String streamUrl(String itemId) => _uri('/emby/Videos/$itemId/stream', {

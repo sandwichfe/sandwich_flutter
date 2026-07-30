@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
+import 'emby-pc/emby_pc_service.dart';
+import 'user_profile_page.dart';
 import '../utils/theme_manager.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -61,6 +63,36 @@ class _SettingsPageState extends State<SettingsPage> {
             (context, _) => ListView(
               padding: const EdgeInsets.symmetric(vertical: 8),
               children: [
+                const _SettingsSectionTitle('账户'),
+                ListTile(
+                  leading: CircleAvatar(
+                    radius: 20,
+                    backgroundColor:
+                        Theme.of(context).colorScheme.surfaceContainerHighest,
+                    foregroundImage: NetworkImage(
+                      EmbyPcService.instance.userAvatarUrl(),
+                    ),
+                    onForegroundImageError: (_, _) {},
+                    child: const Icon(Icons.person_outline),
+                  ),
+                  title: const Text('用户信息'),
+                  subtitle: Text(
+                    EmbyPcService.instance.currentUserName.isEmpty
+                        ? '修改用户头像'
+                        : EmbyPcService.instance.currentUserName,
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  // 返回设置页时刷新头像 URL，及时显示刚上传的新头像。
+                  onTap: () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const UserProfilePage(),
+                      ),
+                    );
+                    if (mounted) setState(() {});
+                  },
+                ),
+                const Divider(height: 1, indent: 72),
                 const _SettingsSectionTitle('媒体库'),
                 ListTile(
                   leading: const Icon(Icons.swap_vert),

@@ -49,6 +49,8 @@ dependencies:
   cached_network_image: ^3.3.1
   # 媒体库图像管理需要从桌面端和移动端选择本地图片。
   file_picker: ^10.3.10
+  # 用户头像裁剪使用纯 Flutter 组件，保证桌面端和移动端行为一致。
+  crop_image: ^1.0.17
   # Windows 桌面端使用自定义标题栏，同时保留原生窗口拖动、缩放和控制能力。
   window_manager: ^0.5.2
   # The following adds the Cupertino Icons font to your application.

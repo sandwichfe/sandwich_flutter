@@ -96,9 +96,9 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
         ),
       ),
       icon: sidebar ? null : avatar,
-      onSelected: (value) {
+      onSelected: (value) async {
         if (value == 'settings') {
-          Navigator.of(
+          await Navigator.of(
             context,
           ).push(
             embyPcFadeRoute(
@@ -106,6 +106,8 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
               (_) => SettingsPage(onAdjustLibraryOrder: _openOrderDialog),
             ),
           );
+          // 设置页可能修改用户头像，返回后重新生成带缓存版本号的图片地址。
+          if (mounted) setState(() {});
         } else if (value == 'logout') {
           _logout();
         }
