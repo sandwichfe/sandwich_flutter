@@ -133,6 +133,8 @@ class _GlobalSearchDialogState extends State<_GlobalSearchDialog> {
       focusNode: _focusNode,
       autofocus: true,
       textInputAction: TextInputAction.search,
+      // 聚焦和失焦会切换边框类型，显式居中可避免文字垂直跳动。
+      textAlignVertical: TextAlignVertical.center,
       onChanged: _scheduleSearch,
       onSubmitted: _startSearch,
       decoration: InputDecoration(
