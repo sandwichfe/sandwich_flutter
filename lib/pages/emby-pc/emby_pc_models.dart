@@ -101,12 +101,14 @@ class EmbyPcItem {
       tags: _strings(json['Tags']),
       studios: _maps(json['Studios']).map(EmbyPcNamedItem.fromJson).toList(),
       people: _maps(json['People']).map(EmbyPcPerson.fromJson).toList(),
-      mediaSources:
-          _maps(json['MediaSources']).map(EmbyPcMediaSource.fromJson).toList(),
+      mediaSources: _maps(
+        json['MediaSources'],
+      ).map(EmbyPcMediaSource.fromJson).toList(),
       chapters: _maps(json['Chapters']).map(EmbyPcChapter.fromJson).toList(),
       providerIds: _stringMap(json['ProviderIds']),
-      externalUrls:
-          _maps(json['ExternalUrls']).map(EmbyPcExternalUrl.fromJson).toList(),
+      externalUrls: _maps(
+        json['ExternalUrls'],
+      ).map(EmbyPcExternalUrl.fromJson).toList(),
       imageTags: _map(json['ImageTags']),
       primaryImageTag: _text(json['PrimaryImageTag']),
       backdropImageTags: _strings(json['BackdropImageTags']),
@@ -173,6 +175,35 @@ class EmbyPcItem {
         '${twoDigits(local.day)} ${twoDigits(local.hour)}:'
         '${twoDigits(local.minute)}';
   }
+}
+
+// 图像管理弹窗只保留渲染和删除操作需要的字段。
+class EmbyPcImageInfo {
+  final String type;
+  final int index;
+  final String fileName;
+  final int? width;
+  final int? height;
+
+  const EmbyPcImageInfo({
+    required this.type,
+    required this.index,
+    this.fileName = '',
+    this.width,
+    this.height,
+  });
+
+  factory EmbyPcImageInfo.fromJson(Map<String, dynamic> json) =>
+      EmbyPcImageInfo(
+        type: _text(json['ImageType']),
+        index: _integer(json['ImageIndex']),
+        fileName: _text(json['Filename']),
+        width: _integerOrNull(json['Width']),
+        height: _integerOrNull(json['Height']),
+      );
+
+  String get dimensions =>
+      width == null || height == null ? '' : '${width}x$height';
 }
 
 // Emby 外部链接保留名称和地址，页面可在名称缺失时使用 URL 兜底显示。
@@ -276,10 +307,9 @@ class EmbyPcMediaSource {
         size: _integer(json['Size']),
         bitrate: _integer(json['Bitrate']),
         runTimeTicks: _integer(json['RunTimeTicks']),
-        streams:
-            _maps(
-              json['MediaStreams'],
-            ).map(EmbyPcMediaStream.fromJson).toList(),
+        streams: _maps(
+          json['MediaStreams'],
+        ).map(EmbyPcMediaStream.fromJson).toList(),
       );
 }
 
@@ -341,10 +371,9 @@ class EmbyPcMediaStream {
   factory EmbyPcMediaStream.fromJson(Map<String, dynamic> json) =>
       EmbyPcMediaStream(
         type: _text(json['Type']),
-        title:
-            _text(json['DisplayTitle']).isNotEmpty
-                ? _text(json['DisplayTitle'])
-                : _text(json['Title']),
+        title: _text(json['DisplayTitle']).isNotEmpty
+            ? _text(json['DisplayTitle'])
+            : _text(json['Title']),
         codec: _text(json['Codec']),
         language: _text(json['Language']),
         codecTag: _text(json['CodecTag']),
@@ -394,13 +423,12 @@ Map<String, String> _stringMap(dynamic value) => {
     if (_text(entry.value).isNotEmpty) entry.key: _text(entry.value),
 };
 
-List<Map<String, dynamic>> _maps(dynamic value) =>
-    value is List
-        ? value
-            .whereType<Map>()
-            .map((item) => Map<String, dynamic>.from(item))
-            .toList()
-        : <Map<String, dynamic>>[];
+List<Map<String, dynamic>> _maps(dynamic value) => value is List
+    ? value
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList()
+    : <Map<String, dynamic>>[];
 
 List<String> _strings(dynamic value) =>
     value is List ? value.map((item) => item.toString()).toList() : const [];

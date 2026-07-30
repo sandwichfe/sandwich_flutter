@@ -113,6 +113,82 @@ class EmbyPcService {
     return EmbyPcPage.fromJson(data).items;
   }
 
+  Future<String> scanLibrary() async {
+    final response = await http.post(
+      _uri('/emby/Library/Refresh'),
+      headers: _tokenHeader,
+    );
+    return _responseText(response, '扫描媒体库失败');
+  }
+
+  Future<String> refreshMetadata(
+    String itemId, {
+    required String mode,
+    required bool replaceImages,
+    required bool replaceThumbnailImages,
+  }) async {
+    final replaceMetadata = mode == 'FullRefresh';
+    final response = await http.post(
+      _uri('/emby/Items/$itemId/Refresh', {
+        'Recursive': 'true',
+        'MetadataRefreshMode': mode,
+        'ImageRefreshMode': replaceImages ? 'FullRefresh' : 'Default',
+        'ReplaceAllMetadata': '$replaceMetadata',
+        'ReplaceAllImages': '$replaceImages',
+      }),
+      headers: {..._tokenHeader, 'Content-Type': 'application/json'},
+      // Swagger 将视频预览缩略图选项定义在 BaseRefreshRequest 正文中。
+      body: jsonEncode({'ReplaceThumbnailImages': replaceThumbnailImages}),
+    );
+    return _responseText(response, '刷新元数据失败');
+  }
+
+  Future<List<EmbyPcImageInfo>> getItemImages(String itemId) async {
+    final response = await http.get(
+      _uri('/emby/Items/$itemId/Images'),
+      headers: _tokenHeader,
+    );
+    _ensureSuccess(response, '获取图像失败');
+    if (response.bodyBytes.isEmpty) return const [];
+    final data = jsonDecode(utf8.decode(response.bodyBytes));
+    if (data is! List) throw const EmbyPcException('获取图像失败：响应格式错误');
+    return data
+        .whereType<Map>()
+        .map((item) => EmbyPcImageInfo.fromJson(_asMap(item)))
+        .toList();
+  }
+
+  Future<void> uploadItemImage(
+    String itemId, {
+    required String type,
+    int? index,
+    required Uint8List bytes,
+    required String contentType,
+  }) async {
+    final path = index == null
+        ? '/emby/Items/$itemId/Images/$type'
+        : '/emby/Items/$itemId/Images/$type/$index';
+    final response = await http.post(
+      _uri(path),
+      headers: {..._tokenHeader, 'Content-Type': contentType},
+      // Emby 图像接口接收以 Base64 编码后的文件内容。
+      body: base64Encode(bytes),
+    );
+    _ensureSuccess(response, '上传图像失败');
+  }
+
+  Future<void> deleteItemImage(
+    String itemId, {
+    required String type,
+    required int index,
+  }) async {
+    final response = await http.delete(
+      _uri('/emby/Items/$itemId/Images/$type/$index'),
+      headers: _tokenHeader,
+    );
+    _ensureSuccess(response, '删除图像失败');
+  }
+
   Future<EmbyPcPage> getItems({
     String libraryId = '',
     bool favoriteOnly = false,
@@ -128,8 +204,8 @@ class EmbyPcService {
   }) async {
     final types =
         const {'Movie', 'Series', 'Video', 'Person'}.contains(itemType)
-            ? itemType
-            : 'Movie,Series,Video';
+        ? itemType
+        : 'Movie,Series,Video';
     final query = <String, String>{
       'Recursive': 'true',
       'IncludeItemTypes': types,
@@ -242,10 +318,9 @@ class EmbyPcService {
 
   Future<bool> setFavorite(String itemId, bool favorite) async {
     final path = '/emby/Users/$userId/FavoriteItems/$itemId';
-    final response =
-        favorite
-            ? await http.post(_uri(path), headers: _tokenHeader)
-            : await http.delete(_uri(path), headers: _tokenHeader);
+    final response = favorite
+        ? await http.post(_uri(path), headers: _tokenHeader)
+        : await http.delete(_uri(path), headers: _tokenHeader);
     final data = _decodeResponse(response, '更新收藏状态失败');
     return data['IsFavorite'] is bool ? data['IsFavorite'] as bool : favorite;
   }
@@ -255,23 +330,23 @@ class EmbyPcService {
     String type = 'Primary',
     int index = 0,
     int maxWidth = 720,
+    String cacheKey = '',
   }) {
-    final path =
-        type == 'Primary'
-            ? '/emby/Items/$itemId/Images/Primary'
-            : '/emby/Items/$itemId/Images/$type/$index';
+    final path = type == 'Primary'
+        ? '/emby/Items/$itemId/Images/Primary'
+        : '/emby/Items/$itemId/Images/$type/$index';
     return _uri(path, {
       'api_key': accessToken,
       'maxWidth': '$maxWidth',
       'quality': '82',
+      if (cacheKey.isNotEmpty) 'v': cacheKey,
     }).toString();
   }
 
-  String streamUrl(String itemId) =>
-      _uri('/emby/Videos/$itemId/stream', {
-        'api_key': accessToken,
-        'static': 'true',
-      }).toString();
+  String streamUrl(String itemId) => _uri('/emby/Videos/$itemId/stream', {
+    'api_key': accessToken,
+    'static': 'true',
+  }).toString();
 
   // Emby 预先生成的 BIF 文件包含进度条缩略图，加载失败时由播放器降级为普通进度条。
   Future<Uint8List?> getBifPreview(String itemId, {int width = 320}) async {
@@ -365,6 +440,21 @@ class EmbyPcService {
       Uri.parse('$serverUrl$path').replace(queryParameters: query);
 
   Map<String, String> get _tokenHeader => {'X-Emby-Token': accessToken};
+
+  String _responseText(http.Response response, String action) {
+    _ensureSuccess(response, action);
+    return response.bodyBytes.isEmpty
+        ? ''
+        : utf8.decode(response.bodyBytes).trim();
+  }
+
+  void _ensureSuccess(http.Response response, String action) {
+    if (response.statusCode >= 200 && response.statusCode < 300) return;
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw const EmbyPcException('登录已失效或当前账号没有管理权限');
+    }
+    throw EmbyPcException('$action：HTTP ${response.statusCode}');
+  }
 
   Map<String, dynamic> _decodeResponse(http.Response response, String action) {
     if (response.statusCode < 200 || response.statusCode >= 300) {

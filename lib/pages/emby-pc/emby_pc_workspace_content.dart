@@ -27,71 +27,71 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
             child: _view == 'home'
                 ? _buildHomeContent(context)
                 : _loading && _items.isEmpty
-                    ? const Center(child: CircularProgressIndicator())
-                    : _items.isEmpty
-                    ? const _EmptyState()
-                    : CustomScrollView(
-                      controller: _scrollController,
-                      slivers: [
+                ? const Center(child: CircularProgressIndicator())
+                : _items.isEmpty
+                ? const _EmptyState()
+                : CustomScrollView(
+                    controller: _scrollController,
+                    slivers: [
+                      SliverPadding(
+                        // 媒体库详情仅展示视频网格，不再插入精选横幅。
+                        padding: const EdgeInsets.fromLTRB(26, 18, 26, 30),
+                        sliver: SliverGrid.builder(
+                          gridDelegate:
+                              SliverGridDelegateWithMaxCrossAxisExtent(
+                                maxCrossAxisExtent: _imageStyle == 'backdrop'
+                                    ? 320
+                                    : 196,
+                                crossAxisSpacing: 20,
+                                mainAxisSpacing: 22,
+                                childAspectRatio: _imageStyle == 'backdrop'
+                                    ? 1.40
+                                    : 0.56,
+                              ),
+                          itemCount: _items.length,
+                          itemBuilder: (context, index) {
+                            final item = _items[index];
+                            return EmbyPcMediaTile(
+                              item: item,
+                              imageStyle: _imageStyle,
+                              secondaryLabel: _view == 'recently-played'
+                                  ? item.lastPlayedLabel
+                                  : '',
+                              favoriteBusy: _favoriteBusyIds.contains(item.id),
+                              onOpen: () => _openItem(item),
+                              onPlay: _view == 'favorite-people'
+                                  ? null
+                                  : () => _playItem(item),
+                              onFavorite: () => _toggleFavorite(item),
+                            );
+                          },
+                        ),
+                      ),
+                      if (_loadingMore)
                         SliverPadding(
-                          // 媒体库详情仅展示视频网格，不再插入精选横幅。
-                          padding: const EdgeInsets.fromLTRB(26, 18, 26, 30),
+                          padding: const EdgeInsets.fromLTRB(26, 0, 26, 30),
                           sliver: SliverGrid.builder(
                             gridDelegate:
                                 SliverGridDelegateWithMaxCrossAxisExtent(
-                                  maxCrossAxisExtent:
-                                      _imageStyle == 'backdrop' ? 320 : 196,
+                                  maxCrossAxisExtent: _imageStyle == 'backdrop'
+                                      ? 320
+                                      : 196,
                                   crossAxisSpacing: 20,
                                   mainAxisSpacing: 22,
-                                  childAspectRatio:
-                                      _imageStyle == 'backdrop' ? 1.40 : 0.56,
+                                  childAspectRatio: _imageStyle == 'backdrop'
+                                      ? 1.40
+                                      : 0.56,
                                 ),
-                            itemCount: _items.length,
+                            itemCount: 6, // 显示 6 个骨架屏占位符
                             itemBuilder: (context, index) {
-                              final item = _items[index];
-                              return EmbyPcMediaTile(
-                                item: item,
-                                imageStyle: _imageStyle,
-                                secondaryLabel:
-                                    _view == 'recently-played'
-                                        ? item.lastPlayedLabel
-                                        : '',
-                                favoriteBusy: _favoriteBusyIds.contains(
-                                  item.id,
-                                ),
-                                onOpen: () => _openItem(item),
-                                onPlay:
-                                    _view == 'favorite-people'
-                                        ? null
-                                        : () => _playItem(item),
-                                onFavorite: () => _toggleFavorite(item),
+                              return EmbyPcLoadingPlaceholder(
+                                isBackdrop: _imageStyle == 'backdrop',
                               );
                             },
                           ),
                         ),
-                        if (_loadingMore)
-                          SliverPadding(
-                            padding: const EdgeInsets.fromLTRB(26, 0, 26, 30),
-                            sliver: SliverGrid.builder(
-                              gridDelegate:
-                                  SliverGridDelegateWithMaxCrossAxisExtent(
-                                    maxCrossAxisExtent:
-                                        _imageStyle == 'backdrop' ? 320 : 196,
-                                    crossAxisSpacing: 20,
-                                    mainAxisSpacing: 22,
-                                    childAspectRatio:
-                                        _imageStyle == 'backdrop' ? 1.40 : 0.56,
-                                  ),
-                              itemCount: 6, // 显示 6 个骨架屏占位符
-                              itemBuilder: (context, index) {
-                                return EmbyPcLoadingPlaceholder(
-                                  isBackdrop: _imageStyle == 'backdrop',
-                                );
-                              },
-                            ),
-                          ),
-                      ],
-                    ),
+                    ],
+                  ),
           ),
         ],
       ),
@@ -170,7 +170,9 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
                 final library = _libraries[index];
                 return _HomeLibraryTile(
                   library: library,
+                  busy: _libraryActionBusyIds.contains(library.id),
                   onPressed: () => _selectLibrary(library.id),
+                  onAction: (action) => _handleLibraryAction(library, action),
                 );
               },
             ),
@@ -241,8 +243,9 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
                 return EmbyPcMediaTile(
                   item: item,
                   imageStyle: 'backdrop',
-                  secondaryLabel:
-                      showLastPlayedTime ? item.lastPlayedLabel : '',
+                  secondaryLabel: showLastPlayedTime
+                      ? item.lastPlayedLabel
+                      : '',
                   onOpen: () => _openItem(item),
                   onPlay: () => _playItem(item),
                 );
@@ -252,5 +255,4 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
       ),
     );
   }
-
 }

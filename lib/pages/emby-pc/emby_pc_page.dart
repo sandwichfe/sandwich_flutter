@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -99,6 +100,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   String _homeError = '';
   int _queryVersion = 0;
   final Set<String> _favoriteBusyIds = {};
+  final Set<String> _libraryActionBusyIds = {};
   Timer? _loadMoreDebounceTimer;
   DateTime? _lastLoadMoreTime;
 
@@ -123,8 +125,9 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         _libraries = ordered;
         _sortBy = preferences.sortBy;
         _sortOrder = preferences.sortOrder;
-        _imageStyle =
-            preferences.imageStyle == 'poster' ? 'poster' : 'backdrop';
+        _imageStyle = preferences.imageStyle == 'poster'
+            ? 'poster'
+            : 'backdrop';
         // 工作台默认进入首页，媒体库详情仅在用户选择后再按需加载。
         _activeId = '';
         _loading = false;
@@ -158,10 +161,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
           sortOrder: 'Descending',
         ),
         ...libraries.map(
-          (library) => EmbyPcService.instance.getItems(
-            libraryId: library.id,
-            limit: 10,
-          ),
+          (library) =>
+              EmbyPcService.instance.getItems(libraryId: library.id, limit: 10),
         ),
       ]);
       if (!mounted) return;
@@ -275,14 +276,13 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         favoriteOnly: _view == 'favorite-movies' || _view == 'favorite-people',
         startIndex: reset ? 0 : _items.length,
         itemType: _view == 'favorite-people' ? 'Person' : _itemType,
-        filters:
-            _view == 'favorite-movies' || _view == 'favorite-people'
-                ? ''
-                : <String>[
-                  // 播放记录始终限定已播放项目，确保分页结果与首页摘要一致。
-                  _view == 'recently-played' ? 'IsPlayed' : _statusFilter,
-                  _markFilter,
-                ].where((value) => value.isNotEmpty).join(','),
+        filters: _view == 'favorite-movies' || _view == 'favorite-people'
+            ? ''
+            : <String>[
+                // 播放记录始终限定已播放项目，确保分页结果与首页摘要一致。
+                _view == 'recently-played' ? 'IsPlayed' : _statusFilter,
+                _markFilter,
+              ].where((value) => value.isNotEmpty).join(','),
         videoType: _videoType,
         searchTerm: _searchController.text,
         productionYear: int.tryParse(_yearController.text.trim()),
@@ -319,14 +319,18 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
           now.difference(_lastLoadMoreTime!).inMilliseconds < 1000) {
         // 防抖：取消旧定时器，延迟到节流间隔结束后执行
         _loadMoreDebounceTimer?.cancel();
-        final remainingTime = 800 - now.difference(_lastLoadMoreTime!).inMilliseconds;
-        _loadMoreDebounceTimer = Timer(Duration(milliseconds: remainingTime + 100), () {
-          // 定时器触发时再次检查状态，避免在加载过程中重复触发
-          if (!_loading && !_loadingMore) {
-            _lastLoadMoreTime = DateTime.now();
-            _loadItems(reset: false);
-          }
-        });
+        final remainingTime =
+            800 - now.difference(_lastLoadMoreTime!).inMilliseconds;
+        _loadMoreDebounceTimer = Timer(
+          Duration(milliseconds: remainingTime + 100),
+          () {
+            // 定时器触发时再次检查状态，避免在加载过程中重复触发
+            if (!_loading && !_loadingMore) {
+              _lastLoadMoreTime = DateTime.now();
+              _loadItems(reset: false);
+            }
+          },
+        );
       } else {
         // 节流间隔已过，立即执行并记录时间
         _loadMoreDebounceTimer?.cancel();
@@ -413,25 +417,22 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       barrierDismissible: true,
       barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
       barrierColor: const Color(0x52000000),
-      transitionDuration:
-          reduceMotion ? Duration.zero : const Duration(milliseconds: 220),
-      pageBuilder:
-          (_, _, _) => SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Align(
-                // 搜索浮层固定在页面上方，查询前后保持位置稳定。
-                alignment: Alignment.topCenter,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    maxWidth: 720,
-                    maxHeight: 640,
-                  ),
-                  child: const _GlobalSearchDialog(),
-                ),
-              ),
+      transitionDuration: reduceMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 220),
+      pageBuilder: (_, _, _) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Align(
+            // 搜索浮层固定在页面上方，查询前后保持位置稳定。
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 720, maxHeight: 640),
+              child: const _GlobalSearchDialog(),
             ),
           ),
+        ),
+      ),
       transitionBuilder: (_, animation, _, child) {
         if (reduceMotion) return child;
         final curved = CurvedAnimation(
@@ -468,25 +469,22 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       if (!mounted) return;
       final updated = item.copyWith(isFavorite: value);
       setState(() {
-        _items =
-            _items
-                .map((entry) => entry.id == item.id ? updated : entry)
-                .toList();
+        _items = _items
+            .map((entry) => entry.id == item.id ? updated : entry)
+            .toList();
         if (!value && _view == 'favorite-movies') {
           _items = _items.where((entry) => entry.id != item.id).toList();
           _total = (_total - 1).clamp(0, 1 << 30).toInt();
         }
         if (_view == 'favorite-movies' && _favoriteMovieCount != null) {
-          _favoriteMovieCount =
-              (_favoriteMovieCount! + (value ? 1 : -1))
-                  .clamp(0, 1 << 30)
-                  .toInt();
+          _favoriteMovieCount = (_favoriteMovieCount! + (value ? 1 : -1))
+              .clamp(0, 1 << 30)
+              .toInt();
         }
         if (_view == 'favorite-people' && _favoritePeopleCount != null) {
-          _favoritePeopleCount =
-              (_favoritePeopleCount! + (value ? 1 : -1))
-                  .clamp(0, 1 << 30)
-                  .toInt();
+          _favoritePeopleCount = (_favoritePeopleCount! + (value ? 1 : -1))
+              .clamp(0, 1 << 30)
+              .toInt();
         }
       });
     } catch (error) {
@@ -496,6 +494,85 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         ).showSnackBar(SnackBar(content: Text(error.toString())));
     } finally {
       if (mounted) setState(() => _favoriteBusyIds.remove(item.id));
+    }
+  }
+
+  Future<void> _handleLibraryAction(
+    EmbyPcItem library,
+    _LibraryAction action,
+  ) async {
+    if (action == _LibraryAction.editImages) {
+      final changed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => _LibraryImagesDialog(library: library),
+      );
+      if (changed == true && mounted) await _reloadLibrariesAfterImageChange();
+      return;
+    }
+
+    if (action == _LibraryAction.refreshMetadata) {
+      final options = await showDialog<_MetadataRefreshOptions>(
+        context: context,
+        builder: (context) => _MetadataRefreshDialog(name: library.name),
+      );
+      if (options == null || !mounted) return;
+      await _runLibraryAction(
+        library.id,
+        () => EmbyPcService.instance.refreshMetadata(
+          library.id,
+          mode: options.mode,
+          replaceImages: options.replaceImages,
+          replaceThumbnailImages: options.replaceThumbnailImages,
+        ),
+        successMessage: '元数据刷新请求已提交',
+      );
+      return;
+    }
+
+    await _runLibraryAction(
+      library.id,
+      EmbyPcService.instance.scanLibrary,
+      successMessage: '媒体库扫描请求已提交',
+    );
+  }
+
+  Future<void> _runLibraryAction(
+    String libraryId,
+    Future<String> Function() request, {
+    required String successMessage,
+  }) async {
+    if (_libraryActionBusyIds.contains(libraryId)) return;
+    setState(() => _libraryActionBusyIds.add(libraryId));
+    try {
+      final response = await request();
+      if (!mounted) return;
+      final message = response.isEmpty ? successMessage : response;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(message)));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(error.toString())));
+    } finally {
+      if (mounted) setState(() => _libraryActionBusyIds.remove(libraryId));
+    }
+  }
+
+  Future<void> _reloadLibrariesAfterImageChange() async {
+    try {
+      final libraries = await EmbyPcService.instance.getLibraries();
+      if (!mounted) return;
+      final currentOrder = _libraries.map((item) => item.id).toList();
+      setState(() => _libraries = _applyLibraryOrder(libraries, currentOrder));
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.toString())));
+      }
     }
   }
 
@@ -565,22 +642,20 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       builder: (context, constraints) {
         final compact = constraints.maxWidth < 820;
         return Scaffold(
-          body:
-              _error.isNotEmpty && _libraries.isEmpty
-                  ? _WorkspaceError(message: _error, onRetry: _initialize)
-                  : Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (!compact)
-                        _EmbyPcWorkspaceNavigation(this)._buildSidebar(context),
-                      Expanded(
-                        child: _EmbyPcWorkspaceContent(this)._buildContent(
-                          context,
-                          compact: compact,
-                        ),
-                      ),
-                    ],
-                  ),
+          body: _error.isNotEmpty && _libraries.isEmpty
+              ? _WorkspaceError(message: _error, onRetry: _initialize)
+              : Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (!compact)
+                      _EmbyPcWorkspaceNavigation(this)._buildSidebar(context),
+                    Expanded(
+                      child: _EmbyPcWorkspaceContent(
+                        this,
+                      )._buildContent(context, compact: compact),
+                    ),
+                  ],
+                ),
         );
       },
     );
