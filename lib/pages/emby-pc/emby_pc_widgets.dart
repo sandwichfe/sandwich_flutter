@@ -171,6 +171,9 @@ class _EmbyPcHorizontalDragScrollBehavior extends MaterialScrollBehavior {
   };
 }
 
+// 媒体卡片菜单先统一保留操作入口，具体编辑与刷新逻辑后续接入。
+enum _EmbyPcMediaAction { editMetadata, editImages, refreshMetadata }
+
 class EmbyPcMediaTile extends StatefulWidget {
   final EmbyPcItem item;
   final String imageStyle;
@@ -408,7 +411,7 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
         ),
       if (widget.onFavorite != null)
         Positioned(
-          right: 8,
+          right: 52,
           bottom: bottom,
           child: AnimatedOpacity(
             duration: const Duration(milliseconds: 200),
@@ -447,6 +450,69 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
             ),
           ),
         ),
+      Positioned(
+        right: 8,
+        bottom: bottom,
+        child: IgnorePointer(
+          ignoring: !_hovered,
+          child: AnimatedOpacity(
+            opacity: _hovered ? 1 : 0,
+            duration: const Duration(milliseconds: 180),
+            child: PopupMenuButton<_EmbyPcMediaAction>(
+              tooltip: '更多',
+              padding: EdgeInsets.zero,
+              // 当前仅提供操作入口，具体功能后续接入。
+              onSelected: (_) {},
+              itemBuilder: (context) => const [
+                PopupMenuItem(
+                  value: _EmbyPcMediaAction.editMetadata,
+                  child: Row(
+                    children: [
+                      Icon(Icons.edit_outlined, size: 20),
+                      SizedBox(width: 12),
+                      Text('编辑元数据'),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: _EmbyPcMediaAction.editImages,
+                  child: Row(
+                    children: [
+                      Icon(Icons.image_outlined, size: 20),
+                      SizedBox(width: 12),
+                      Text('编辑图像'),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: _EmbyPcMediaAction.refreshMetadata,
+                  child: Row(
+                    children: [
+                      Icon(Icons.refresh_outlined, size: 20),
+                      SizedBox(width: 12),
+                      Text('刷新元数据'),
+                    ],
+                  ),
+                ),
+              ],
+              child: SizedBox.square(
+                dimension: 38,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.62),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.more_horiz,
+                    size: 23,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     ],
   );
 
