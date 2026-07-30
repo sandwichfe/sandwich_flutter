@@ -100,30 +100,21 @@ class _GlobalSearchDialogState extends State<_GlobalSearchDialog> {
             reduceMotion ? Duration.zero : const Duration(milliseconds: 180),
         curve: Curves.easeOutCubic,
         width: double.infinity,
-        height: hasQuery ? 560 : 78,
+        height: hasQuery ? 560 : 60,
         child: Material(
           color: colors.surface,
           surfaceTintColor: Colors.transparent,
-          elevation: 24,
-          shadowColor: colors.shadow.withValues(alpha: 0.28),
-          borderRadius: BorderRadius.circular(8),
+          elevation: 8,
+          shadowColor: colors.shadow.withValues(alpha: 0.18),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide(color: colors.outlineVariant),
+          ),
           clipBehavior: Clip.antiAlias,
           child: Column(
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 12, 14),
-                child: Row(
-                  children: [
-                    Expanded(child: _buildSearchField(context)),
-                    const SizedBox(width: 8),
-                    IconButton(
-                      tooltip: '关闭搜索',
-                      onPressed: () => Navigator.of(context).maybePop(),
-                      icon: const Icon(Icons.close_rounded),
-                    ),
-                  ],
-                ),
-              ),
+              // 输入区直接作为浮层头部，避免再套一层带边框的输入容器。
+              SizedBox(height: 60, child: _buildSearchField(context)),
               if (hasQuery) ...[
                 Divider(height: 1, color: colors.outlineVariant),
                 Expanded(child: _buildBody(context)),
@@ -137,45 +128,43 @@ class _GlobalSearchDialogState extends State<_GlobalSearchDialog> {
 
   Widget _buildSearchField(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minHeight: 46),
-      child: TextField(
-        controller: _controller,
-        focusNode: _focusNode,
-        autofocus: true,
-        textInputAction: TextInputAction.search,
-        onChanged: _scheduleSearch,
-        onSubmitted: _startSearch,
-        decoration: InputDecoration(
-          isDense: true,
-          filled: true,
-          fillColor: colors.surfaceContainerLow,
-          hintText: '搜索电影、剧集、视频和演员',
-          prefixIcon: const Icon(Icons.search_rounded, size: 20),
-          suffixIcon:
-              _loading
-                  ? const Center(
-                    child: SizedBox.square(
-                      dimension: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  )
-                  : _controller.text.trim().isEmpty
-                  ? null
-                  : IconButton(
-                    tooltip: '清除搜索',
-                    onPressed: _clearSearch,
-                    icon: const Icon(Icons.clear_rounded, size: 18),
+    return TextField(
+      controller: _controller,
+      focusNode: _focusNode,
+      autofocus: true,
+      textInputAction: TextInputAction.search,
+      onChanged: _scheduleSearch,
+      onSubmitted: _startSearch,
+      decoration: InputDecoration(
+        isDense: true,
+        hintText: '搜索媒体库',
+        prefixIcon: const Icon(Icons.search_rounded, size: 20),
+        // 图标约束与头部等高，使 InputDecorator 的焦点边框完整铺满头部。
+        prefixIconConstraints: const BoxConstraints(
+          minWidth: 48,
+          minHeight: 60,
+        ),
+        suffixIcon:
+            _loading
+                ? const Center(
+                  child: SizedBox.square(
+                    dimension: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
                   ),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
-          enabledBorder: OutlineInputBorder(
-            borderSide: BorderSide(color: colors.outlineVariant),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderSide: BorderSide(color: colors.primary, width: 1.4),
-            borderRadius: BorderRadius.circular(6),
-          ),
+                )
+                : _controller.text.trim().isEmpty
+                ? null
+                : IconButton(
+                  tooltip: '清除搜索',
+                  onPressed: _clearSearch,
+                  icon: const Icon(Icons.clear_rounded, size: 18),
+                ),
+        border: InputBorder.none,
+        enabledBorder: InputBorder.none,
+        // 焦点边框与浮层外沿重合，保留键盘导航反馈而不增加容器层级。
+        focusedBorder: OutlineInputBorder(
+          borderSide: BorderSide(color: colors.primary, width: 1.4),
+          borderRadius: BorderRadius.circular(8),
         ),
       ),
     );
@@ -381,4 +370,3 @@ class _GlobalSearchListTile extends StatelessWidget {
     _ => type,
   };
 }
-

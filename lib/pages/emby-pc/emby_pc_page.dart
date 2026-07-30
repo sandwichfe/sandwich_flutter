@@ -417,18 +417,18 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       useRootNavigator: false,
       barrierDismissible: true,
       barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-      barrierColor: const Color(0x52000000),
+      barrierColor: const Color(0x47000000),
       transitionDuration: reduceMotion
           ? Duration.zero
           : const Duration(milliseconds: 220),
       pageBuilder: (_, _, _) => SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.fromLTRB(24, 80, 24, 24),
           child: Align(
-            // 搜索浮层固定在页面上方，查询前后保持位置稳定。
+            // 搜索浮层在顶部保留呼吸空间，查询前后保持位置稳定。
             alignment: Alignment.topCenter,
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 720, maxHeight: 640),
+              constraints: const BoxConstraints(maxWidth: 580, maxHeight: 640),
               child: const _GlobalSearchDialog(),
             ),
           ),
