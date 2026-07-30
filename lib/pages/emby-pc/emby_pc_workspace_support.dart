@@ -294,6 +294,705 @@ class _LibraryMenuEntry extends StatelessWidget {
   );
 }
 
+class _ItemMetadataDialog extends StatefulWidget {
+  final String itemId;
+  final Map<String, dynamic> item;
+
+  const _ItemMetadataDialog({required this.itemId, required this.item});
+
+  @override
+  State<_ItemMetadataDialog> createState() => _ItemMetadataDialogState();
+}
+
+class _ItemMetadataDialogState extends State<_ItemMetadataDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _titleController;
+  late final TextEditingController _dateCreatedController;
+  late final TextEditingController _ratingController;
+  late final TextEditingController _overviewController;
+  late final TextEditingController _premiereDateController;
+  late final TextEditingController _imdbController;
+  late final TextEditingController _tmdbController;
+  late final TextEditingController _tvdbController;
+  late final TextEditingController _genresController;
+  late final TextEditingController _tagsController;
+  late List<_EditablePerson> _people;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final providerIds = _map(widget.item['ProviderIds']);
+    _titleController = TextEditingController(text: _text(widget.item['Name']));
+    _dateCreatedController = TextEditingController(
+      text: _formatDate(_text(widget.item['DateCreated']), includeTime: true),
+    );
+    _ratingController = TextEditingController(
+      text: _numberText(widget.item['CommunityRating']),
+    );
+    _overviewController = TextEditingController(
+      text: _text(widget.item['Overview']),
+    );
+    _premiereDateController = TextEditingController(
+      text: _formatDate(_text(widget.item['PremiereDate'])),
+    );
+    _imdbController = TextEditingController(text: _text(providerIds['Imdb']));
+    _tmdbController = TextEditingController(
+      text: _text(providerIds['Tmdb'] ?? providerIds['MovieDb']),
+    );
+    _tvdbController = TextEditingController(text: _text(providerIds['Tvdb']));
+    _genresController = TextEditingController(
+      text: _stringList(widget.item['Genres']).join(', '),
+    );
+    _tagsController = TextEditingController(
+      text: _stringList(widget.item['Tags']).join(', '),
+    );
+    _people = _mapList(
+      widget.item['People'],
+    ).map(_EditablePerson.fromJson).toList();
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _dateCreatedController.dispose();
+    _ratingController.dispose();
+    _overviewController.dispose();
+    _premiereDateController.dispose();
+    _imdbController.dispose();
+    _tmdbController.dispose();
+    _tvdbController.dispose();
+    _genresController.dispose();
+    _tagsController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickDate(
+    TextEditingController controller, {
+    bool includeTime = false,
+  }) async {
+    final current = DateTime.tryParse(controller.text.trim()) ?? DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      initialDate: current,
+      firstDate: DateTime(1900),
+      lastDate: DateTime(2100),
+    );
+    if (date == null || !mounted) return;
+    var selected = date;
+    if (includeTime) {
+      final time = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay.fromDateTime(current),
+      );
+      if (time == null || !mounted) return;
+      selected = DateTime(
+        date.year,
+        date.month,
+        date.day,
+        time.hour,
+        time.minute,
+        current.second,
+      );
+    }
+    setState(() {
+      controller.text = _formatLocalDate(selected, includeTime: includeTime);
+    });
+  }
+
+  Future<void> _editPerson([int? index]) async {
+    final person = await showDialog<_EditablePerson>(
+      context: context,
+      builder: (context) => _PersonEditorDialog(
+        person: index == null ? null : _people[index],
+      ),
+    );
+    if (person == null || !mounted) return;
+    setState(() {
+      if (index == null) {
+        _people.add(person);
+      } else {
+        _people[index] = person;
+      }
+    });
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate() || _saving) return;
+    setState(() => _saving = true);
+    final updated = Map<String, dynamic>.from(widget.item);
+    final providerIds = _map(widget.item['ProviderIds']);
+    _setProviderId(providerIds, 'Imdb', _imdbController.text);
+    _setProviderId(providerIds, 'Tmdb', _tmdbController.text);
+    providerIds.remove('MovieDb');
+    _setProviderId(providerIds, 'Tvdb', _tvdbController.text);
+    final premiereDate = DateTime.tryParse(_premiereDateController.text.trim());
+    updated
+      ..['Name'] = _titleController.text.trim()
+      ..['DateCreated'] = _isoDate(
+        _dateCreatedController.text,
+        includeTime: true,
+      )
+      ..['CommunityRating'] = double.tryParse(_ratingController.text.trim())
+      ..['Overview'] = _overviewController.text.trim()
+      ..['PremiereDate'] = _isoDate(_premiereDateController.text)
+      // 发行年份是发行日期的派生字段，两者需要同步保存。
+      ..['ProductionYear'] = premiereDate?.year
+      ..['ProviderIds'] = providerIds
+      ..['Genres'] = _splitValues(_genresController.text)
+      ..['People'] = _people.map((person) => person.toJson()).toList()
+      ..['Tags'] = _splitValues(_tagsController.text);
+    try {
+      await EmbyPcService.instance.updateItemMetadata(widget.itemId, updated);
+      if (mounted) Navigator.pop(context, true);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(error.toString())));
+      setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final dialogWidth = (size.width - 32).clamp(320.0, 920.0).toDouble();
+    final dialogHeight = (size.height - 32).clamp(460.0, 820.0).toDouble();
+    return Dialog(
+      insetPadding: const EdgeInsets.all(16),
+      child: SizedBox(
+        width: dialogWidth,
+        height: dialogHeight,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 20, 8),
+              child: Row(
+                children: [
+                  IconButton(
+                    tooltip: '关闭',
+                    onPressed: _saving ? null : () => Navigator.pop(context),
+                    icon: const Icon(Icons.close),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '编辑元数据 · ${_titleController.text}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: AbsorbPointer(
+                absorbing: _saving,
+                child: Form(
+                  key: _formKey,
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(20),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final fieldWidth = constraints.maxWidth >= 700
+                            ? (constraints.maxWidth - 16) / 2
+                            : constraints.maxWidth;
+                        return Wrap(
+                        spacing: 16,
+                        runSpacing: 16,
+                        children: [
+                          SizedBox(
+                            width: fieldWidth,
+                            child: TextFormField(
+                              controller: _titleController,
+                              decoration: const InputDecoration(
+                                labelText: '标题',
+                                border: OutlineInputBorder(),
+                              ),
+                              validator: (value) =>
+                                  value == null || value.trim().isEmpty
+                                      ? '请输入标题'
+                                      : null,
+                            ),
+                          ),
+                          SizedBox(
+                            width: fieldWidth,
+                            child: _dateField(
+                              controller: _dateCreatedController,
+                              label: '加入日期',
+                              includeTime: true,
+                            ),
+                          ),
+                          SizedBox(
+                            width: fieldWidth,
+                            child: TextFormField(
+                              controller: _ratingController,
+                              keyboardType: const TextInputType.numberWithOptions(
+                                decimal: true,
+                              ),
+                              decoration: const InputDecoration(
+                                labelText: '影视评分',
+                                hintText: '0 - 10',
+                                border: OutlineInputBorder(),
+                              ),
+                              validator: _validateRating,
+                            ),
+                          ),
+                          SizedBox(
+                            width: fieldWidth,
+                            child: _dateField(
+                              controller: _premiereDateController,
+                              label: '发行日期',
+                            ),
+                          ),
+                          SizedBox(
+                            width: constraints.maxWidth,
+                            child: TextFormField(
+                              controller: _overviewController,
+                              minLines: 4,
+                              maxLines: 7,
+                              decoration: const InputDecoration(
+                                labelText: '概要',
+                                alignLabelWithHint: true,
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: fieldWidth,
+                            child: TextFormField(
+                              controller: _imdbController,
+                              decoration: const InputDecoration(
+                                labelText: 'IMDb',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: fieldWidth,
+                            child: TextFormField(
+                              controller: _tmdbController,
+                              decoration: const InputDecoration(
+                                labelText: 'TMDB / MovieDB',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: fieldWidth,
+                            child: TextFormField(
+                              controller: _tvdbController,
+                              decoration: const InputDecoration(
+                                labelText: 'TVDB',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: fieldWidth,
+                            child: TextFormField(
+                              controller: _genresController,
+                              decoration: const InputDecoration(
+                                labelText: '类型',
+                                hintText: '多个类型用逗号分隔',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: constraints.maxWidth,
+                            child: _buildPeopleSection(context),
+                          ),
+                          SizedBox(
+                            width: constraints.maxWidth,
+                            child: TextFormField(
+                              controller: _tagsController,
+                              decoration: const InputDecoration(
+                                labelText: '标签',
+                                hintText: '多个标签用逗号分隔',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                        ],
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: _saving ? null : () => Navigator.pop(context),
+                    child: const Text('取消'),
+                  ),
+                  const SizedBox(width: 10),
+                  FilledButton.icon(
+                    onPressed: _saving ? null : _save,
+                    icon: _saving
+                        ? const SizedBox.square(
+                            dimension: 17,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.save_outlined, size: 19),
+                    label: Text(_saving ? '保存中...' : '保存'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _dateField({
+    required TextEditingController controller,
+    required String label,
+    bool includeTime = false,
+  }) => TextFormField(
+    controller: controller,
+    readOnly: true,
+    onTap: _saving
+        ? null
+        : () => _pickDate(controller, includeTime: includeTime),
+    decoration: InputDecoration(
+      labelText: label,
+      border: const OutlineInputBorder(),
+      suffixIcon: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (controller.text.isNotEmpty)
+            IconButton(
+              tooltip: '清除$label',
+              onPressed: _saving
+                  ? null
+                  : () => setState(() => controller.clear()),
+              icon: const Icon(Icons.clear, size: 19),
+            ),
+          IconButton(
+            tooltip: '选择$label',
+            onPressed: _saving
+                ? null
+                : () => _pickDate(controller, includeTime: includeTime),
+            icon: const Icon(Icons.calendar_today_outlined, size: 19),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Widget _buildPeopleSection(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: colors.outlineVariant),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    '演员',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: _saving ? null : _editPerson,
+                  icon: const Icon(Icons.add, size: 19),
+                  label: const Text('添加'),
+                ),
+              ],
+            ),
+          ),
+          if (_people.isEmpty)
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 8, 16, 18),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('暂无演员'),
+              ),
+            )
+          else
+            ...List.generate(_people.length, (index) {
+              final person = _people[index];
+              return Column(
+                children: [
+                  const Divider(height: 1),
+                  ListTile(
+                    title: Text(person.name),
+                    subtitle: Text(
+                      [
+                        person.role,
+                        _personTypeLabel(person.type),
+                      ].where((value) => value.isNotEmpty).join(' · '),
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: '编辑演员',
+                          onPressed: _saving ? null : () => _editPerson(index),
+                          icon: const Icon(Icons.edit_outlined),
+                        ),
+                        IconButton(
+                          tooltip: '移除演员',
+                          onPressed: _saving
+                              ? null
+                              : () => setState(() => _people.removeAt(index)),
+                          icon: const Icon(Icons.remove_circle_outline),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            }),
+        ],
+      ),
+    );
+  }
+
+  String? _validateRating(String? value) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) return null;
+    final rating = double.tryParse(text);
+    if (rating == null || rating < 0 || rating > 10) {
+      return '请输入 0 到 10 之间的评分';
+    }
+    return null;
+  }
+}
+
+class _EditablePerson {
+  final Map<String, dynamic> source;
+  final String name;
+  final String role;
+  final String type;
+
+  const _EditablePerson({
+    required this.source,
+    required this.name,
+    required this.role,
+    required this.type,
+  });
+
+  factory _EditablePerson.fromJson(Map<String, dynamic> json) => _EditablePerson(
+    source: Map<String, dynamic>.from(json),
+    name: _text(json['Name']),
+    role: _text(json['Role']),
+    type: _text(json['Type']).isEmpty ? 'Actor' : _text(json['Type']),
+  );
+
+  Map<String, dynamic> toJson() => Map<String, dynamic>.from(source)
+    ..['Name'] = name
+    ..['Role'] = role
+    ..['Type'] = type;
+}
+
+class _PersonEditorDialog extends StatefulWidget {
+  final _EditablePerson? person;
+
+  const _PersonEditorDialog({this.person});
+
+  @override
+  State<_PersonEditorDialog> createState() => _PersonEditorDialogState();
+}
+
+class _PersonEditorDialogState extends State<_PersonEditorDialog> {
+  static const _personTypes = [
+    'Actor',
+    'Director',
+    'Writer',
+    'Producer',
+    'GuestStar',
+    'Composer',
+    'Conductor',
+    'Lyricist',
+  ];
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _nameController;
+  late final TextEditingController _roleController;
+  late String _type;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.person?.name ?? '');
+    _roleController = TextEditingController(text: widget.person?.role ?? '');
+    final initialType = widget.person?.type ?? 'Actor';
+    _type = _personTypes.contains(initialType) ? initialType : 'Actor';
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _roleController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(widget.person == null ? '添加演员' : '编辑演员'),
+    content: SizedBox(
+      width: 460,
+      child: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              controller: _nameController,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: '名称',
+                border: OutlineInputBorder(),
+              ),
+              validator: (value) => value == null || value.trim().isEmpty
+                  ? '请输入名称'
+                  : null,
+            ),
+            const SizedBox(height: 14),
+            TextFormField(
+              controller: _roleController,
+              decoration: const InputDecoration(
+                labelText: '角色',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 14),
+            DropdownButtonFormField<String>(
+              initialValue: _type,
+              decoration: const InputDecoration(
+                labelText: '类型',
+                border: OutlineInputBorder(),
+              ),
+              items: _personTypes
+                  .map(
+                    (type) => DropdownMenuItem(
+                      value: type,
+                      child: Text(_personTypeLabel(type)),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                if (value != null) setState(() => _type = value);
+              },
+            ),
+          ],
+        ),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('取消'),
+      ),
+      FilledButton(
+        onPressed: () {
+          if (!_formKey.currentState!.validate()) return;
+          Navigator.pop(
+            context,
+            _EditablePerson(
+              source: widget.person?.source ?? const {},
+              name: _nameController.text.trim(),
+              role: _roleController.text.trim(),
+              type: _type,
+            ),
+          );
+        },
+        child: const Text('确定'),
+      ),
+    ],
+  );
+}
+
+Map<String, dynamic> _map(dynamic value) => value is Map
+    ? value.map((key, value) => MapEntry(key.toString(), value))
+    : <String, dynamic>{};
+
+List<Map<String, dynamic>> _mapList(dynamic value) => value is List
+    ? value.whereType<Map>().map(_map).toList()
+    : <Map<String, dynamic>>[];
+
+List<String> _stringList(dynamic value) => value is List
+    ? value
+          .map((entry) => entry.toString().trim())
+          .where((entry) => entry.isNotEmpty)
+          .toList()
+    : <String>[];
+
+String _text(dynamic value) => value?.toString().trim() ?? '';
+
+String _numberText(dynamic value) {
+  if (value is num) {
+    return value == value.roundToDouble() ? '${value.toInt()}' : '$value';
+  }
+  return _text(value);
+}
+
+String _formatDate(String value, {bool includeTime = false}) {
+  final parsed = DateTime.tryParse(value);
+  if (parsed == null) return '';
+  return _formatLocalDate(parsed.toLocal(), includeTime: includeTime);
+}
+
+String _formatLocalDate(DateTime value, {bool includeTime = false}) {
+  String twoDigits(int number) => number.toString().padLeft(2, '0');
+  final date = '${value.year}-${twoDigits(value.month)}-${twoDigits(value.day)}';
+  if (!includeTime) return date;
+  return '$date ${twoDigits(value.hour)}:${twoDigits(value.minute)}:'
+      '${twoDigits(value.second)}';
+}
+
+String? _isoDate(String value, {bool includeTime = false}) {
+  final parsed = DateTime.tryParse(value.trim());
+  if (parsed == null) return null;
+  if (includeTime) return parsed.toUtc().toIso8601String();
+  return DateTime.utc(parsed.year, parsed.month, parsed.day).toIso8601String();
+}
+
+List<String> _splitValues(String value) => value
+    .split(RegExp(r'[,，]'))
+    .map((entry) => entry.trim())
+    .where((entry) => entry.isNotEmpty)
+    .toSet()
+    .toList();
+
+void _setProviderId(Map<String, dynamic> ids, String key, String value) {
+  final normalized = value.trim();
+  if (normalized.isEmpty) {
+    ids.remove(key);
+  } else {
+    ids[key] = normalized;
+  }
+}
+
+String _personTypeLabel(String type) => switch (type) {
+  'Actor' => '演员',
+  'Director' => '导演',
+  'Writer' => '编剧',
+  'Producer' => '制片',
+  'GuestStar' => '客串明星',
+  'Composer' => '作曲家',
+  'Conductor' => '指挥',
+  'Lyricist' => '作词人',
+  _ => type,
+};
+
 class _MetadataRefreshOptions {
   final String mode;
   final bool replaceImages;
@@ -383,35 +1082,35 @@ class _MetadataRefreshDialogState extends State<_MetadataRefreshDialog> {
   );
 }
 
-class _LibraryImageSlot {
+class _ItemImageSlot {
   final String type;
   final String label;
 
-  const _LibraryImageSlot(this.type, this.label);
+  const _ItemImageSlot(this.type, this.label);
 }
 
-const _libraryImageSlots = [
-  _LibraryImageSlot('Primary', '海报'),
-  _LibraryImageSlot('Logo', '徽标'),
-  _LibraryImageSlot('Thumb', '缩略图'),
-  _LibraryImageSlot('Banner', '横幅图'),
-  _LibraryImageSlot('Disc', '光盘封面'),
-  _LibraryImageSlot('Art', '艺术图'),
+const _itemImageSlots = [
+  _ItemImageSlot('Primary', '海报'),
+  _ItemImageSlot('Logo', '徽标'),
+  _ItemImageSlot('Thumb', '缩略图'),
+  _ItemImageSlot('Banner', '横幅图'),
+  _ItemImageSlot('Disc', '光盘封面'),
+  _ItemImageSlot('Art', '艺术图'),
 ];
 
 // Emby 允许同一项目保存多张背景图，不能像其他类型一样压缩成单个槽位。
-const _backdropImageSlot = _LibraryImageSlot('Backdrop', '背景图');
+const _backdropImageSlot = _ItemImageSlot('Backdrop', '背景图');
 
-class _LibraryImagesDialog extends StatefulWidget {
-  final EmbyPcItem library;
+class _ItemImagesDialog extends StatefulWidget {
+  final EmbyPcItem item;
 
-  const _LibraryImagesDialog({required this.library});
+  const _ItemImagesDialog({required this.item});
 
   @override
-  State<_LibraryImagesDialog> createState() => _LibraryImagesDialogState();
+  State<_ItemImagesDialog> createState() => _ItemImagesDialogState();
 }
 
-class _LibraryImagesDialogState extends State<_LibraryImagesDialog> {
+class _ItemImagesDialogState extends State<_ItemImagesDialog> {
   List<EmbyPcImageInfo> _images = const [];
   final Set<String> _busyTypes = {};
   bool _loading = true;
@@ -429,7 +1128,7 @@ class _LibraryImagesDialogState extends State<_LibraryImagesDialog> {
     if (showProgress && mounted) setState(() => _loading = true);
     try {
       final images = await EmbyPcService.instance.getItemImages(
-        widget.library.id,
+        widget.item.id,
       );
       if (!mounted) return;
       setState(() {
@@ -457,7 +1156,7 @@ class _LibraryImagesDialogState extends State<_LibraryImagesDialog> {
   }
 
   Future<void> _upload(
-    _LibraryImageSlot slot,
+    _ItemImageSlot slot,
     EmbyPcImageInfo? currentImage,
   ) async {
     if (_busyTypes.contains(slot.type)) return;
@@ -477,7 +1176,7 @@ class _LibraryImagesDialogState extends State<_LibraryImagesDialog> {
     setState(() => _busyTypes.add(slot.type));
     try {
       await EmbyPcService.instance.uploadItemImage(
-        widget.library.id,
+        widget.item.id,
         type: slot.type,
         index: currentImage?.index,
         bytes: bytes,
@@ -494,7 +1193,7 @@ class _LibraryImagesDialogState extends State<_LibraryImagesDialog> {
     }
   }
 
-  Future<void> _delete(_LibraryImageSlot slot, EmbyPcImageInfo image) async {
+  Future<void> _delete(_ItemImageSlot slot, EmbyPcImageInfo image) async {
     if (_busyTypes.contains(slot.type)) return;
     final confirmed = await showDialog<bool>(
       context: context,
@@ -518,7 +1217,7 @@ class _LibraryImagesDialogState extends State<_LibraryImagesDialog> {
     setState(() => _busyTypes.add(slot.type));
     try {
       await EmbyPcService.instance.deleteItemImage(
-        widget.library.id,
+        widget.item.id,
         type: image.type,
         index: image.index,
       );
@@ -585,7 +1284,7 @@ class _LibraryImagesDialogState extends State<_LibraryImagesDialog> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      '编辑图像 · ${widget.library.name}',
+                      '编辑图像 · ${widget.item.name}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.titleLarge,
@@ -604,9 +1303,9 @@ class _LibraryImagesDialogState extends State<_LibraryImagesDialog> {
                           padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
                           sliver: SliverGrid.builder(
                             gridDelegate: gridDelegate,
-                            itemCount: _libraryImageSlots.length,
+                            itemCount: _itemImageSlots.length,
                             itemBuilder: (context, index) {
-                              final slot = _libraryImageSlots[index];
+                              final slot = _itemImageSlots[index];
                               return _buildImageSlot(
                                 slot,
                                 _imageFor(slot.type),
@@ -703,7 +1402,7 @@ class _LibraryImagesDialogState extends State<_LibraryImagesDialog> {
   }
 
   Widget _buildImageSlot(
-    _LibraryImageSlot slot,
+    _ItemImageSlot slot,
     EmbyPcImageInfo? image, {
     String? title,
   }) {
@@ -712,7 +1411,7 @@ class _LibraryImagesDialogState extends State<_LibraryImagesDialog> {
     final imageUrl = image == null
         ? ''
         : EmbyPcService.instance.imageUrl(
-            widget.library.id,
+            widget.item.id,
             type: image.type,
             index: image.index,
             maxWidth: 520,

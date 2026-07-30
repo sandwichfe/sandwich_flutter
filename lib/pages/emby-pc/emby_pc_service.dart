@@ -269,6 +269,31 @@ class EmbyPcService {
     );
   }
 
+  Future<Map<String, dynamic>> getItemForEditing(String itemId) async {
+    const fields =
+        'Genres,Tags,People,Overview,PremiereDate,DateCreated,CommunityRating,'
+        'ProviderIds,OriginalTitle,SortName';
+    // 保存时基于服务端 DTO 修改，避免未展示字段被空值覆盖。
+    return Map<String, dynamic>.from(
+      await _get(
+        '/emby/Users/$userId/Items/$itemId',
+        query: {'Fields': fields, 'EnableUserData': 'true'},
+      ),
+    );
+  }
+
+  Future<void> updateItemMetadata(
+    String itemId,
+    Map<String, dynamic> item,
+  ) async {
+    final response = await http.post(
+      _uri('/emby/Items/$itemId'),
+      headers: {..._tokenHeader, 'Content-Type': 'application/json'},
+      body: jsonEncode(item),
+    );
+    _ensureSuccess(response, '保存元数据失败');
+  }
+
   Future<EmbyPcItem> getPersonDetail(String personId) async {
     // 人物页需要外部编号、外部链接和摘要信息，统一随详情接口返回。
     const fields =

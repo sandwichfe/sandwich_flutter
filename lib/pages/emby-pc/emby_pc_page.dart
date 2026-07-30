@@ -101,6 +101,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   int _queryVersion = 0;
   final Set<String> _favoriteBusyIds = {};
   final Set<String> _libraryActionBusyIds = {};
+  final Set<String> _mediaActionBusyIds = {};
   Timer? _loadMoreDebounceTimer;
   DateTime? _lastLoadMoreTime;
 
@@ -497,6 +498,72 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     }
   }
 
+  Future<void> _handleMediaAction(
+    EmbyPcItem item,
+    EmbyPcMediaAction action,
+  ) async {
+    if (_mediaActionBusyIds.contains(item.id)) return;
+    setState(() => _mediaActionBusyIds.add(item.id));
+    try {
+      if (action == EmbyPcMediaAction.editMetadata) {
+        final metadata = await EmbyPcService.instance.getItemForEditing(item.id);
+        if (!mounted) return;
+        final changed = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => _ItemMetadataDialog(
+            itemId: item.id,
+            item: metadata,
+          ),
+        );
+        if (changed != true || !mounted) return;
+        _showWorkspaceMessage('元数据已保存');
+        await _reloadMediaAfterChange();
+        return;
+      }
+
+      if (action == EmbyPcMediaAction.editImages) {
+        final changed = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => _ItemImagesDialog(item: item),
+        );
+        if (changed == true && mounted) await _reloadMediaAfterChange();
+        return;
+      }
+
+      final response = await EmbyPcService.instance.refreshMetadata(
+        item.id,
+        mode: 'Default',
+        replaceImages: false,
+        replaceThumbnailImages: false,
+      );
+      if (mounted) {
+        _showWorkspaceMessage(
+          response.isEmpty ? '元数据刷新请求已提交' : response,
+        );
+      }
+    } catch (error) {
+      if (mounted) _showWorkspaceMessage(error.toString());
+    } finally {
+      if (mounted) setState(() => _mediaActionBusyIds.remove(item.id));
+    }
+  }
+
+  Future<void> _reloadMediaAfterChange() async {
+    if (_view == 'home') {
+      await _loadHome(force: true);
+    } else {
+      await _loadItems(reset: true);
+    }
+  }
+
+  void _showWorkspaceMessage(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
   Future<void> _handleLibraryAction(
     EmbyPcItem library,
     _LibraryAction action,
@@ -505,7 +572,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       final changed = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
-        builder: (context) => _LibraryImagesDialog(library: library),
+        builder: (context) => _ItemImagesDialog(item: library),
       );
       if (changed == true && mounted) await _reloadLibrariesAfterImageChange();
       return;

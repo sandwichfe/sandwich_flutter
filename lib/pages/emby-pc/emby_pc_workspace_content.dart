@@ -58,11 +58,14 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
                                   ? item.lastPlayedLabel
                                   : '',
                               favoriteBusy: _favoriteBusyIds.contains(item.id),
+                              actionBusy: _mediaActionBusyIds.contains(item.id),
                               onOpen: () => _openItem(item),
                               onPlay: _view == 'favorite-people'
                                   ? null
                                   : () => _playItem(item),
                               onFavorite: () => _toggleFavorite(item),
+                              onAction: (action) =>
+                                  _handleMediaAction(item, action),
                             );
                           },
                         ),
@@ -246,8 +249,10 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
                   secondaryLabel: showLastPlayedTime
                       ? item.lastPlayedLabel
                       : '',
+                  actionBusy: _mediaActionBusyIds.contains(item.id),
                   onOpen: () => _openItem(item),
                   onPlay: () => _playItem(item),
+                  onAction: (action) => _handleMediaAction(item, action),
                 );
               },
             ),
