@@ -6,8 +6,8 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
     final colors = Theme.of(context).colorScheme;
     // 背景图卡片沿用首页约 270 x 205 的视觉比例，并放宽列宽阈值，
     // 避免临界宽度下过早增加列数。
-    final mediaGridMaxExtent = _imageStyle == 'backdrop' ? 360.0 : 220.0;
-    final mediaGridAspectRatio = _imageStyle == 'backdrop' ? 1.32 : 0.58;
+    final mediaGridMaxExtent = _imageStyle == 'backdrop' ? 336.0 : 214.0;
+    final mediaGridAspectRatio = _imageStyle == 'backdrop' ? 1.28 : 0.585;
     return ColoredBox(
       color: colors.surfaceContainerLowest,
       child: Column(
