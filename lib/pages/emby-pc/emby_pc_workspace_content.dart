@@ -245,9 +245,12 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
                   secondaryLabel: showLastPlayedTime
                       ? item.lastPlayedLabel
                       : '',
+                  favoriteBusy: _favoriteBusyIds.contains(item.id),
                   actionBusy: _mediaActionBusyIds.contains(item.id),
                   onOpen: () => _openItem(item),
                   onPlay: () => _playItem(item),
+                  // 首页横向列表与详情网格共用收藏交互。
+                  onFavorite: () => _toggleFavorite(item),
                   onAction: (action) => _handleMediaAction(item, action),
                 );
               },

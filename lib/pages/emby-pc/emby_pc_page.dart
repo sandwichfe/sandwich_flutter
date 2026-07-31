@@ -473,6 +473,24 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         _items = _items
             .map((entry) => entry.id == item.id ? updated : entry)
             .toList();
+        // 首页横向列表持有独立快照，收藏完成后同步状态以立即刷新图标。
+        _recentlyPlayed = _recentlyPlayed
+            .map(
+              (entry) => entry.id == item.id
+                  ? entry.copyWith(isFavorite: value)
+                  : entry,
+            )
+            .toList();
+        _homeLibraryItems = {
+          for (final library in _homeLibraryItems.entries)
+            library.key: library.value
+                .map(
+                  (entry) => entry.id == item.id
+                      ? entry.copyWith(isFavorite: value)
+                      : entry,
+                )
+                .toList(),
+        };
         if (!value && _view == 'favorite-movies') {
           _items = _items.where((entry) => entry.id != item.id).toList();
           _total = (_total - 1).clamp(0, 1 << 30).toInt();
