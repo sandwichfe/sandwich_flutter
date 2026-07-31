@@ -419,12 +419,10 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
           bottom: bottom,
           child: AnimatedOpacity(
             duration: const Duration(milliseconds: 200),
-            opacity:
-                (_hovered || widget.item.isFavorite || widget.favoriteBusy)
-                    ? 1
-                    : 0,
+            // 收藏状态只改变图标样式，不影响卡片操作按钮的悬浮显隐。
+            opacity: _hovered ? 1 : 0,
             child: IgnorePointer(
-              ignoring: !_hovered && !widget.item.isFavorite,
+              ignoring: !_hovered,
               child: IconButton.filledTonal(
                 tooltip: widget.item.isFavorite ? '取消收藏' : '收藏',
                 onPressed: widget.favoriteBusy ? null : widget.onFavorite,
