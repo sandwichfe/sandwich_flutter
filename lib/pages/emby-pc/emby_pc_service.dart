@@ -251,6 +251,41 @@ class EmbyPcService {
     );
   }
 
+  // Keep the continue-watching request aligned with Emby Web's Items/Resume endpoint.
+  Future<EmbyPcPage> getResumeItems({
+    int startIndex = 0,
+    int? limit,
+    String itemType = '',
+    String searchTerm = '',
+    int? productionYear,
+    String sortBy = '',
+    String sortOrder = '',
+  }) async {
+    final query = <String, String>{
+      'Recursive': 'true',
+      'MediaTypes': 'Video',
+      'Fields':
+          'BasicSyncInfo,CanDelete,CanDownload,PrimaryImageAspectRatio,'
+          'ProgramPrimaryImageAspectRatio,ProductionYear,Status,EndDate',
+      'ImageTypeLimit': '1',
+      'EnableImageTypes': 'Primary,Backdrop,Thumb,Logo',
+    };
+    if (startIndex > 0) query['StartIndex'] = '$startIndex';
+    if (limit != null) query['Limit'] = '${limit.clamp(1, 100)}';
+    if (itemType.isNotEmpty) query['IncludeItemTypes'] = itemType;
+    if (searchTerm.trim().isNotEmpty) query['SearchTerm'] = searchTerm.trim();
+    if (productionYear != null) query['Years'] = '$productionYear';
+    // DatePlayed descending is Emby Web's default Resume ordering.
+    if (sortBy.isNotEmpty &&
+        !(sortBy == 'DatePlayed' && sortOrder == 'Descending')) {
+      query['SortBy'] = sortBy;
+      if (sortOrder.isNotEmpty) query['SortOrder'] = sortOrder;
+    }
+    return EmbyPcPage.fromJson(
+      await _get('/emby/Users/$userId/Items/Resume', query: query),
+    );
+  }
+
   Future<EmbyPcPage> searchItems(String searchTerm, {int limit = 60}) async {
     final queryText = searchTerm.trim();
     if (queryText.isEmpty) {

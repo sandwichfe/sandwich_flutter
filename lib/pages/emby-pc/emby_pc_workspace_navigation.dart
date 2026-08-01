@@ -4,7 +4,7 @@ part of 'emby_pc_page.dart';
 extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
   String get _pageTitle {
     if (_view == 'home') return '首页';
-    if (_view == 'recently-played') return '播放记录';
+    if (_view == 'recently-played') return '继续观看';
     if (_view == 'favorite-movies') return '收藏影片';
     if (_view == 'favorite-people') return '收藏演员';
     for (final library in _libraries) {
@@ -298,7 +298,7 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
                   ),
                   _SidebarButton(
                     icon: Icons.history_rounded,
-                    title: '播放记录',
+                    title: '继续观看',
                     count: null,
                     showCount: false,
                     active: _view == 'recently-played',

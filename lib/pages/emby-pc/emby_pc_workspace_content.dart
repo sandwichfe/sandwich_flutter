@@ -126,7 +126,7 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
         SliverToBoxAdapter(
           child: _buildHomeMediaSection(
             context,
-            title: '播放记录',
+            title: '继续观看',
             items: _recentlyPlayed,
             showLastPlayedTime: true,
             onOpenSection: _selectRecentlyPlayed,

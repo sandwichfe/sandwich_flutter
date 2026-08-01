@@ -153,14 +153,9 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       _homeError = '';
     });
     try {
-      // 首页数据彼此独立，首次进入时并行获取最近播放和各媒体库前十条。
+      // 首页数据彼此独立，首次进入时并行获取继续观看和各媒体库前十条。
       final results = await Future.wait<EmbyPcPage>([
-        EmbyPcService.instance.getItems(
-          filters: 'IsPlayed',
-          limit: 10,
-          sortBy: 'DatePlayed',
-          sortOrder: 'Descending',
-        ),
+        EmbyPcService.instance.getResumeItems(),
         ...libraries.map(
           (library) =>
               EmbyPcService.instance.getItems(libraryId: library.id, limit: 10),
@@ -272,24 +267,35 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       setState(() => _loadingMore = true);
     }
     try {
-      final page = await EmbyPcService.instance.getItems(
-        libraryId: _view == 'library' ? _activeId : '',
-        favoriteOnly: _view == 'favorite-movies' || _view == 'favorite-people',
-        startIndex: reset ? 0 : _items.length,
-        itemType: _view == 'favorite-people' ? 'Person' : _itemType,
-        filters: _view == 'favorite-movies' || _view == 'favorite-people'
-            ? ''
-            : <String>[
-                // 播放记录始终限定已播放项目，确保分页结果与首页摘要一致。
-                _view == 'recently-played' ? 'IsPlayed' : _statusFilter,
-                _markFilter,
-              ].where((value) => value.isNotEmpty).join(','),
-        videoType: _videoType,
-        searchTerm: _searchController.text,
-        productionYear: int.tryParse(_yearController.text.trim()),
-        sortBy: _sortBy,
-        sortOrder: _sortOrder,
-      );
+      final page = _view == 'recently-played'
+          ? await EmbyPcService.instance.getResumeItems(
+              startIndex: reset ? 0 : _items.length,
+              limit: 100,
+              itemType: _itemType,
+              searchTerm: _searchController.text,
+              productionYear: int.tryParse(_yearController.text.trim()),
+              sortBy: _sortBy,
+              sortOrder: _sortOrder,
+            )
+          : await EmbyPcService.instance.getItems(
+              libraryId: _view == 'library' ? _activeId : '',
+              favoriteOnly:
+                  _view == 'favorite-movies' || _view == 'favorite-people',
+              startIndex: reset ? 0 : _items.length,
+              itemType: _view == 'favorite-people' ? 'Person' : _itemType,
+              filters: _view == 'favorite-movies' || _view == 'favorite-people'
+                  ? ''
+                  : <String>[
+                      // 非继续观看列表保留原有的状态和标记筛选。
+                      _statusFilter,
+                      _markFilter,
+                    ].where((value) => value.isNotEmpty).join(','),
+              videoType: _videoType,
+              searchTerm: _searchController.text,
+              productionYear: int.tryParse(_yearController.text.trim()),
+              sortBy: _sortBy,
+              sortOrder: _sortOrder,
+            );
       if (!mounted || requestVersion != _queryVersion) return;
       setState(() {
         _items = reset ? page.items : [..._items, ...page.items];
@@ -379,7 +385,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       _view = 'recently-played';
       _activeId = '';
       _resetQueryControllers();
-      // 首次进入播放记录时按最近播放时间倒序展示。
+      // Resume uses Emby Web's default DatePlayed descending order.
       _sortBy = 'DatePlayed';
       _sortOrder = 'Descending';
     });
