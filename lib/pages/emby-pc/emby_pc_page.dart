@@ -712,8 +712,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     );
   }
 
-  void _playItem(EmbyPcItem item) {
-    Navigator.of(context).push(
+  Future<void> _playItem(EmbyPcItem item) async {
+    final played = await Navigator.of(context).push<bool>(
       embyPcFadeRoute(
         context,
         (_) => EmbyPcPlayerPage(
@@ -722,6 +722,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         ),
       ),
     );
+    // 直接播放返回后刷新当前工作台视图，避免继续显示旧的播放进度。
+    if (played == true && mounted) await _reloadMediaAfterChange();
   }
 
   @override

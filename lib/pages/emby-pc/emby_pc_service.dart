@@ -1,10 +1,14 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'emby_pc_models.dart';
+
+// 三类播放上报使用不同接口和请求字段，避免服务端错误关联播放会话。
+enum EmbyPcPlaybackEvent { started, progress, stopped }
 
 // 桌面端使用独立会话，避免覆盖现有移动端 Emby 页面的登录状态。
 class EmbyPcService {
@@ -393,6 +397,7 @@ class EmbyPcService {
         'v': '$_userAvatarRevision',
       }).toString();
 
+  // 静态放流保持最小参数集，兼容不接受播放会话查询参数的 Emby 版本。
   String streamUrl(String itemId) => _uri('/emby/Videos/$itemId/stream', {
     'api_key': accessToken,
     'static': 'true',
@@ -415,30 +420,52 @@ class EmbyPcService {
     }
   }
 
-  // 播放器周期性上报位置，Emby 才能在下次打开时计算“继续播放”。
+  // 播放器使用同一个播放会话上报开始、进度和停止，Emby 才能可靠保存进度。
   Future<void> reportPlayback({
     required String itemId,
-    required String eventPath,
+    required String mediaSourceId,
+    required String playSessionId,
+    required EmbyPcPlaybackEvent event,
     required int positionTicks,
     required bool paused,
+    required bool muted,
+    required int volumeLevel,
+    required bool canSeek,
+    String progressEventName = 'TimeUpdate',
   }) async {
-    try {
-      final response = await http.post(
-        _uri('/emby$eventPath'),
-        headers: {..._tokenHeader, 'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'ItemId': itemId,
-          'UserId': userId,
-          'PositionTicks': positionTicks,
-          'IsPaused': paused,
-          'IsMuted': false,
-          'PlayMethod': 'DirectPlay',
-          'EventName': 'TimeUpdate',
-        }),
-      );
-      // 进度上报失败不能影响本地播放，因此只忽略非成功响应。
-      if (response.statusCode < 200 || response.statusCode >= 300) return;
-    } catch (_) {}
+    final eventPath = switch (event) {
+      EmbyPcPlaybackEvent.started => '/emby/Sessions/Playing',
+      EmbyPcPlaybackEvent.progress => '/emby/Sessions/Playing/Progress',
+      EmbyPcPlaybackEvent.stopped => '/emby/Sessions/Playing/Stopped',
+    };
+    final body = <String, dynamic>{
+      'ItemId': itemId,
+      'UserId': userId,
+      'MediaSourceId': mediaSourceId,
+      'PlaySessionId': playSessionId,
+      'PositionTicks': positionTicks,
+      'IsPaused': paused,
+      'IsMuted': muted,
+      'VolumeLevel': volumeLevel,
+      'CanSeek': canSeek,
+      'PlayMethod': 'DirectPlay',
+      'PlaybackRate': 1,
+      // 只有停止接口使用 Failed；开始和进度接口不发送无关字段。
+      if (event == EmbyPcPlaybackEvent.stopped) 'Failed': false,
+      // EventName 属于进度请求，开始和停止请求不再固定伪装成 TimeUpdate。
+      if (event == EmbyPcPlaybackEvent.progress)
+        'EventName': progressEventName,
+    };
+    final response = await http.post(
+      _uri(eventPath),
+      headers: {..._tokenHeader, 'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+    // 输出接口和状态码，失败时继续抛出异常，由播放器记录具体原因。
+    debugPrint(
+      'Emby playback ${event.name}: $eventPath HTTP ${response.statusCode}',
+    );
+    _ensureSuccess(response, '播放状态上报失败（${event.name}）');
   }
 
   Future<EmbyPcPreferences> readPreferences() async {

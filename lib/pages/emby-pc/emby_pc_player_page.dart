@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'emby_pc_models.dart';
 import 'emby_pc_service.dart';
@@ -26,7 +27,8 @@ class EmbyPcPlayerPage extends StatefulWidget {
   State<EmbyPcPlayerPage> createState() => _EmbyPcPlayerPageState();
 }
 
-class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
+class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
+    with WindowListener {
   static const double _defaultVolume = 5.0;
   // 只在当前应用进程内保存音量；应用重启后静态值会重新回到默认音量。
   static double _sessionVolume = _defaultVolume;
@@ -34,6 +36,8 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
 
   late final Player _player;
   late final VideoController _videoController;
+  late final String _playSessionId;
+  late final String _mediaSourceId;
   final List<StreamSubscription<dynamic>> _playerSubscriptions = [];
   bool _loading = true;
   bool _buffering = false;
@@ -48,6 +52,11 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
   Duration _duration = Duration.zero;
   double _aspectRatio = 16 / 9;
   Timer? _progressTimer;
+  Future<void> _playbackReportQueue = Future<void>.value();
+  bool _closing = false;
+  bool _windowClosing = false;
+  bool _allowPop = false;
+  bool _stopReportQueued = false;
   late final _ThumbnailPreviewController _thumbnailPreviewController;
   // 保持音量控件状态引用稳定，让键盘调节也能唤起同一个音量浮层。
   final GlobalKey<_VolumeControlState> _volumeControlKey =
@@ -56,6 +65,13 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
   @override
   void initState() {
     super.initState();
+    // 每次进入播放器创建独立会话，三类上报都复用该标识。
+    _playSessionId =
+        '${DateTime.now().microsecondsSinceEpoch}-${widget.item.id}';
+    // 详情数据优先使用真实媒体源，工作台精简条目则回退到媒体条目 ID。
+    _mediaSourceId = widget.item.mediaSources
+        .map((source) => source.id)
+        .firstWhere((id) => id.isNotEmpty, orElse: () => widget.item.id);
     // Use Emby's known dimensions while the native decoder is still loading.
     if (widget.item.width != null &&
         widget.item.height != null &&
@@ -64,10 +80,33 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
     }
     _player = Player();
     _videoController = VideoController(_player);
+    if (_usesWindowCloseGuard) {
+      // Windows 关闭窗口时先保留进程，等待本次播放会话完成停止上报。
+      windowManager.addListener(this);
+      unawaited(_setWindowCloseGuard(true));
+    }
     // 缩略图数据与控制层状态分离，后续可在这里接入其他 Emby 预览来源。
     _thumbnailPreviewController = _ThumbnailPreviewController();
     _listenToPlayerState();
     _initializePlayer();
+  }
+
+  bool get _usesWindowCloseGuard =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+
+  Future<void> _setWindowCloseGuard(bool enabled) async {
+    try {
+      await windowManager.setPreventClose(enabled);
+    } catch (error, stackTrace) {
+      // 窗口插件异常不能阻断播放器，但需要保留日志说明关闭保护未生效。
+      debugPrint('Windows 播放器关闭保护设置失败：$error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
+  }
+
+  @override
+  void onWindowClose() {
+    unawaited(_closeWindowAfterPlaybackReport());
   }
 
   // Keep the Flutter controls synchronized with media_kit's event streams.
@@ -185,9 +224,9 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
       if (_error.isNotEmpty) return;
       _progressTimer = Timer.periodic(
         const Duration(seconds: 10),
-        (_) => _reportProgress('/Sessions/Playing/Progress'),
+        (_) => _reportPlayback(EmbyPcPlaybackEvent.progress),
       );
-      _reportProgress('/Sessions/Playing');
+      unawaited(_reportPlayback(EmbyPcPlaybackEvent.started));
       setState(() {
         _loading = false;
         _playerReady = true;
@@ -221,20 +260,80 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
     }
   }
 
-  void _reportProgress(String eventPath) {
+  // 串行发送播放事件，确保最终进度一定排在停止事件之前到达服务端。
+  Future<void> _reportPlayback(
+    EmbyPcPlaybackEvent event, {
+    String progressEventName = 'TimeUpdate',
+  }) {
     final ticks = _player.state.position.inMicroseconds * 10;
-    EmbyPcService.instance.reportPlayback(
-      itemId: widget.item.id,
-      eventPath: eventPath,
-      positionTicks: ticks,
-      paused: !_player.state.playing,
+    final paused = !_player.state.playing;
+    final muted = _muted;
+    final volumeLevel = _volume.round().clamp(0, 100).toInt();
+    final report = _playbackReportQueue.then(
+      (_) => EmbyPcService.instance.reportPlayback(
+        itemId: widget.item.id,
+        mediaSourceId: _mediaSourceId,
+        playSessionId: _playSessionId,
+        event: event,
+        positionTicks: ticks,
+        paused: paused,
+        muted: muted,
+        volumeLevel: volumeLevel,
+        canSeek: _duration > Duration.zero || widget.item.runTimeTicks > 0,
+        progressEventName: progressEventName,
+      ),
     );
+    // 上报失败不打断本地播放，但必须保留状态码或网络异常供诊断。
+    _playbackReportQueue = report.then<void>(
+      (_) {},
+      onError: (Object error, StackTrace stackTrace) {
+        debugPrint('Emby 播放状态上报失败：$error');
+        debugPrintStack(stackTrace: stackTrace);
+      },
+    );
+    return _playbackReportQueue;
   }
 
   Future<void> _togglePlay() async {
     if (!_playerReady) return;
     _isPlaying ? await _player.pause() : await _player.play();
-    _reportProgress('/Sessions/Playing/Progress');
+    unawaited(
+      _reportPlayback(
+        EmbyPcPlaybackEvent.progress,
+        progressEventName: _player.state.playing ? 'Unpause' : 'Pause',
+      ),
+    );
+  }
+
+  // 正常返回前等待最后进度和停止事件完成，短时间播放也不再依赖 dispose 异步兜底。
+  Future<void> _closePlayer() async {
+    if (_closing) return;
+    setState(() => _closing = true);
+    await _finishPlaybackReports();
+    if (!mounted) return;
+    setState(() => _allowPop = true);
+    Navigator.of(context).pop(true);
+  }
+
+  // 关闭整个窗口时同样等待最终上报，再解除窗口保护并销毁桌面窗口。
+  Future<void> _closeWindowAfterPlaybackReport() async {
+    if (_windowClosing) return;
+    _windowClosing = true;
+    if (mounted && !_closing) setState(() => _closing = true);
+    await _finishPlaybackReports();
+    await _setWindowCloseGuard(false);
+    await windowManager.destroy();
+  }
+
+  Future<void> _finishPlaybackReports() async {
+    _progressTimer?.cancel();
+    if (!_playerReady || _stopReportQueued) {
+      await _playbackReportQueue;
+      return;
+    }
+    _stopReportQueued = true;
+    await _reportPlayback(EmbyPcPlaybackEvent.progress);
+    await _reportPlayback(EmbyPcPlaybackEvent.stopped);
   }
 
   Future<void> _toggleMute() async {
@@ -269,8 +368,16 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
 
   @override
   void dispose() {
-    if (_playerReady) _reportProgress('/Sessions/Playing/Stopped');
     _progressTimer?.cancel();
+    // 非正常移除页面时仍排入停止事件；正常返回路径已在 _closePlayer 中等待完成。
+    if (_playerReady && !_stopReportQueued) {
+      _stopReportQueued = true;
+      unawaited(_reportPlayback(EmbyPcPlaybackEvent.stopped));
+    }
+    if (_usesWindowCloseGuard) {
+      windowManager.removeListener(this);
+      unawaited(_setWindowCloseGuard(false));
+    }
     for (final subscription in _playerSubscriptions) {
       unawaited(subscription.cancel());
     }
@@ -281,14 +388,39 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
+    return PopScope<bool>(
+      canPop: _allowPop,
+      // 系统返回、键盘返回和标题栏返回都先经过同一个可等待退出流程。
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) unawaited(_closePlayer());
+      },
+      child: Scaffold(
         backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: Text(widget.item.name, overflow: TextOverflow.ellipsis),
-      ),
-      body:
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
+          leading: BackButton(
+            onPressed: _closing ? null : () => unawaited(_closePlayer()),
+          ),
+          title: Text(widget.item.name, overflow: TextOverflow.ellipsis),
+          // 退出上报期间提供明确状态，并禁用重复返回操作。
+          actions: [
+            if (_closing)
+              const Padding(
+                padding: EdgeInsets.only(right: 16),
+                child: Center(
+                  child: SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+        body:
           _loading
               ? Center(
                 child: _PlayerLoadingIndicator(
@@ -343,6 +475,7 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
                       ),
                 ),
               ),
+      ),
     );
   }
 }

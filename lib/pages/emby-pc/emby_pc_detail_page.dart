@@ -185,10 +185,10 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
     }
   }
 
-  void _play([int? positionTicks]) {
+  Future<void> _play([int? positionTicks]) async {
     final detail = _detail;
     if (detail == null) return;
-    Navigator.of(context).push(
+    final played = await Navigator.of(context).push<bool>(
       embyPcFadeRoute(
         context,
         (_) => EmbyPcPlayerPage(
@@ -197,6 +197,8 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
         ),
       ),
     );
+    // 播放器已完成停止上报后重新请求详情，立即展示服务端保存的进度。
+    if (played == true && mounted) await _loadDetail();
   }
 
   @override
