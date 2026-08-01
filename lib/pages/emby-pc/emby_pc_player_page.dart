@@ -28,15 +28,18 @@ class EmbyPcPlayerPage extends StatefulWidget {
 
 class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
   static const double _defaultVolume = 5.0;
+  // 只在当前应用进程内保存音量；应用重启后静态值会重新回到默认音量。
+  static double _sessionVolume = _defaultVolume;
+  static double _sessionVolumeBeforeMute = _defaultVolume;
 
   late final Player _player;
   late final VideoController _videoController;
   final List<StreamSubscription<dynamic>> _playerSubscriptions = [];
   bool _loading = true;
   bool _buffering = false;
-  bool _muted = false;
-  double _volume = _defaultVolume;
-  double _volumeBeforeMute = _defaultVolume;
+  bool _muted = _sessionVolume <= 0;
+  double _volume = _sessionVolume;
+  double _volumeBeforeMute = _sessionVolumeBeforeMute;
   double? _networkSpeedBytesPerSecond;
   String _error = '';
   bool _playerReady = false;
@@ -171,8 +174,8 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
         EmbyPcService.instance.streamUrl(widget.item.id),
         start: startPosition,
       );
-      // 在打开媒体前同步默认音量，避免起播瞬间短暂使用播放器的满音量默认值。
-      await _player.setVolume(_defaultVolume);
+      // 在打开媒体前同步本次运行期间的音量，避免切换视频时重置或短暂满音量。
+      await _player.setVolume(_sessionVolume);
       await _observeNetworkSpeed();
       await _player.open(media);
       if (!mounted) {
@@ -243,6 +246,9 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
       _volume = targetVolume;
       _muted = targetVolume <= 0;
     });
+    // 静音状态和最近一次非零音量都在后续视频中继续复用。
+    _sessionVolume = targetVolume;
+    _sessionVolumeBeforeMute = _volumeBeforeMute;
     await _player.setVolume(targetVolume);
   }
 
@@ -255,6 +261,9 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
       _muted = safeVolume <= 0;
       if (safeVolume > 0) _volumeBeforeMute = safeVolume;
     });
+    // 仅记录用户主动设置的音量，不把播放器初始化期间的临时状态写入会话值。
+    _sessionVolume = safeVolume;
+    if (safeVolume > 0) _sessionVolumeBeforeMute = safeVolume;
     await _player.setVolume(safeVolume);
   }
 
