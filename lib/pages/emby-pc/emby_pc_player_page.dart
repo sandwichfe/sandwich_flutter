@@ -46,6 +46,9 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
   double _aspectRatio = 16 / 9;
   Timer? _progressTimer;
   late final _ThumbnailPreviewController _thumbnailPreviewController;
+  // 保持音量控件状态引用稳定，让键盘调节也能唤起同一个音量浮层。
+  final GlobalKey<_VolumeControlState> _volumeControlKey =
+      GlobalKey<_VolumeControlState>();
 
   @override
   void initState() {
@@ -323,6 +326,7 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage> {
                         thumbnailPreviewController: _thumbnailPreviewController,
                         muted: _muted,
                         volume: _volume,
+                        volumeControlKey: _volumeControlKey,
                         onTogglePlay: _togglePlay,
                         onToggleMute: _toggleMute,
                         onVolumeChanged:
@@ -483,6 +487,7 @@ class _PlayerControls extends StatelessWidget {
   final _ThumbnailPreviewController thumbnailPreviewController;
   final bool muted;
   final double volume;
+  final GlobalKey<_VolumeControlState> volumeControlKey;
   final VoidCallback onTogglePlay;
   final VoidCallback onToggleMute;
   final ValueChanged<double> onVolumeChanged;
@@ -497,6 +502,7 @@ class _PlayerControls extends StatelessWidget {
     required this.thumbnailPreviewController,
     required this.muted,
     required this.volume,
+    required this.volumeControlKey,
     required this.onTogglePlay,
     required this.onToggleMute,
     required this.onVolumeChanged,
@@ -531,6 +537,8 @@ class _PlayerControls extends StatelessWidget {
         .clamp(0.0, 100.0)
         .toDouble();
     onVolumeChanged(targetVolume);
+    // 键盘调节后显示现有音量条，连续按键时由音量控件重新计算隐藏时间。
+    volumeControlKey.currentState?.showForKeyboardAdjustment();
   }
 
   @override
@@ -698,6 +706,7 @@ class _PlayerControls extends StatelessWidget {
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   _VolumeControl(
+                                    key: volumeControlKey,
                                     volume: volume,
                                     muted: muted,
                                     compact: compact,
@@ -824,6 +833,7 @@ class _VolumeControl extends StatefulWidget {
   final ValueChanged<double> onVolumeChanged;
 
   const _VolumeControl({
+    super.key,
     required this.volume,
     required this.muted,
     required this.compact,
@@ -840,6 +850,7 @@ class _VolumeControlState extends State<_VolumeControl> {
   OverlayEntry? _volumeOverlayEntry;
   Timer? _hideTimer;
   bool _overlayRefreshScheduled = false;
+  bool _pointerInsideVolumeArea = false;
 
   IconData get _volumeIcon {
     if (widget.muted || widget.volume <= 0) return Icons.volume_off_rounded;
@@ -855,6 +866,25 @@ class _VolumeControlState extends State<_VolumeControl> {
     final entry = OverlayEntry(builder: _buildVolumeOverlay);
     _volumeOverlayEntry = entry;
     Overlay.of(context).insert(entry);
+  }
+
+  void showForKeyboardAdjustment() {
+    _showVolumeSlider();
+    _hideTimer?.cancel();
+    // 连续按上下键时重新计时，最后一次操作后为用户保留足够的读数时间。
+    _hideTimer = Timer(const Duration(milliseconds: 1200), () {
+      if (mounted && !_pointerInsideVolumeArea) _hideVolumeSlider();
+    });
+  }
+
+  void _handlePointerEnter() {
+    _pointerInsideVolumeArea = true;
+    _showVolumeSlider();
+  }
+
+  void _handlePointerExit() {
+    _pointerInsideVolumeArea = false;
+    _scheduleHideVolumeSlider();
   }
 
   void _scheduleHideVolumeSlider() {
@@ -913,8 +943,8 @@ class _VolumeControlState extends State<_VolumeControl> {
         followerAnchor: Alignment.bottomCenter,
         offset: const Offset(0, -4),
         child: MouseRegion(
-          onEnter: (_) => _showVolumeSlider(),
-          onExit: (_) => _scheduleHideVolumeSlider(),
+          onEnter: (_) => _handlePointerEnter(),
+          onExit: (_) => _handlePointerExit(),
           child: Material(
             color: Colors.transparent,
             child: Container(
@@ -968,8 +998,8 @@ class _VolumeControlState extends State<_VolumeControl> {
     return CompositedTransformTarget(
       link: _volumeLayerLink,
       child: MouseRegion(
-        onEnter: (_) => _showVolumeSlider(),
-        onExit: (_) => _scheduleHideVolumeSlider(),
+        onEnter: (_) => _handlePointerEnter(),
+        onExit: (_) => _handlePointerExit(),
         child: Semantics(
           button: true,
           label: widget.muted ? '取消静音' : '静音',
