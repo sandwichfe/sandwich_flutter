@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
@@ -467,6 +468,12 @@ class _ThumbnailPreviewController {
 }
 
 class _PlayerControls extends StatelessWidget {
+  // 方向键使用播放器中常见的 5 秒步长，避免 10 秒跳转过于突兀。
+  static const _keyboardSeekStep = Duration(seconds: 5);
+  static const _keyboardRewindStep = Duration(seconds: -5);
+  // 每次方向键调整 5 个音量单位，与桌面端音量操作保持一致。
+  static const _keyboardVolumeStep = 5.0;
+
   final Player player;
   final Duration position;
   final Duration duration;
@@ -505,188 +512,227 @@ class _PlayerControls extends StatelessWidget {
     if (context.mounted) await toggleFullscreen(context);
   }
 
+  void _seekBy(Duration delta) {
+    final currentPosition = player.state.position;
+    final mediaDuration = player.state.duration;
+    var targetPosition = currentPosition + delta;
+    if (targetPosition < Duration.zero) {
+      targetPosition = Duration.zero;
+    } else if (mediaDuration > Duration.zero &&
+        targetPosition > mediaDuration) {
+      targetPosition = mediaDuration;
+    }
+    unawaited(player.seek(targetPosition));
+  }
+
+  void _adjustVolume(double delta) {
+    // 通过页面回调修改音量，确保键盘、滑块和静音状态使用同一份状态。
+    final targetVolume = (volume + delta)
+        .clamp(0.0, 100.0)
+        .toDouble();
+    onVolumeChanged(targetVolume);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        // 点击视频画面切换播放状态；底部控制栏位于该层上方，仍可独立响应操作。
-        Positioned.fill(
-          child: Semantics(
-            button: true,
-            label: isPlaying ? '暂停' : '播放',
-            child: MouseRegion(
-              cursor: SystemMouseCursors.click,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: onTogglePlay,
-                child: Center(
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 180),
-                    switchInCurve: Curves.easeOut,
-                    switchOutCurve: Curves.easeIn,
-                    child:
-                        isPlaying || buffering
+    return CallbackShortcuts(
+      bindings: {
+        // 自定义控制层接管默认控制层的方向键交互。
+        const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
+            _seekBy(_keyboardRewindStep),
+        const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
+            _seekBy(_keyboardSeekStep),
+        const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
+            _adjustVolume(_keyboardVolumeStep),
+        const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
+            _adjustVolume(-_keyboardVolumeStep),
+      },
+      child: Focus(
+        autofocus: true,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // 点击视频画面切换播放状态；底部控制栏位于该层上方，仍可独立响应操作。
+            Positioned.fill(
+              child: Semantics(
+                button: true,
+                label: isPlaying ? '暂停' : '播放',
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: onTogglePlay,
+                    child: Center(
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 180),
+                        switchInCurve: Curves.easeOut,
+                        switchOutCurve: Curves.easeIn,
+                        child: isPlaying || buffering
                             ? const SizedBox.shrink(key: ValueKey('playing'))
                             : Container(
-                              key: const ValueKey('paused'),
-                              width: 72,
-                              height: 72,
-                              decoration: BoxDecoration(
-                                // 半透明白色按钮兼顾不同亮度视频画面的可读性。
-                                color: const Color(0x2EFFFFFF),
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: const Color(0xB3FFFFFF),
-                                ),
-                                boxShadow: const [
-                                  BoxShadow(
-                                    color: Colors.black38,
-                                    blurRadius: 24,
-                                    offset: Offset(0, 8),
+                                key: const ValueKey('paused'),
+                                width: 72,
+                                height: 72,
+                                decoration: BoxDecoration(
+                                  // 半透明白色按钮兼顾不同亮度视频画面的可读性。
+                                  color: const Color(0x2EFFFFFF),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: const Color(0xB3FFFFFF),
                                   ),
-                                ],
+                                  boxShadow: const [
+                                    BoxShadow(
+                                      color: Colors.black38,
+                                      blurRadius: 24,
+                                      offset: Offset(0, 8),
+                                    ),
+                                  ],
+                                ),
+                                child: const Icon(
+                                  Icons.play_arrow_rounded,
+                                  color: Colors.white,
+                                  size: 46,
+                                ),
                               ),
-                              child: const Icon(
-                                Icons.play_arrow_rounded,
-                                color: Colors.white,
-                                size: 46,
-                              ),
-                            ),
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-        ),
-        Positioned.fill(
-          child: IgnorePointer(
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 180),
-              switchInCurve: Curves.easeOut,
-              switchOutCurve: Curves.easeIn,
-              child: buffering
-                  ? Center(
-                      key: const ValueKey('buffering'),
-                      child: _PlayerLoadingIndicator(
-                        statusText: '正在缓冲',
-                        networkSpeedBytesPerSecond: networkSpeedBytesPerSecond,
-                      ),
-                    )
-                  : const SizedBox.shrink(key: ValueKey('buffered')),
-            ),
-          ),
-        ),
-        // 渐变只负责增强工具可读性，不拦截视频区域的鼠标与触摸事件。
-        const Positioned(
-          left: 0,
-          right: 0,
-          bottom: 0,
-          height: 160,
-          child: IgnorePointer(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.transparent, Color(0xD9000000)],
+            Positioned.fill(
+              child: IgnorePointer(
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  switchInCurve: Curves.easeOut,
+                  switchOutCurve: Curves.easeIn,
+                  // 两种状态的组件类型已经不同；不使用固定 Key，避免缓冲状态快速反复时
+                  // 新旧动画子项在 AnimatedSwitcher 的 Stack 中产生重复 Key。
+                  child: buffering
+                      ? Center(
+                          child: _PlayerLoadingIndicator(
+                            statusText: '正在缓冲',
+                            networkSpeedBytesPerSecond:
+                                networkSpeedBytesPerSecond,
+                          ),
+                        )
+                      : const SizedBox.shrink(),
                 ),
               ),
             ),
-          ),
-        ),
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom: 0,
-          child: SafeArea(
-            top: false,
-            minimum: const EdgeInsets.only(bottom: 8),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final compact = constraints.maxWidth < 520;
-                final horizontalPadding = compact ? 4.0 : 8.0;
-                final timeText =
-                    constraints.maxWidth < 380
+            // 渐变只负责增强工具可读性，不拦截视频区域的鼠标与触摸事件。
+            const Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: 160,
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Colors.transparent, Color(0xD9000000)],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: SafeArea(
+                top: false,
+                minimum: const EdgeInsets.only(bottom: 8),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final compact = constraints.maxWidth < 520;
+                    final horizontalPadding = compact ? 4.0 : 8.0;
+                    final timeText = constraints.maxWidth < 380
                         ? _formatDuration(position)
                         : '${_formatDuration(position)} / '
-                            '${_formatDuration(duration)}';
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // 时间轴只保留极窄的窗口边距，下方按钮继续使用舒适的操作间距。
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                      child: _PreviewTimelineBar(
-                        position: position,
-                        duration: duration,
-                        thumbnailController: thumbnailPreviewController,
-                        onSeek: (value) => unawaited(player.seek(value)),
-                      ),
-                    ),
-                    Padding(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: horizontalPadding,
-                      ),
-                      child: Row(
-                        children: [
-                          IconButton(
-                            tooltip: isPlaying ? '暂停' : '播放',
-                            color: Colors.white,
-                            visualDensity: VisualDensity.compact,
-                            onPressed: onTogglePlay,
-                            icon: Icon(
-                              isPlaying
-                                  ? Icons.pause_rounded
-                                  : Icons.play_arrow_rounded,
-                            ),
+                              '${_formatDuration(duration)}';
+                    return Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // 时间轴只保留极窄的窗口边距，下方按钮继续使用舒适的操作间距。
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          child: _PreviewTimelineBar(
+                            position: position,
+                            duration: duration,
+                            thumbnailController: thumbnailPreviewController,
+                            onSeek: (value) => unawaited(player.seek(value)),
                           ),
-                          const SizedBox(width: 4),
-                          // 时间区域独占剩余空间，右侧操作区因此始终贴住窗口右边。
-                          Expanded(
-                            child: Text(
-                              timeText,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(color: Colors.white70),
-                            ),
+                        ),
+                        Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: horizontalPadding,
                           ),
-                          // 右侧操作区保持贴右；竖向音量层不参与控制栏宽度分配。
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
+                          child: Row(
                             children: [
-                              _VolumeControl(
-                                volume: volume,
-                                muted: muted,
-                                compact: compact,
-                                onToggleMute: onToggleMute,
-                                onVolumeChanged: onVolumeChanged,
-                              ),
-                              // 使用播放器自带的全屏路由，并同步桌面端的原生窗口状态。
                               IconButton(
-                                tooltip: isFullscreen(context) ? '退出全屏' : '全屏',
+                                tooltip: isPlaying ? '暂停' : '播放',
                                 color: Colors.white,
                                 visualDensity: VisualDensity.compact,
-                                onPressed:
-                                    () => unawaited(_toggleFullscreen(context)),
+                                onPressed: onTogglePlay,
                                 icon: Icon(
-                                  isFullscreen(context)
-                                      ? Icons.fullscreen_exit_rounded
-                                      : Icons.fullscreen_rounded,
+                                  isPlaying
+                                      ? Icons.pause_rounded
+                                      : Icons.play_arrow_rounded,
                                 ),
+                              ),
+                              const SizedBox(width: 4),
+                              // 时间区域独占剩余空间，右侧操作区因此始终贴住窗口右边。
+                              Expanded(
+                                child: Text(
+                                  timeText,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(color: Colors.white70),
+                                ),
+                              ),
+                              // 右侧操作区保持贴右；竖向音量层不参与控制栏宽度分配。
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  _VolumeControl(
+                                    volume: volume,
+                                    muted: muted,
+                                    compact: compact,
+                                    onToggleMute: onToggleMute,
+                                    onVolumeChanged: onVolumeChanged,
+                                  ),
+                                  // 使用播放器自带的全屏路由，并同步桌面端的原生窗口状态。
+                                  IconButton(
+                                    tooltip: isFullscreen(context)
+                                        ? '退出全屏'
+                                        : '全屏',
+                                    color: Colors.white,
+                                    visualDensity: VisualDensity.compact,
+                                    onPressed: () =>
+                                        unawaited(_toggleFullscreen(context)),
+                                    icon: Icon(
+                                      isFullscreen(context)
+                                          ? Icons.fullscreen_exit_rounded
+                                          : Icons.fullscreen_rounded,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
-                        ],
-                      ),
-                    ),
-                  ],
-                );
-              },
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
             ),
-          ),
+          ],
         ),
-      ],
+      ),
     );
   }
 
