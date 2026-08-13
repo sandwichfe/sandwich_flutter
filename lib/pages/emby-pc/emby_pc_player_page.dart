@@ -13,6 +13,48 @@ import 'package:window_manager/window_manager.dart';
 import 'emby_pc_models.dart';
 import 'emby_pc_service.dart';
 
+// Android 播放器只调整当前应用窗口亮度，退出播放器后恢复跟随系统亮度。
+class _AndroidWindowBrightness {
+  static const MethodChannel _channel = MethodChannel(
+    'helloworld_flutter/player_brightness',
+  );
+
+  static Future<double> getBrightness() async {
+    try {
+      final brightness = await _channel.invokeMethod<double>('getBrightness');
+      return (brightness ?? 0.5).clamp(0.01, 1.0).toDouble();
+    } on PlatformException catch (error) {
+      debugPrint('读取 Android 窗口亮度失败：$error');
+      return 0.5;
+    } on MissingPluginException catch (error) {
+      debugPrint('Android 窗口亮度通道不可用：$error');
+      return 0.5;
+    }
+  }
+
+  static Future<void> setBrightness(double brightness) async {
+    try {
+      await _channel.invokeMethod<void>('setBrightness', {
+        'brightness': brightness.clamp(0.01, 1.0).toDouble(),
+      });
+    } on PlatformException catch (error) {
+      debugPrint('设置 Android 窗口亮度失败：$error');
+    } on MissingPluginException catch (error) {
+      debugPrint('Android 窗口亮度通道不可用：$error');
+    }
+  }
+
+  static Future<void> resetBrightness() async {
+    try {
+      await _channel.invokeMethod<void>('resetBrightness');
+    } on PlatformException catch (error) {
+      debugPrint('恢复 Android 系统亮度失败：$error');
+    } on MissingPluginException catch (error) {
+      debugPrint('Android 窗口亮度通道不可用：$error');
+    }
+  }
+}
+
 class EmbyPcPlayerPage extends StatefulWidget {
   final EmbyPcItem item;
   final int startPositionTicks;
@@ -369,6 +411,10 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
   @override
   void dispose() {
     _progressTimer?.cancel();
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      // 播放器离开后不保留窗口级亮度覆盖，重新跟随 Android 系统设置。
+      unawaited(_AndroidWindowBrightness.resetBrightness());
+    }
     // 非正常移除页面时仍排入停止事件；正常返回路径已在 _closePlayer 中等待完成。
     if (_playerReady && !_stopReportQueued) {
       _stopReportQueued = true;
@@ -683,8 +729,44 @@ class _PlayerControls extends StatelessWidget {
     volumeControlKey.currentState?.showForKeyboardAdjustment();
   }
 
+  bool get _usesAndroidTouchGestures =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
   @override
   Widget build(BuildContext context) {
+    final playbackStateIndicator = Center(
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 180),
+        switchInCurve: Curves.easeOut,
+        switchOutCurve: Curves.easeIn,
+        child: isPlaying || buffering
+            ? const SizedBox.shrink(key: ValueKey('playing'))
+            : Container(
+                key: const ValueKey('paused'),
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  // 半透明白色按钮兼顾不同亮度视频画面的可读性。
+                  color: const Color(0x2EFFFFFF),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: const Color(0xB3FFFFFF)),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Colors.black38,
+                      blurRadius: 24,
+                      offset: Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.play_arrow_rounded,
+                  color: Colors.white,
+                  size: 46,
+                ),
+              ),
+      ),
+    );
+
     return CallbackShortcuts(
       bindings: {
         // 自定义控制层接管默认控制层的方向键交互。
@@ -707,47 +789,22 @@ class _PlayerControls extends StatelessWidget {
               child: Semantics(
                 button: true,
                 label: isPlaying ? '暂停' : '播放',
-                child: MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: onTogglePlay,
-                    child: Center(
-                      child: AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 180),
-                        switchInCurve: Curves.easeOut,
-                        switchOutCurve: Curves.easeIn,
-                        child: isPlaying || buffering
-                            ? const SizedBox.shrink(key: ValueKey('playing'))
-                            : Container(
-                                key: const ValueKey('paused'),
-                                width: 72,
-                                height: 72,
-                                decoration: BoxDecoration(
-                                  // 半透明白色按钮兼顾不同亮度视频画面的可读性。
-                                  color: const Color(0x2EFFFFFF),
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: const Color(0xB3FFFFFF),
-                                  ),
-                                  boxShadow: const [
-                                    BoxShadow(
-                                      color: Colors.black38,
-                                      blurRadius: 24,
-                                      offset: Offset(0, 8),
-                                    ),
-                                  ],
-                                ),
-                                child: const Icon(
-                                  Icons.play_arrow_rounded,
-                                  color: Colors.white,
-                                  size: 46,
-                                ),
-                              ),
+                child: _usesAndroidTouchGestures
+                    ? _AndroidPlayerGestureLayer(
+                        player: player,
+                        volume: volume,
+                        onTap: onTogglePlay,
+                        onVolumeChanged: onVolumeChanged,
+                        child: playbackStateIndicator,
+                      )
+                    : MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: onTogglePlay,
+                          child: playbackStateIndicator,
+                        ),
                       ),
-                    ),
-                  ),
-                ),
               ),
             ),
             Positioned.fill(
@@ -883,6 +940,262 @@ class _PlayerControls extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  String _formatDuration(Duration value) {
+    final hours = value.inHours;
+    final minutes = value.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = value.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return hours > 0 ? '$hours:$minutes:$seconds' : '$minutes:$seconds';
+  }
+}
+
+enum _AndroidPlayerGestureMode {
+  pending,
+  seek,
+  brightness,
+  volume,
+}
+
+class _AndroidPlayerGestureLayer extends StatefulWidget {
+  final Player player;
+  final double volume;
+  final VoidCallback onTap;
+  final ValueChanged<double> onVolumeChanged;
+  final Widget child;
+
+  const _AndroidPlayerGestureLayer({
+    required this.player,
+    required this.volume,
+    required this.onTap,
+    required this.onVolumeChanged,
+    required this.child,
+  });
+
+  @override
+  State<_AndroidPlayerGestureLayer> createState() =>
+      _AndroidPlayerGestureLayerState();
+}
+
+class _AndroidPlayerGestureLayerState
+    extends State<_AndroidPlayerGestureLayer> {
+  static const double _directionLockDistance = 10;
+  static const Duration _maximumSeekRange = Duration(minutes: 5);
+
+  _AndroidPlayerGestureMode? _mode;
+  Offset _dragOffset = Offset.zero;
+  bool _startedOnLeft = false;
+  double _brightness = 0.5;
+  double _startBrightness = 0.5;
+  double _startVolume = 0;
+  double _displayValue = 0;
+  Duration _startPosition = Duration.zero;
+  Duration _seekPosition = Duration.zero;
+  Timer? _feedbackTimer;
+  bool _feedbackVisible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadBrightness());
+  }
+
+  Future<void> _loadBrightness() async {
+    final brightness = await _AndroidWindowBrightness.getBrightness();
+    if (!mounted) return;
+    _brightness = brightness;
+  }
+
+  void _handlePanStart(DragStartDetails details) {
+    final width = context.size?.width ?? 0;
+    _feedbackTimer?.cancel();
+    _mode = _AndroidPlayerGestureMode.pending;
+    _dragOffset = Offset.zero;
+    _startedOnLeft = details.localPosition.dx < width / 2;
+    _startBrightness = _brightness;
+    _startVolume = widget.volume;
+    _displayValue = _startedOnLeft ? _startBrightness * 100 : _startVolume;
+    _startPosition = widget.player.state.position;
+    _seekPosition = _startPosition;
+    _feedbackVisible = false;
+  }
+
+  void _handlePanUpdate(DragUpdateDetails details) {
+    final size = context.size;
+    if (size == null || size.width <= 0 || size.height <= 0) return;
+
+    _dragOffset += details.delta;
+    if (_mode == _AndroidPlayerGestureMode.pending) {
+      final horizontalDistance = _dragOffset.dx.abs();
+      final verticalDistance = _dragOffset.dy.abs();
+      if (math.max(horizontalDistance, verticalDistance) <
+          _directionLockDistance) {
+        return;
+      }
+      _mode = horizontalDistance >= verticalDistance
+          ? _AndroidPlayerGestureMode.seek
+          : (_startedOnLeft
+                ? _AndroidPlayerGestureMode.brightness
+                : _AndroidPlayerGestureMode.volume);
+    }
+
+    switch (_mode!) {
+      case _AndroidPlayerGestureMode.seek:
+        _updateSeek(size.width);
+        break;
+      case _AndroidPlayerGestureMode.brightness:
+        _updateBrightness(size.height);
+        break;
+      case _AndroidPlayerGestureMode.volume:
+        _updateVolume(size.height);
+        break;
+      case _AndroidPlayerGestureMode.pending:
+        return;
+    }
+  }
+
+  void _updateSeek(double width) {
+    final duration = widget.player.state.duration;
+    if (duration <= Duration.zero) return;
+    // 横跨整个屏幕最多调整五分钟，长视频也能保持可控的拖动精度。
+    final seekRange = duration < _maximumSeekRange
+        ? duration
+        : _maximumSeekRange;
+    final deltaMilliseconds =
+        seekRange.inMilliseconds * _dragOffset.dx / width;
+    final targetMilliseconds = (_startPosition.inMilliseconds +
+            deltaMilliseconds.round())
+        .clamp(0, duration.inMilliseconds)
+        .toInt();
+    setState(() {
+      _seekPosition = Duration(milliseconds: targetMilliseconds);
+      _feedbackVisible = true;
+    });
+  }
+
+  void _updateBrightness(double height) {
+    final brightness = (_startBrightness - _dragOffset.dy / height)
+        .clamp(0.01, 1.0)
+        .toDouble();
+    if ((brightness - _brightness).abs() < 0.005) return;
+    setState(() {
+      _brightness = brightness;
+      _displayValue = brightness * 100;
+      _feedbackVisible = true;
+    });
+    unawaited(_AndroidWindowBrightness.setBrightness(brightness));
+  }
+
+  void _updateVolume(double height) {
+    final volume = (_startVolume - _dragOffset.dy / height * 100)
+        .clamp(0.0, 100.0)
+        .toDouble();
+    if ((volume - _displayValue).abs() < 0.5 && _feedbackVisible) return;
+    setState(() {
+      _displayValue = volume;
+      _feedbackVisible = true;
+    });
+    widget.onVolumeChanged(volume);
+  }
+
+  void _handlePanEnd(DragEndDetails details) {
+    if (_mode == _AndroidPlayerGestureMode.seek && _feedbackVisible) {
+      unawaited(widget.player.seek(_seekPosition));
+    }
+    _scheduleFeedbackHide();
+  }
+
+  void _handlePanCancel() {
+    _scheduleFeedbackHide();
+  }
+
+  void _scheduleFeedbackHide() {
+    _feedbackTimer?.cancel();
+    _feedbackTimer = Timer(const Duration(milliseconds: 450), () {
+      if (mounted) setState(() => _feedbackVisible = false);
+    });
+  }
+
+  @override
+  void dispose() {
+    _feedbackTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: widget.onTap,
+      onPanStart: _handlePanStart,
+      onPanUpdate: _handlePanUpdate,
+      onPanEnd: _handlePanEnd,
+      onPanCancel: _handlePanCancel,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          widget.child,
+          IgnorePointer(
+            child: AnimatedOpacity(
+              opacity: _feedbackVisible ? 1 : 0,
+              duration: const Duration(milliseconds: 120),
+              child: Center(child: _buildFeedback()),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFeedback() {
+    final mode = _mode;
+    final IconData icon;
+    final String text;
+    switch (mode) {
+      case _AndroidPlayerGestureMode.seek:
+        icon = _seekPosition >= _startPosition
+            ? Icons.fast_forward_rounded
+            : Icons.fast_rewind_rounded;
+        text = '${_formatDuration(_seekPosition)} / '
+            '${_formatDuration(widget.player.state.duration)}';
+        break;
+      case _AndroidPlayerGestureMode.brightness:
+        icon = Icons.brightness_6_rounded;
+        text = '${_displayValue.round()}%';
+        break;
+      case _AndroidPlayerGestureMode.volume:
+        icon = _displayValue <= 0
+            ? Icons.volume_off_rounded
+            : Icons.volume_up_rounded;
+        text = '${_displayValue.round()}%';
+        break;
+      case _AndroidPlayerGestureMode.pending:
+      case null:
+        icon = Icons.touch_app_rounded;
+        text = '';
+        break;
+    }
+
+    return Container(
+      constraints: const BoxConstraints(minWidth: 116, minHeight: 88),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xCC000000),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.white, size: 32),
+          const SizedBox(height: 8),
+          Text(
+            text,
+            maxLines: 1,
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+          ),
+        ],
       ),
     );
   }
