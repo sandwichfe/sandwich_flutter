@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 播放器音量控件与 Android 媒体音量保持同步；该普通权限不会触发运行时授权弹窗。 -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <application
         android:label="flutter_application_1"
         android:name="${applicationName}"

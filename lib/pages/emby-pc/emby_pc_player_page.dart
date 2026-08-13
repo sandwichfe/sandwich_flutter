@@ -55,6 +55,61 @@ class _AndroidWindowBrightness {
   }
 }
 
+// Android 播放器以系统媒体音量为唯一音量来源，避免系统与播放器重复衰减。
+class _AndroidSystemVolume {
+  static const MethodChannel _channel = MethodChannel(
+    'helloworld_flutter/player_volume',
+  );
+  static ValueChanged<double>? _onVolumeChanged;
+
+  static Future<double> startObserving(
+    ValueChanged<double> onVolumeChanged,
+  ) async {
+    _onVolumeChanged = onVolumeChanged;
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'onVolumeChanged' && call.arguments is num) {
+        _onVolumeChanged?.call((call.arguments as num).toDouble());
+      }
+    });
+    try {
+      final volume = await _channel.invokeMethod<double>('startObserving');
+      return (volume ?? 0).clamp(0.0, 100.0).toDouble();
+    } on PlatformException catch (error) {
+      debugPrint('监听 Android 媒体音量失败：$error');
+      return 0;
+    } on MissingPluginException catch (error) {
+      debugPrint('Android 媒体音量通道不可用：$error');
+      return 0;
+    }
+  }
+
+  static Future<double?> setVolume(double volume) async {
+    try {
+      return await _channel.invokeMethod<double>('setVolume', {
+        'volume': volume.clamp(0.0, 100.0).toDouble(),
+      });
+    } on PlatformException catch (error) {
+      debugPrint('设置 Android 媒体音量失败：$error');
+      return null;
+    } on MissingPluginException catch (error) {
+      debugPrint('Android 媒体音量通道不可用：$error');
+      return null;
+    }
+  }
+
+  static Future<void> stopObserving() async {
+    _onVolumeChanged = null;
+    _channel.setMethodCallHandler(null);
+    try {
+      await _channel.invokeMethod<void>('stopObserving');
+    } on PlatformException catch (error) {
+      debugPrint('停止监听 Android 媒体音量失败：$error');
+    } on MissingPluginException catch (error) {
+      debugPrint('Android 媒体音量通道不可用：$error');
+    }
+  }
+}
+
 class EmbyPcPlayerPage extends StatefulWidget {
   final EmbyPcItem item;
   final int startPositionTicks;
@@ -130,8 +185,14 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
     // 缩略图数据与控制层状态分离，后续可在这里接入其他 Emby 预览来源。
     _thumbnailPreviewController = _ThumbnailPreviewController();
     _listenToPlayerState();
+    if (_usesAndroidSystemVolume) {
+      unawaited(_initializeAndroidSystemVolume());
+    }
     _initializePlayer();
   }
+
+  bool get _usesAndroidSystemVolume =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
   bool get _usesWindowCloseGuard =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
@@ -173,10 +234,10 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
         if (mounted) setState(() => _buffering = buffering);
       }),
     );
-    // 音量状态由播放器事件统一回写，保证按钮、滑条和底层实际音量一致。
+    // 桌面端音量由播放器事件回写；Android 改由系统媒体音量事件统一同步。
     _playerSubscriptions.add(
       _player.stream.volume.listen((volume) {
-        if (!mounted) return;
+        if (!mounted || _usesAndroidSystemVolume) return;
         final safeVolume = volume.clamp(0.0, 100.0).toDouble();
         setState(() {
           _volume = safeVolume;
@@ -255,8 +316,10 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
         EmbyPcService.instance.streamUrl(widget.item.id),
         start: startPosition,
       );
-      // 在打开媒体前同步本次运行期间的音量，避免切换视频时重置或短暂满音量。
-      await _player.setVolume(_sessionVolume);
+      // Android 只使用系统媒体音量，播放器内部保持满音量以避免重复衰减。
+      await _player.setVolume(
+        _usesAndroidSystemVolume ? 100.0 : _sessionVolume,
+      );
       await _observeNetworkSpeed();
       await _player.open(media);
       if (!mounted) {
@@ -347,6 +410,24 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
     );
   }
 
+  Future<void> _initializeAndroidSystemVolume() async {
+    final volume = await _AndroidSystemVolume.startObserving(
+      _synchronizeAndroidSystemVolume,
+    );
+    if (!mounted) return;
+    _synchronizeAndroidSystemVolume(volume);
+  }
+
+  void _synchronizeAndroidSystemVolume(double volume) {
+    if (!mounted) return;
+    final safeVolume = volume.clamp(0.0, 100.0).toDouble();
+    setState(() {
+      _volume = safeVolume;
+      _muted = safeVolume <= 0;
+      if (safeVolume > 0) _volumeBeforeMute = safeVolume;
+    });
+  }
+
   // 正常返回前等待最后进度和停止事件完成，短时间播放也不再依赖 dispose 异步兜底。
   Future<void> _closePlayer() async {
     if (_closing) return;
@@ -390,7 +471,14 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
     // 静音状态和最近一次非零音量都在后续视频中继续复用。
     _sessionVolume = targetVolume;
     _sessionVolumeBeforeMute = _volumeBeforeMute;
-    await _player.setVolume(targetVolume);
+    if (_usesAndroidSystemVolume) {
+      final actualVolume = await _AndroidSystemVolume.setVolume(targetVolume);
+      if (actualVolume != null && mounted) {
+        _synchronizeAndroidSystemVolume(actualVolume);
+      }
+    } else {
+      await _player.setVolume(targetVolume);
+    }
   }
 
   Future<void> _setVolume(double volume) async {
@@ -405,7 +493,14 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
     // 仅记录用户主动设置的音量，不把播放器初始化期间的临时状态写入会话值。
     _sessionVolume = safeVolume;
     if (safeVolume > 0) _sessionVolumeBeforeMute = safeVolume;
-    await _player.setVolume(safeVolume);
+    if (_usesAndroidSystemVolume) {
+      final actualVolume = await _AndroidSystemVolume.setVolume(safeVolume);
+      if (actualVolume != null && mounted) {
+        _synchronizeAndroidSystemVolume(actualVolume);
+      }
+    } else {
+      await _player.setVolume(safeVolume);
+    }
   }
 
   @override
@@ -414,6 +509,8 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
       // 播放器离开后不保留窗口级亮度覆盖，重新跟随 Android 系统设置。
       unawaited(_AndroidWindowBrightness.resetBrightness());
+      // 音量是用户主动设置的系统状态，仅停止监听，不在退出时回滚。
+      unawaited(_AndroidSystemVolume.stopObserving());
     }
     // 非正常移除页面时仍排入停止事件；正常返回路径已在 _closePlayer 中等待完成。
     if (_playerReady && !_stopReportQueued) {
