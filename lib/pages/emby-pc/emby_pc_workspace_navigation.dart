@@ -5,6 +5,7 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
   String get _pageTitle {
     if (_view == 'home') return '首页';
     if (_view == 'recently-played') return '继续观看';
+    if (_view == 'people') return '演员列表';
     if (_view == 'favorite-movies') return '收藏影片';
     if (_view == 'favorite-people') return '收藏演员';
     for (final library in _libraries) {
@@ -316,6 +317,17 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
                       collapsed: _sidebarCollapsed,
                       onPressed: () => _selectLibrary(library.id),
                     ),
+                  ),
+                  // 媒体库与全局演员入口分组显示，便于区分内容来源。
+                  Divider(height: _sidebarCollapsed ? 18 : 28),
+                  _SidebarButton(
+                    icon: Icons.groups_outlined,
+                    title: '演员列表',
+                    count: null,
+                    showCount: false,
+                    active: _view == 'people',
+                    collapsed: _sidebarCollapsed,
+                    onPressed: _selectPeople,
                   ),
                   Divider(height: _sidebarCollapsed ? 18 : 28),
                   if (!_sidebarCollapsed) const _SidebarSectionTitle('收藏'),

@@ -4,10 +4,13 @@ part of 'emby_pc_page.dart';
 extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
   Widget _buildContent(BuildContext context, {required bool compact}) {
     final colors = Theme.of(context).colorScheme;
+    // 人物没有背景图，演员列表和收藏演员均固定使用主图卡片。
+    final peopleList = _view == 'people' || _view == 'favorite-people';
+    final imageStyle = peopleList ? 'poster' : _imageStyle;
     // 背景图卡片沿用首页约 270 x 205 的视觉比例，并放宽列宽阈值，
     // 避免临界宽度下过早增加列数。
-    final mediaGridMaxExtent = _imageStyle == 'backdrop' ? 336.0 : 214.0;
-    final mediaGridAspectRatio = _imageStyle == 'backdrop' ? 1.28 : 0.585;
+    final mediaGridMaxExtent = imageStyle == 'backdrop' ? 336.0 : 214.0;
+    final mediaGridAspectRatio = imageStyle == 'backdrop' ? 1.28 : 0.585;
     return ColoredBox(
       color: colors.surfaceContainerLowest,
       child: Column(
@@ -53,14 +56,17 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
                             final item = _items[index];
                             return EmbyPcMediaTile(
                               item: item,
-                              imageStyle: _imageStyle,
-                              secondaryLabel: _view == 'recently-played'
+                              imageStyle: imageStyle,
+                              secondaryLabel: peopleList
+                                  ? _personBirthYear(item)
+                                  : _view == 'recently-played'
                                   ? item.lastPlayedLabel
                                   : '',
+                              hideDefaultMetadata: peopleList,
                               favoriteBusy: _favoriteBusyIds.contains(item.id),
                               actionBusy: _mediaActionBusyIds.contains(item.id),
                               onOpen: () => _openItem(item),
-                              onPlay: _view == 'favorite-people'
+                              onPlay: peopleList
                                   ? null
                                   : () => _playItem(item),
                               onFavorite: () => _toggleFavorite(item),
@@ -84,7 +90,7 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
                             itemCount: 6, // 显示 6 个骨架屏占位符
                             itemBuilder: (context, index) {
                               return EmbyPcLoadingPlaceholder(
-                                isBackdrop: _imageStyle == 'backdrop',
+                                isBackdrop: imageStyle == 'backdrop',
                               );
                             },
                           ),
@@ -95,6 +101,14 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
         ],
       ),
     );
+  }
+
+  // Emby 人物 DTO 使用 PremiereDate 保存出生日期，列表只展示其年份。
+  String _personBirthYear(EmbyPcItem person) {
+    final date = DateTime.tryParse(person.premiereDate);
+    if (date != null) return '${date.year}';
+    final match = RegExp(r'^\d{4}').firstMatch(person.premiereDate);
+    return match?.group(0) ?? '';
   }
 
   Widget _buildHomeContent(BuildContext context) {

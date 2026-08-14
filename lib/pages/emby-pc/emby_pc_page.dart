@@ -267,7 +267,15 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       setState(() => _loadingMore = true);
     }
     try {
-      final page = _view == 'recently-played'
+      final page = _view == 'people'
+          // 演员列表走 Persons 专用接口，返回整个服务器可见范围内的人物。
+          ? await EmbyPcService.instance.getPersons(
+              startIndex: reset ? 0 : _items.length,
+              searchTerm: _searchController.text,
+              sortBy: _sortBy,
+              sortOrder: _sortOrder,
+            )
+          : _view == 'recently-played'
           ? await EmbyPcService.instance.getResumeItems(
               startIndex: reset ? 0 : _items.length,
               limit: 100,
@@ -375,6 +383,19 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       _view = view;
       _activeId = '';
       _resetQueryControllers();
+    });
+    await _loadItems(reset: true);
+  }
+
+  Future<void> _selectPeople() async {
+    if (_view == 'people') return;
+    setState(() {
+      _view = 'people';
+      _activeId = '';
+      _resetQueryControllers();
+      // 人物按名称展示，避免沿用影片默认的上映日期排序。
+      _sortBy = 'SortName';
+      _sortOrder = 'Ascending';
     });
     await _loadItems(reset: true);
   }
@@ -506,7 +527,9 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
               .clamp(0, 1 << 30)
               .toInt();
         }
-        if (_view == 'favorite-people' && _favoritePeopleCount != null) {
+        // 从演员列表修改收藏时，同步侧栏的收藏演员数量。
+        if ((_view == 'favorite-people' || _view == 'people') &&
+            _favoritePeopleCount != null) {
           _favoritePeopleCount = (_favoritePeopleCount! + (value ? 1 : -1))
               .clamp(0, 1 << 30)
               .toInt();
@@ -692,7 +715,10 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   }
 
   void _openItem(EmbyPcItem item) {
-    if (item.type == 'Person' || _view == 'favorite-people') {
+    // 人物接口通常返回 Person 类型；视图条件同时兼容缺失类型字段的服务端响应。
+    if (item.type == 'Person' ||
+        _view == 'favorite-people' ||
+        _view == 'people') {
       Navigator.of(context).push(
         embyPcFadeRoute(
           context,

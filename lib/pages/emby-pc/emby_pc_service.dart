@@ -251,6 +251,30 @@ class EmbyPcService {
     );
   }
 
+  // 人物列表使用 Swagger 定义的 Persons 接口，避免受单个媒体库范围限制。
+  Future<EmbyPcPage> getPersons({
+    int startIndex = 0,
+    int limit = 100,
+    String searchTerm = '',
+    String sortBy = 'SortName',
+    String sortOrder = 'Ascending',
+  }) async {
+    final query = <String, String>{
+      'UserId': userId,
+      'Recursive': 'true',
+      // 人物 DTO 的 PremiereDate 保存出生日期，列表卡片据此显示出生年份。
+      'Fields': 'Overview,PremiereDate,DateCreated,ProviderIds,SortName',
+      'EnableUserData': 'true',
+      'EnableImageTypes': 'Primary',
+      'SortBy': sortBy,
+      'SortOrder': sortOrder,
+      'StartIndex': '$startIndex',
+      'Limit': '${limit.clamp(1, 100)}',
+    };
+    if (searchTerm.trim().isNotEmpty) query['SearchTerm'] = searchTerm.trim();
+    return EmbyPcPage.fromJson(await _get('/emby/Persons', query: query));
+  }
+
   // Keep the continue-watching request aligned with Emby Web's Items/Resume endpoint.
   Future<EmbyPcPage> getResumeItems({
     int startIndex = 0,

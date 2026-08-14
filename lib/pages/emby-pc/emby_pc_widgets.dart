@@ -186,6 +186,8 @@ class EmbyPcMediaTile extends StatefulWidget {
 
   // 指定后替换默认媒体元数据，用于播放记录等具有专属摘要的列表。
   final String secondaryLabel;
+  // 人物列表出生日期缺失时不应回退显示通用类型文本。
+  final bool hideDefaultMetadata;
 
   const EmbyPcMediaTile({
     super.key,
@@ -198,6 +200,7 @@ class EmbyPcMediaTile extends StatefulWidget {
     this.favoriteBusy = false,
     this.actionBusy = false,
     this.secondaryLabel = '',
+    this.hideDefaultMetadata = false,
   });
 
   @override
@@ -379,7 +382,7 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
             ),
           ),
           const SizedBox(height: 4),
-          if (widget.secondaryLabel.isEmpty)
+          if (widget.secondaryLabel.isEmpty && !widget.hideDefaultMetadata)
             _MediaMetadata(item: widget.item)
           else
             Text(

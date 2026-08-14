@@ -110,6 +110,8 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
         _selectHome();
       } else if (value == 'recently-played') {
         _selectRecentlyPlayed();
+      } else if (value == 'people') {
+        _selectPeople();
       } else if (value == 'favorite-movies' || value == 'favorite-people') {
         _selectFavorites(value);
       } else {
@@ -128,6 +130,8 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
             (library) =>
             PopupMenuItem(value: library.id, child: Text(library.name)),
       ),
+      // 紧凑布局使用弹出菜单替代侧栏，也保留演员列表入口。
+      const PopupMenuItem(value: 'people', child: Text('演员列表')),
       const PopupMenuDivider(),
       const PopupMenuItem(value: 'favorite-movies', child: Text('收藏影片')),
       const PopupMenuItem(value: 'favorite-people', child: Text('收藏演员')),
@@ -136,6 +140,8 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
 
   Widget _buildToolbar(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    // 人物接口没有视频筛选和布局参数，避免展示不会影响请求的控件。
+    final peopleList = _view == 'people' || _view == 'favorite-people';
     return Material(
       color: colors.surfaceContainerLowest,
       child: Container(
@@ -154,14 +160,17 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
             final compactLayoutControl = constraints.maxWidth < 420;
             return Row(
               children: [
-                _buildFilterMenu(context),
-                const SizedBox(width: 8),
+                if (!peopleList) ...[
+                  _buildFilterMenu(context),
+                  const SizedBox(width: 8),
+                ],
                 _buildSortMenu(context),
                 const Spacer(),
-                _buildLayoutControl(
-                  context,
-                  compact: compactLayoutControl,
-                ),
+                if (!peopleList)
+                  _buildLayoutControl(
+                    context,
+                    compact: compactLayoutControl,
+                  ),
               ],
             );
           },
