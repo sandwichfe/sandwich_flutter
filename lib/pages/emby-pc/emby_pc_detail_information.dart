@@ -54,6 +54,7 @@ class _OtherInformation extends StatelessWidget {
         title: '媒体信息',
         icon: Icons.calendar_month_outlined,
         lines: mediaLines.isEmpty ? const ['暂无媒体信息'] : mediaLines,
+        copyFirstLine: mediaPath.isNotEmpty,
       ),
     ];
     return Column(
@@ -71,11 +72,13 @@ class _InfoCard extends StatelessWidget {
   final String title;
   final IconData icon;
   final List<String> lines;
+  final bool copyFirstLine;
 
   const _InfoCard({
     required this.title,
     required this.icon,
     required this.lines,
+    this.copyFirstLine = false,
   });
 
   @override
@@ -93,23 +96,44 @@ class _InfoCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _CardTitle(title: title, icon: icon),
-            ...lines.map(
-              (line) => Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(
-                  line,
-                  style: TextStyle(
-                    color: colors.onSurfaceVariant,
-                    fontSize: 13,
-                    height: 1.55,
-                  ),
+            ...lines.asMap().entries.map((entry) {
+              final line = entry.value;
+              final lineText = Text(
+                line,
+                style: TextStyle(
+                  color: colors.onSurfaceVariant,
+                  fontSize: 13,
+                  height: 1.55,
                 ),
-              ),
-            ),
+              );
+              final isCopyablePath = copyFirstLine && entry.key == 0;
+              return Padding(
+                padding: const EdgeInsets.only(top: 6),
+                // 仅媒体路径支持双击复制，其他信息仍保持普通文本行为。
+                child: isCopyablePath
+                    ? Tooltip(
+                        message: '双击复制路径',
+                        child: GestureDetector(
+                          onDoubleTap: () => _copyMediaPath(context, line),
+                          child: lineText,
+                        ),
+                      )
+                    : lineText,
+              );
+            }),
           ],
         ),
       ),
     );
+  }
+
+  // 复制后提供轻提示，避免用户不确定路径是否已进入剪贴板。
+  Future<void> _copyMediaPath(BuildContext context, String path) async {
+    await Clipboard.setData(ClipboardData(text: path));
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(content: Text('已复制影片路径')));
   }
 }
 

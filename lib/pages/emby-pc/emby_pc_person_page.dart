@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'emby_pc_detail_page.dart';
 import 'emby_pc_item_images_dialog.dart';
@@ -336,13 +337,32 @@ class _PersonContent extends StatelessWidget {
       final biography = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            person.name.isEmpty ? '人物详情' : person.name,
-            style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-              // 人物主标题与详情页其它标题保持统一字体。
-              fontFamily: 'Microsoft YaHei UI',
-              fontWeight: FontWeight.w600,
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  person.name.isEmpty ? '人物详情' : person.name,
+                  // 长名称最多显示两行，为右侧复制按钮保留稳定的操作空间。
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.headlineLarge?.copyWith(
+                    // 人物主标题与详情页其它标题保持统一字体。
+                    fontFamily: 'Microsoft YaHei UI',
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              // 保留标题视觉层级，并为鼠标和触屏提供明确的一键复制入口。
+              IconButton(
+                tooltip: '复制演员名称',
+                onPressed: person.name.isEmpty
+                    ? null
+                    : () => _copyPersonName(context, person.name),
+                icon: const Icon(Icons.copy_outlined),
+              ),
+            ],
           ),
           if (facts.isNotEmpty) ...[
             const SizedBox(height: 14),
@@ -523,6 +543,15 @@ class _PersonContent extends StatelessWidget {
   );
 
   // 摘要字段沿用 Vue 人物页的顺序，空值不占据布局空间。
+  // 复制完成后立即反馈，方便确认可直接粘贴到外部搜索。
+  Future<void> _copyPersonName(BuildContext context, String name) async {
+    await Clipboard.setData(ClipboardData(text: name));
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(content: Text('已复制演员名称')));
+  }
+
   List<String> _personFacts(EmbyPcItem person) => [
     if (person.type.isNotEmpty) '类型：${_typeLabel(person.type)}',
     if (person.sortName.isNotEmpty) '排序名：${person.sortName}',
