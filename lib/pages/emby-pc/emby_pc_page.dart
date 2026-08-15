@@ -1,5 +1,7 @@
 import 'dart:async';
 
+// Android 平台返回行为需要通过 foundation 中的平台标识进行区分。
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -11,6 +13,7 @@ import 'emby_pc_models.dart';
 import 'emby_pc_person_page.dart';
 import 'emby_pc_player_page.dart';
 import 'emby_pc_service.dart';
+import 'emby_pc_toast.dart';
 import 'emby_pc_widgets.dart';
 
 part 'emby_pc_workspace_navigation.dart';
@@ -29,6 +32,8 @@ class EmbyPcEntryPage extends StatefulWidget {
 
 class _EmbyPcEntryPageState extends State<EmbyPcEntryPage> {
   bool _loading = true;
+  // 防止系统返回键连续触发时重复打开退出确认弹框。
+  bool _exitDialogOpen = false;
 
   @override
   void initState() {
@@ -47,14 +52,50 @@ class _EmbyPcEntryPageState extends State<EmbyPcEntryPage> {
     }
   }
 
+  Future<void> _handleRootBack(bool didPop) async {
+    if (didPop || _exitDialogOpen) return;
+    _exitDialogOpen = true;
+    // 根页面返回时由用户明确确认，避免误触系统返回键直接退出应用。
+    final shouldExit = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('退出应用'),
+        content: const Text('确定要退出应用吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('退出'),
+          ),
+        ],
+      ),
+    );
+    if (shouldExit == true) {
+      SystemNavigator.pop();
+      return;
+    }
+    if (mounted) _exitDialogOpen = false;
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (_loading)
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    if (!EmbyPcService.instance.isLoggedIn) {
-      return EmbyPcLoginPage(onLogin: () => setState(() {}));
-    }
-    return EmbyPcWorkspace(onLogout: () => setState(() {}));
+    final interceptAndroidBack =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    return PopScope<void>(
+      // 非 Android 平台继续沿用系统默认返回行为，避免影响桌面端窗口关闭。
+      canPop: !interceptAndroidBack,
+      onPopInvokedWithResult: (didPop, _) {
+        if (interceptAndroidBack) unawaited(_handleRootBack(didPop));
+      },
+      child: _loading
+          ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+          : !EmbyPcService.instance.isLoggedIn
+          ? EmbyPcLoginPage(onLogin: () => setState(() {}))
+          : EmbyPcWorkspace(onLogout: () => setState(() {})),
+    );
   }
 }
 
@@ -536,10 +577,13 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         }
       });
     } catch (error) {
-      if (mounted)
-        ScaffoldMessenger.of(
+      if (mounted) {
+        EmbyPcToast.show(
           context,
-        ).showSnackBar(SnackBar(content: Text(error.toString())));
+          error.toString(),
+          type: EmbyPcToastType.error,
+        );
+      }
     } finally {
       if (mounted) setState(() => _favoriteBusyIds.remove(item.id));
     }
@@ -590,7 +634,9 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       }
       return false;
     } catch (error) {
-      if (mounted) _showWorkspaceMessage(error.toString());
+      if (mounted) {
+        _showWorkspaceMessage(error.toString(), type: EmbyPcToastType.error);
+      }
       return false;
     } finally {
       if (mounted) setState(() => _mediaActionBusyIds.remove(item.id));
@@ -605,10 +651,11 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     }
   }
 
-  void _showWorkspaceMessage(String message) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
+  void _showWorkspaceMessage(
+    String message, {
+    EmbyPcToastType type = EmbyPcToastType.success,
+  }) {
+    EmbyPcToast.show(context, message, type: type);
   }
 
   Future<void> _handleLibraryAction(
@@ -662,14 +709,14 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       final response = await request();
       if (!mounted) return;
       final message = response.isEmpty ? successMessage : response;
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text(message)));
+      EmbyPcToast.show(context, message, type: EmbyPcToastType.success);
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text(error.toString())));
+      EmbyPcToast.show(
+        context,
+        error.toString(),
+        type: EmbyPcToastType.error,
+      );
     } finally {
       if (mounted) setState(() => _libraryActionBusyIds.remove(libraryId));
     }
@@ -683,9 +730,11 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       setState(() => _libraries = _applyLibraryOrder(libraries, currentOrder));
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(
+        EmbyPcToast.show(
           context,
-        ).showSnackBar(SnackBar(content: Text(error.toString())));
+          error.toString(),
+          type: EmbyPcToastType.error,
+        );
       }
     }
   }

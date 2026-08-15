@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import 'emby_pc_models.dart';
 import 'emby_pc_service.dart';
+import 'emby_pc_toast.dart';
 import 'emby_pc_widgets.dart';
 
 class _ItemImageSlot {
@@ -60,7 +61,7 @@ class _EmbyPcItemImagesDialogState extends State<EmbyPcItemImagesDialog> {
     } catch (error) {
       if (!mounted) return;
       setState(() => _loading = false);
-      _showMessage(error.toString());
+      _showMessage(error.toString(), type: EmbyPcToastType.error);
     }
   }
 
@@ -91,7 +92,7 @@ class _EmbyPcItemImagesDialogState extends State<EmbyPcItemImagesDialog> {
     final file = result.files.single;
     final bytes = file.bytes;
     if (bytes == null) {
-      _showMessage('无法读取所选图片');
+      _showMessage('无法读取所选图片', type: EmbyPcToastType.error);
       return;
     }
 
@@ -109,7 +110,7 @@ class _EmbyPcItemImagesDialogState extends State<EmbyPcItemImagesDialog> {
       await _loadImages(showProgress: false);
       if (mounted) _showMessage('${slot.label}上传成功');
     } catch (error) {
-      if (mounted) _showMessage(error.toString());
+      if (mounted) _showMessage(error.toString(), type: EmbyPcToastType.error);
     } finally {
       if (mounted) setState(() => _busyTypes.remove(slot.type));
     }
@@ -148,7 +149,7 @@ class _EmbyPcItemImagesDialogState extends State<EmbyPcItemImagesDialog> {
       await _loadImages(showProgress: false);
       if (mounted) _showMessage('${slot.label}已删除');
     } catch (error) {
-      if (mounted) _showMessage(error.toString());
+      if (mounted) _showMessage(error.toString(), type: EmbyPcToastType.error);
     } finally {
       if (mounted) setState(() => _busyTypes.remove(slot.type));
     }
@@ -169,10 +170,11 @@ class _EmbyPcItemImagesDialogState extends State<EmbyPcItemImagesDialog> {
     }
   }
 
-  void _showMessage(String message) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
+  void _showMessage(
+    String message, {
+    EmbyPcToastType type = EmbyPcToastType.success,
+  }) {
+    EmbyPcToast.show(context, message, type: type);
   }
 
   @override

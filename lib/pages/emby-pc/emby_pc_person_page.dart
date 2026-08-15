@@ -5,6 +5,7 @@ import 'emby_pc_detail_page.dart';
 import 'emby_pc_item_images_dialog.dart';
 import 'emby_pc_models.dart';
 import 'emby_pc_service.dart';
+import 'emby_pc_toast.dart';
 import 'emby_pc_widgets.dart';
 
 class EmbyPcPersonPage extends StatefulWidget {
@@ -71,10 +72,13 @@ class _EmbyPcPersonPageState extends State<EmbyPcPersonPage> {
       );
       if (mounted) setState(() => _person = person.copyWith(isFavorite: value));
     } catch (error) {
-      if (mounted)
-        ScaffoldMessenger.of(
+      if (mounted) {
+        EmbyPcToast.show(
           context,
-        ).showSnackBar(SnackBar(content: Text(error.toString())));
+          error.toString(),
+          type: EmbyPcToastType.error,
+        );
+      }
     } finally {
       if (mounted) setState(() => _favoriteBusy = false);
     }
@@ -124,16 +128,19 @@ class _EmbyPcPersonPageState extends State<EmbyPcPersonPage> {
         _showMessage(response.isEmpty ? '元数据刷新请求已提交' : response);
       }
     } catch (error) {
-      if (mounted) _showMessage(error.toString());
+      if (mounted) {
+        _showMessage(error.toString(), type: EmbyPcToastType.error);
+      }
     } finally {
       if (mounted) setState(() => _actionBusy = false);
     }
   }
 
-  void _showMessage(String message) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
+  void _showMessage(
+    String message, {
+    EmbyPcToastType type = EmbyPcToastType.success,
+  }) {
+    EmbyPcToast.show(context, message, type: type);
   }
 
   @override
@@ -547,9 +554,11 @@ class _PersonContent extends StatelessWidget {
   Future<void> _copyPersonName(BuildContext context, String name) async {
     await Clipboard.setData(ClipboardData(text: name));
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(const SnackBar(content: Text('已复制演员名称')));
+    EmbyPcToast.show(
+      context,
+      '已复制演员名称',
+      type: EmbyPcToastType.success,
+    );
   }
 
   List<String> _personFacts(EmbyPcItem person) => [
@@ -802,9 +811,11 @@ class _PersonMetadataDialogState extends State<_PersonMetadataDialog> {
       if (mounted) Navigator.pop(context, true);
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text(error.toString())));
+      EmbyPcToast.show(
+        context,
+        error.toString(),
+        type: EmbyPcToastType.error,
+      );
       setState(() => _saving = false);
     }
   }

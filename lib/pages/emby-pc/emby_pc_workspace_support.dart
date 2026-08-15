@@ -446,9 +446,11 @@ class _ItemMetadataDialogState extends State<_ItemMetadataDialog> {
       if (mounted) Navigator.pop(context, true);
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text(error.toString())));
+      EmbyPcToast.show(
+        context,
+        error.toString(),
+        type: EmbyPcToastType.error,
+      );
       setState(() => _saving = false);
     }
   }

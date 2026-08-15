@@ -6,6 +6,7 @@ import 'emby_pc_models.dart';
 import 'emby_pc_person_page.dart';
 import 'emby_pc_player_page.dart';
 import 'emby_pc_service.dart';
+import 'emby_pc_toast.dart';
 import 'emby_pc_widgets.dart';
 
 part 'emby_pc_detail_layout.dart';
@@ -164,9 +165,11 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
       if (mounted) setState(() => _detail = detail.copyWith(isFavorite: value));
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(
+        EmbyPcToast.show(
           context,
-        ).showSnackBar(SnackBar(content: Text(error.toString())));
+          error.toString(),
+          type: EmbyPcToastType.error,
+        );
       }
     } finally {
       if (mounted) setState(() => _favoriteBusy = false);

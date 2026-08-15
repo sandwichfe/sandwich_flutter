@@ -131,9 +131,11 @@ class _InfoCard extends StatelessWidget {
   Future<void> _copyMediaPath(BuildContext context, String path) async {
     await Clipboard.setData(ClipboardData(text: path));
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(const SnackBar(content: Text('已复制影片路径')));
+    EmbyPcToast.show(
+      context,
+      '已复制影片路径',
+      type: EmbyPcToastType.success,
+    );
   }
 }
 
