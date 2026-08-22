@@ -282,6 +282,10 @@ class EmbyPcChapter {
 
 class EmbyPcMediaSource {
   final String id;
+  // 版本源的名称、类型和关联条目用于详情页区分多个版本。
+  final String name;
+  final String type;
+  final String itemId;
   final String path;
   final String container;
   final int size;
@@ -291,6 +295,9 @@ class EmbyPcMediaSource {
 
   const EmbyPcMediaSource({
     required this.id,
+    this.name = '',
+    this.type = '',
+    this.itemId = '',
     this.path = '',
     this.container = '',
     this.size = 0,
@@ -302,6 +309,9 @@ class EmbyPcMediaSource {
   factory EmbyPcMediaSource.fromJson(Map<String, dynamic> json) =>
       EmbyPcMediaSource(
         id: _text(json['Id']),
+        name: _text(json['Name']),
+        type: _text(json['Type']),
+        itemId: _text(json['ItemId']),
         path: _text(json['Path']),
         container: _text(json['Container']),
         size: _integer(json['Size']),

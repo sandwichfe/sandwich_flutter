@@ -456,11 +456,14 @@ class EmbyPcService {
         'v': '$_userAvatarRevision',
       }).toString();
 
-  // 静态放流保持最小参数集，兼容不接受播放会话查询参数的 Emby 版本。
-  String streamUrl(String itemId) => _uri('/emby/Videos/$itemId/stream', {
-    'api_key': accessToken,
-    'static': 'true',
-  }).toString();
+  // 多版本播放通过 MediaSourceId 指定源，未指定时保持 Emby 默认选择。
+  String streamUrl(String itemId, {String? mediaSourceId}) =>
+      _uri('/emby/Videos/$itemId/stream', {
+        'api_key': accessToken,
+        'static': 'true',
+        if (mediaSourceId != null && mediaSourceId.isNotEmpty)
+          'mediaSourceId': mediaSourceId,
+      }).toString();
 
   // Emby 预先生成的 BIF 文件包含进度条缩略图，加载失败时由播放器降级为普通进度条。
   Future<Uint8List?> getBifPreview(String itemId, {int width = 320}) async {

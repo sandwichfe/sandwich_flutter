@@ -47,7 +47,7 @@ class _DetailContent extends StatelessWidget {
   final bool actionBusy;
   final VoidCallback onFavorite;
   final ValueChanged<EmbyPcMediaAction> onAction;
-  final void Function(int? ticks) onPlay;
+  final void Function(int? ticks, String? mediaSourceId) onPlay;
   final ValueChanged<EmbyPcItem> onOpenSimilar;
   final ValueChanged<EmbyPcPerson> onOpenPerson;
 
@@ -131,7 +131,7 @@ class _DetailContent extends StatelessWidget {
             _ChapterCarousel(
               itemId: detail.id,
               chapters: detail.chapters,
-              onPlay: onPlay,
+              onPlay: (ticks) => onPlay(ticks, null),
             ),
           ],
           if (artworkImages.isNotEmpty) ...[
@@ -173,7 +173,7 @@ class _Summary extends StatelessWidget {
   final bool actionBusy;
   final VoidCallback onFavorite;
   final ValueChanged<EmbyPcMediaAction> onAction;
-  final void Function(int? ticks) onPlay;
+  final void Function(int? ticks, String? mediaSourceId) onPlay;
 
   const _Summary({
     required this.detail,
@@ -304,6 +304,14 @@ class _Summary extends StatelessWidget {
           const SizedBox(height: 8),
           Text(meta.join('  ·  ')),
         ],
+        if (detail.mediaSources.length > 1) ...[
+          const SizedBox(height: 10),
+          _MediaSourcesSection(
+            sources: detail.mediaSources,
+            onPlay: (mediaSourceId) =>
+                onPlay(detail.playbackPositionTicks, mediaSourceId),
+          ),
+        ],
         if (mediaMeta.isNotEmpty) ...[
           const SizedBox(height: 8),
           Text(
@@ -347,7 +355,7 @@ class _Summary extends StatelessWidget {
           runSpacing: 10,
           children: [
             FilledButton.icon(
-              onPressed: () => onPlay(null),
+              onPressed: () => onPlay(null, null),
               icon: const Icon(Icons.play_arrow_rounded),
               label: Text(detail.playbackPositionTicks > 0 ? '继续播放' : '播放'),
             ),
@@ -426,6 +434,92 @@ class _Summary extends StatelessWidget {
           const SizedBox(height: 22),
           Text(detail.overview, style: const TextStyle(height: 1.65)),
         ],
+      ],
+    );
+  }
+}
+
+// 多版本媒体源使用紧凑下拉选择器展示，避免详情页只显示 MediaSources 的第一项。
+class _MediaSourcesSection extends StatelessWidget {
+  final List<EmbyPcMediaSource> sources;
+  final ValueChanged<String?> onPlay;
+
+  const _MediaSourcesSection({required this.sources, required this.onPlay});
+
+  String _sourceTitle(EmbyPcMediaSource source, int index) {
+    final name = source.name.trim();
+    return name.isEmpty ? '版本 ${index + 1}' : name;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    // 服务端将首个媒体源作为当前默认版本，胶囊和菜单勾选保持一致。
+    final selectedSource = sources.first;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text('版本', style: TextStyle(color: colors.onSurfaceVariant)),
+        const SizedBox(width: 10),
+        PopupMenuButton<String?>(
+          tooltip: '选择媒体版本',
+          offset: const Offset(0, 8),
+          position: PopupMenuPosition.under,
+          color: colors.surfaceContainerHigh,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          onSelected: onPlay,
+          itemBuilder: (context) => [
+            for (var index = 0; index < sources.length; index++)
+              PopupMenuItem<String?>(
+                value: sources[index].id.isEmpty ? null : sources[index].id,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.check,
+                      color: sources[index].id == selectedSource.id
+                          ? colors.onSurface
+                          : Colors.transparent,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 10),
+                    Flexible(
+                      child: Text(
+                        _sourceTitle(sources[index], index),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: colors.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Padding(
+              padding: const EdgeInsetsDirectional.fromSTEB(14, 7, 10, 7),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 260),
+                    child: Text(
+                      _sourceTitle(selectedSource, 0),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  const Icon(Icons.keyboard_arrow_down_rounded, size: 20),
+                ],
+              ),
+            ),
+          ),
+        ),
       ],
     );
   }

@@ -113,11 +113,13 @@ class _AndroidSystemVolume {
 class EmbyPcPlayerPage extends StatefulWidget {
   final EmbyPcItem item;
   final int startPositionTicks;
+  final String? mediaSourceId;
 
   const EmbyPcPlayerPage({
     super.key,
     required this.item,
     this.startPositionTicks = 0,
+    this.mediaSourceId,
   });
 
   @override
@@ -165,10 +167,12 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
     // 每次进入播放器创建独立会话，三类上报都复用该标识。
     _playSessionId =
         '${DateTime.now().microsecondsSinceEpoch}-${widget.item.id}';
-    // 详情数据优先使用真实媒体源，工作台精简条目则回退到媒体条目 ID。
-    _mediaSourceId = widget.item.mediaSources
-        .map((source) => source.id)
-        .firstWhere((id) => id.isNotEmpty, orElse: () => widget.item.id);
+    // 详情页选择版本时复用指定源；工作台精简条目则回退到默认媒体条目 ID。
+    _mediaSourceId =
+        widget.mediaSourceId ??
+        widget.item.mediaSources
+            .map((source) => source.id)
+            .firstWhere((id) => id.isNotEmpty, orElse: () => widget.item.id);
     // Use Emby's known dimensions while the native decoder is still loading.
     if (widget.item.width != null &&
         widget.item.height != null &&
@@ -313,7 +317,10 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
               ? start
               : null;
       final media = Media(
-        EmbyPcService.instance.streamUrl(widget.item.id),
+        EmbyPcService.instance.streamUrl(
+          widget.item.id,
+          mediaSourceId: widget.mediaSourceId,
+        ),
         start: startPosition,
       );
       // Android 只使用系统媒体音量，播放器内部保持满音量以避免重复衰减。

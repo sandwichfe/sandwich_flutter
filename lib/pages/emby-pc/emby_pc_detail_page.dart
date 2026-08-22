@@ -189,7 +189,7 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
     }
   }
 
-  Future<void> _play([int? positionTicks]) async {
+  Future<void> _play([int? positionTicks, String? mediaSourceId]) async {
     final detail = _detail;
     if (detail == null) return;
     final played = await Navigator.of(context).push<bool>(
@@ -198,6 +198,7 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
         (_) => EmbyPcPlayerPage(
           item: detail,
           startPositionTicks: positionTicks ?? detail.playbackPositionTicks,
+          mediaSourceId: mediaSourceId,
         ),
       ),
     );
