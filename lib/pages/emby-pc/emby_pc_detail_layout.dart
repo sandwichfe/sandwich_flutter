@@ -309,7 +309,8 @@ class _Summary extends StatelessWidget {
           const SizedBox(height: 8),
           Text(meta.join('  ·  ')),
         ],
-        if (detail.mediaSources.length > 1) ...[
+        // 只要服务端返回媒体源就显示版本选择器，单版本默认选中首项。
+        if (detail.mediaSources.isNotEmpty) ...[
           const SizedBox(height: 10),
           _MediaSourcesSection(
             sources: detail.mediaSources,
@@ -443,7 +444,7 @@ class _Summary extends StatelessWidget {
   }
 }
 
-// 多版本媒体源使用紧凑下拉选择器展示，避免详情页只显示 MediaSources 的第一项。
+// 媒体源使用紧凑下拉选择器展示，单版本时仍显示当前默认源。
 class _MediaSourcesSection extends StatelessWidget {
   final List<EmbyPcMediaSource> sources;
   final ValueChanged<String> onSelect;
