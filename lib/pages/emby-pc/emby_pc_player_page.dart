@@ -129,6 +129,8 @@ class EmbyPcPlayerPage extends StatefulWidget {
 class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
     with WindowListener {
   static const double _defaultVolume = 5.0;
+  // 关闭窗口时网络异常不能无限期阻塞返回上一页。
+  static const Duration _windowCloseReportTimeout = Duration(seconds: 3);
   // 只在当前应用进程内保存音量；应用重启后静态值会重新回到默认音量。
   static double _sessionVolume = _defaultVolume;
   static double _sessionVolumeBeforeMute = _defaultVolume;
@@ -156,6 +158,7 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
   bool _windowClosing = false;
   bool _allowPop = false;
   bool _stopReportQueued = false;
+  bool _playerDisposed = false;
   late final _ThumbnailPreviewController _thumbnailPreviewController;
   // 保持音量控件状态引用稳定，让键盘调节也能唤起同一个音量浮层。
   final GlobalKey<_VolumeControlState> _volumeControlKey =
@@ -220,28 +223,28 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
   void _listenToPlayerState() {
     _playerSubscriptions.add(
       _player.stream.playing.listen((playing) {
-        if (mounted) setState(() => _isPlaying = playing);
+        if (mounted && !_windowClosing) setState(() => _isPlaying = playing);
       }),
     );
     _playerSubscriptions.add(
       _player.stream.position.listen((position) {
-        if (mounted) setState(() => _position = position);
+        if (mounted && !_windowClosing) setState(() => _position = position);
       }),
     );
     _playerSubscriptions.add(
       _player.stream.duration.listen((duration) {
-        if (mounted) setState(() => _duration = duration);
+        if (mounted && !_windowClosing) setState(() => _duration = duration);
       }),
     );
     _playerSubscriptions.add(
       _player.stream.buffering.listen((buffering) {
-        if (mounted) setState(() => _buffering = buffering);
+        if (mounted && !_windowClosing) setState(() => _buffering = buffering);
       }),
     );
     // 桌面端音量由播放器事件回写；Android 改由系统媒体音量事件统一同步。
     _playerSubscriptions.add(
       _player.stream.volume.listen((volume) {
-        if (!mounted || _usesAndroidSystemVolume) return;
+        if (!mounted || _windowClosing || _usesAndroidSystemVolume) return;
         final safeVolume = volume.clamp(0.0, 100.0).toDouble();
         setState(() {
           _volume = safeVolume;
@@ -257,14 +260,14 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
             (params.dw != null && params.dh != null && params.dh! > 0
                 ? params.dw! / params.dh!
                 : null);
-        if (mounted && aspect != null && aspect > 0) {
+        if (mounted && !_windowClosing && aspect != null && aspect > 0) {
           setState(() => _aspectRatio = aspect);
         }
       }),
     );
     _playerSubscriptions.add(
       _player.stream.error.listen((message) {
-        if (message.isEmpty || !mounted) return;
+        if (message.isEmpty || !mounted || _windowClosing) return;
         setState(() {
           _loading = false;
           _playerReady = false;
@@ -282,7 +285,7 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
       await (_player.platform as dynamic).observeProperty(
         'demuxer-cache-state',
         (String value) async {
-          if (!mounted || value.isEmpty) return;
+          if (!mounted || _windowClosing || value.isEmpty) return;
           try {
             final cacheState = jsonDecode(value);
             if (cacheState is! Map<String, dynamic>) return;
@@ -292,6 +295,7 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
             final speed = math.max(0.0, rawInputRate.toDouble());
             if (_networkSpeedBytesPerSecond == speed) return;
             if (_loading || _buffering) {
+              if (_windowClosing) return;
               setState(() => _networkSpeedBytesPerSecond = speed);
             } else {
               _networkSpeedBytesPerSecond = speed;
@@ -329,8 +333,8 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
       );
       await _observeNetworkSpeed();
       await _player.open(media);
-      if (!mounted) {
-        await _player.dispose();
+      if (!mounted || _windowClosing) {
+        await _disposePlayer();
         return;
       }
       if (_error.isNotEmpty) return;
@@ -445,14 +449,30 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
     Navigator.of(context).pop(true);
   }
 
-  // 关闭整个窗口时同样等待最终上报，再解除窗口保护并销毁桌面窗口。
+  // 播放器页收到窗口关闭时优先返回上一页，避免销毁整个窗口触发原生纹理同步等待。
   Future<void> _closeWindowAfterPlaybackReport() async {
     if (_windowClosing) return;
     _windowClosing = true;
-    if (mounted && !_closing) setState(() => _closing = true);
-    await _finishPlaybackReports();
-    await _setWindowCloseGuard(false);
-    await windowManager.destroy();
+    if (mounted && !_closing) _closing = true;
+
+    final navigator = mounted ? Navigator.of(context) : null;
+    if (navigator != null && navigator.canPop()) {
+      // 先排入停止和最终进度上报，路由立即返回，网络或原生资源释放不阻塞界面。
+      final reports = _finishPlaybackReports().timeout(_windowCloseReportTimeout);
+      unawaited(
+        reports.catchError((error, stackTrace) {
+          debugPrint('Emby 播放停止上报异常，继续返回上一页：$error');
+          debugPrintStack(stackTrace: stackTrace);
+        }),
+      );
+      _allowPop = true;
+      unawaited(_setWindowCloseGuard(false));
+      navigator.pop(true);
+      return;
+    }
+    // 播放器页通常总有上一页；异常情况下只解除保护，避免保留无效的关闭拦截。
+    debugPrint('播放器关闭时没有可返回的页面');
+    unawaited(_setWindowCloseGuard(false));
   }
 
   Future<void> _finishPlaybackReports() async {
@@ -464,6 +484,13 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
     _stopReportQueued = true;
     await _reportPlayback(EmbyPcPlaybackEvent.progress);
     await _reportPlayback(EmbyPcPlaybackEvent.stopped);
+  }
+
+  // 页面退出和窗口销毁可能同时触发，播放器释放必须只执行一次。
+  Future<void> _disposePlayer() async {
+    if (_playerDisposed) return;
+    _playerDisposed = true;
+    await _player.dispose();
   }
 
   Future<void> _toggleMute() async {
@@ -531,7 +558,7 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
     for (final subscription in _playerSubscriptions) {
       unawaited(subscription.cancel());
     }
-    unawaited(_player.dispose());
+    unawaited(_disposePlayer());
     _thumbnailPreviewController.clear();
     super.dispose();
   }
