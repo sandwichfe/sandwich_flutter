@@ -176,6 +176,59 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
     }
   }
 
+  Future<void> _selectMediaSource(String mediaSourceId) async {
+    final detail = _detail;
+    if (detail == null || mediaSourceId.isEmpty || _loading) return;
+    final currentIndex = detail.mediaSources.indexWhere(
+      (source) => source.id == mediaSourceId,
+    );
+    if (currentIndex == 0) return;
+
+    setState(() {
+      _loading = true;
+      _error = '';
+    });
+    try {
+      final selected = await EmbyPcService.instance.getMediaSourceInfo(
+        itemId: detail.id,
+        mediaSourceId: mediaSourceId,
+      );
+      if (!mounted || selected == null) return;
+
+      final sourceList = [...detail.mediaSources];
+      sourceList.removeWhere((source) => source.id == selected.id);
+      sourceList.insert(0, selected);
+      EmbyPcMediaStream? video;
+      for (final stream in selected.streams) {
+        if (stream.type == 'Video') {
+          video = stream;
+          break;
+        }
+      }
+      setState(() {
+        _detail = detail.copyWith(
+          mediaSources: sourceList,
+          runTimeTicks:
+              selected.runTimeTicks > 0
+                  ? selected.runTimeTicks
+                  : detail.runTimeTicks,
+          width: video?.width ?? detail.width,
+          height: video?.height ?? detail.height,
+        );
+      });
+    } catch (error) {
+      if (mounted) {
+        EmbyPcToast.show(
+          context,
+          error.toString(),
+          type: EmbyPcToastType.error,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
   Future<void> _handleAction(EmbyPcMediaAction action) async {
     final detail = _detail;
     if (detail == null || _actionBusy) return;
@@ -250,6 +303,7 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
                     onFavorite: _toggleFavorite,
                     onAction: _handleAction,
                     onPlay: _play,
+                    onSelectMediaSource: _selectMediaSource,
                     onOpenSimilar:
                         (item) => Navigator.of(context).push(
                           embyPcFadeRoute(

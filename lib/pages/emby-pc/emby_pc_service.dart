@@ -347,6 +347,41 @@ class EmbyPcService {
     );
   }
 
+  // 按需读取指定媒体版本的播放信息，避免切换版本时直接启动播放器。
+  Future<EmbyPcMediaSource?> getMediaSourceInfo({
+    required String itemId,
+    required String mediaSourceId,
+  }) async {
+    final response = await http.post(
+      _uri('/emby/Items/$itemId/PlaybackInfo'),
+      headers: {..._tokenHeader, 'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'Id': itemId,
+        'UserId': userId,
+        'MediaSourceId': mediaSourceId,
+        'EnableDirectPlay': true,
+        'EnableDirectStream': true,
+        'EnableTranscoding': false,
+        'IsPlayback': false,
+      }),
+    );
+    final data = _decodeResponse(response, '读取媒体版本信息失败');
+    final rawSources = data['MediaSources'];
+    final sources = rawSources is List
+        ? rawSources
+            .whereType<Map>()
+            .map(
+              (value) =>
+                  EmbyPcMediaSource.fromJson(Map<String, dynamic>.from(value)),
+            )
+            .toList()
+        : <EmbyPcMediaSource>[];
+    for (final source in sources) {
+      if (source.id == mediaSourceId) return source;
+    }
+    return sources.isEmpty ? null : sources.first;
+  }
+
   Future<Map<String, dynamic>> getItemForEditing(String itemId) async {
     const fields =
         'Genres,Tags,People,Overview,PremiereDate,DateCreated,CommunityRating,'

@@ -116,7 +116,14 @@ class EmbyPcItem {
     );
   }
 
-  EmbyPcItem copyWith({bool? isFavorite}) => EmbyPcItem(
+  // 详情页切换媒体版本时复用同一条目，只替换服务端返回的版本字段。
+  EmbyPcItem copyWith({
+    bool? isFavorite,
+    List<EmbyPcMediaSource>? mediaSources,
+    int? runTimeTicks,
+    int? width,
+    int? height,
+  }) => EmbyPcItem(
     id: id,
     name: name,
     sortName: sortName,
@@ -125,11 +132,11 @@ class EmbyPcItem {
     role: role,
     productionYear: productionYear,
     communityRating: communityRating,
-    runTimeTicks: runTimeTicks,
+    runTimeTicks: runTimeTicks ?? this.runTimeTicks,
     officialRating: officialRating,
     childCount: childCount,
-    width: width,
-    height: height,
+    width: width ?? this.width,
+    height: height ?? this.height,
     path: path,
     premiereDate: premiereDate,
     dateCreated: dateCreated,
@@ -141,7 +148,7 @@ class EmbyPcItem {
     tags: tags,
     studios: studios,
     people: people,
-    mediaSources: mediaSources,
+    mediaSources: mediaSources ?? this.mediaSources,
     chapters: chapters,
     providerIds: providerIds,
     externalUrls: externalUrls,

@@ -48,6 +48,7 @@ class _DetailContent extends StatelessWidget {
   final VoidCallback onFavorite;
   final ValueChanged<EmbyPcMediaAction> onAction;
   final void Function(int? ticks, String? mediaSourceId) onPlay;
+  final ValueChanged<String> onSelectMediaSource;
   final ValueChanged<EmbyPcItem> onOpenSimilar;
   final ValueChanged<EmbyPcPerson> onOpenPerson;
 
@@ -59,6 +60,7 @@ class _DetailContent extends StatelessWidget {
     required this.onFavorite,
     required this.onAction,
     required this.onPlay,
+    required this.onSelectMediaSource,
     required this.onOpenSimilar,
     required this.onOpenPerson,
   });
@@ -82,6 +84,7 @@ class _DetailContent extends StatelessWidget {
         actionBusy: actionBusy,
         onAction: onAction,
         onPlay: onPlay,
+        onSelectMediaSource: onSelectMediaSource,
       );
       // Primary 竖版海报保留在标题旁，和页面背景使用的 Backdrop 区分展示。
       final poster = SizedBox(
@@ -174,6 +177,7 @@ class _Summary extends StatelessWidget {
   final VoidCallback onFavorite;
   final ValueChanged<EmbyPcMediaAction> onAction;
   final void Function(int? ticks, String? mediaSourceId) onPlay;
+  final ValueChanged<String> onSelectMediaSource;
 
   const _Summary({
     required this.detail,
@@ -182,6 +186,7 @@ class _Summary extends StatelessWidget {
     required this.onFavorite,
     required this.onAction,
     required this.onPlay,
+    required this.onSelectMediaSource,
   });
 
   EmbyPcMediaStream? _preferredStream(String type) {
@@ -308,8 +313,7 @@ class _Summary extends StatelessWidget {
           const SizedBox(height: 10),
           _MediaSourcesSection(
             sources: detail.mediaSources,
-            onPlay: (mediaSourceId) =>
-                onPlay(detail.playbackPositionTicks, mediaSourceId),
+            onSelect: onSelectMediaSource,
           ),
         ],
         if (mediaMeta.isNotEmpty) ...[
@@ -442,9 +446,9 @@ class _Summary extends StatelessWidget {
 // 多版本媒体源使用紧凑下拉选择器展示，避免详情页只显示 MediaSources 的第一项。
 class _MediaSourcesSection extends StatelessWidget {
   final List<EmbyPcMediaSource> sources;
-  final ValueChanged<String?> onPlay;
+  final ValueChanged<String> onSelect;
 
-  const _MediaSourcesSection({required this.sources, required this.onPlay});
+  const _MediaSourcesSection({required this.sources, required this.onSelect});
 
   String _sourceTitle(EmbyPcMediaSource source, int index) {
     final name = source.name.trim();
@@ -469,7 +473,11 @@ class _MediaSourcesSection extends StatelessWidget {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
           ),
-          onSelected: onPlay,
+          onSelected: (mediaSourceId) {
+            if (mediaSourceId != null && mediaSourceId.isNotEmpty) {
+              onSelect(mediaSourceId);
+            }
+          },
           itemBuilder: (context) => [
             for (var index = 0; index < sources.length; index++)
               PopupMenuItem<String?>(
