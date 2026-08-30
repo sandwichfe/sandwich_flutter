@@ -152,6 +152,8 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   double _aspectRatio = 16 / 9;
+  // 默认完整显示视频；用户可在控制栏切换铺满或拉伸模式。
+  BoxFit _videoFit = BoxFit.contain;
   Timer? _progressTimer;
   Future<void> _playbackReportQueue = Future<void>.value();
   bool _closing = false;
@@ -540,6 +542,12 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
     }
   }
 
+  void _setVideoFit(BoxFit fit) {
+    if (_videoFit == fit) return;
+    // 画面模式保存在当前播放器页面中，全屏路由会通过共享参数立即同步。
+    setState(() => _videoFit = fit);
+  }
+
   @override
   void dispose() {
     _progressTimer?.cancel();
@@ -620,12 +628,12 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
                 ),
               )
               : SizedBox.expand(
-                // 播放器视口铺满页面，画面在视口内保持比例，控制层始终吸附视口底部。
+                // 播放器视口铺满页面，画面按用户选择的模式布局，控制层始终吸附视口底部。
                 child: Video(
                   controller: _videoController,
                   aspectRatio: _aspectRatio,
-                  fit: BoxFit.contain,
-                  // 仅将画面在剩余黑边中轻微上移，控制栏仍固定在播放器底部。
+                  fit: _videoFit,
+                  // 存在剩余黑边时仅将画面轻微上移，控制栏仍固定在播放器底部。
                   alignment: const Alignment(0, -0.22),
                   // Flutter 字幕上移到控制区上方，避免与进度条和操作按钮重叠。
                   subtitleViewConfiguration: const SubtitleViewConfiguration(
@@ -647,12 +655,14 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
                         thumbnailPreviewController: _thumbnailPreviewController,
                         muted: _muted,
                         volume: _volume,
+                        videoFit: _videoFit,
                         // media_kit 全屏时会保留原页面并新建 Video，两个控制层必须使用不同 Key。
                         volumeControlKey: isFullscreen(videoState.context)
                             ? _fullscreenVolumeControlKey
                             : _volumeControlKey,
                         onTogglePlay: _togglePlay,
                         onToggleMute: _toggleMute,
+                        onVideoFitChanged: _setVideoFit,
                         onVolumeChanged:
                             (value) => unawaited(_setVolume(value)),
                       ),
@@ -806,9 +816,11 @@ class _PlayerControls extends StatefulWidget {
   final _ThumbnailPreviewController thumbnailPreviewController;
   final bool muted;
   final double volume;
+  final BoxFit videoFit;
   final GlobalKey<_VolumeControlState> volumeControlKey;
   final VoidCallback onTogglePlay;
   final VoidCallback onToggleMute;
+  final ValueChanged<BoxFit> onVideoFitChanged;
   final ValueChanged<double> onVolumeChanged;
 
   const _PlayerControls({
@@ -821,9 +833,11 @@ class _PlayerControls extends StatefulWidget {
     required this.thumbnailPreviewController,
     required this.muted,
     required this.volume,
+    required this.videoFit,
     required this.volumeControlKey,
     required this.onTogglePlay,
     required this.onToggleMute,
+    required this.onVideoFitChanged,
     required this.onVolumeChanged,
   });
 
@@ -854,10 +868,12 @@ class _PlayerControlsState extends State<_PlayerControls> {
       widget.thumbnailPreviewController;
   bool get muted => widget.muted;
   double get volume => widget.volume;
+  BoxFit get videoFit => widget.videoFit;
   GlobalKey<_VolumeControlState> get volumeControlKey =>
       widget.volumeControlKey;
   VoidCallback get onTogglePlay => widget.onTogglePlay;
   VoidCallback get onToggleMute => widget.onToggleMute;
+  ValueChanged<BoxFit> get onVideoFitChanged => widget.onVideoFitChanged;
   ValueChanged<double> get onVolumeChanged => widget.onVolumeChanged;
 
   bool get _usesAndroidTouchGestures =>
@@ -924,6 +940,60 @@ class _PlayerControlsState extends State<_PlayerControls> {
 
   void _handleControlsPointerEnd(PointerEvent event) {
     if (_usesAndroidFullscreenControls) _scheduleControlsHide();
+  }
+
+  void _handleVideoFitMenuOpened() {
+    // 菜单显示期间保持底部工具栏可见，避免用户选择模式时工具栏先行隐藏。
+    if (_usesAndroidFullscreenControls) _controlsHideTimer?.cancel();
+  }
+
+  void _handleVideoFitMenuCanceled() {
+    if (_usesAndroidFullscreenControls) _scheduleControlsHide();
+  }
+
+  void _handleVideoFitSelected(BoxFit fit) {
+    onVideoFitChanged(fit);
+    if (_usesAndroidFullscreenControls) _scheduleControlsHide();
+  }
+
+  String _videoFitLabel(BoxFit fit) {
+    if (fit == BoxFit.cover) return '铺满屏幕';
+    if (fit == BoxFit.fill) return '拉伸铺满';
+    return '适应屏幕';
+  }
+
+  PopupMenuItem<BoxFit> _videoFitMenuItem({
+    required BoxFit fit,
+    required String label,
+    required String description,
+  }) {
+    final selected = videoFit == fit;
+    return PopupMenuItem<BoxFit>(
+      value: fit,
+      height: 58,
+      child: Row(
+        children: [
+          SizedBox(
+            width: 24,
+            child: selected
+                ? const Icon(Icons.check_rounded, color: Colors.white, size: 20)
+                : null,
+          ),
+          const SizedBox(width: 10),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: const TextStyle(color: Colors.white)),
+              Text(
+                description,
+                style: const TextStyle(color: Colors.white60, fontSize: 12),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -1176,6 +1246,37 @@ class _PlayerControlsState extends State<_PlayerControls> {
                                     Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
+                                        // 使用简洁的调节图标区分画面模式菜单与旁边的全屏按钮。
+                                        PopupMenuButton<BoxFit>(
+                                          tooltip:
+                                              '画面模式：${_videoFitLabel(videoFit)}',
+                                          color: const Color(0xFF202020),
+                                          icon: const Icon(
+                                            Icons.tune_rounded,
+                                            color: Colors.white,
+                                          ),
+                                          onOpened: _handleVideoFitMenuOpened,
+                                          onCanceled:
+                                              _handleVideoFitMenuCanceled,
+                                          onSelected: _handleVideoFitSelected,
+                                          itemBuilder: (context) => [
+                                            _videoFitMenuItem(
+                                              fit: BoxFit.contain,
+                                              label: '适应屏幕',
+                                              description: '完整显示，不裁剪',
+                                            ),
+                                            _videoFitMenuItem(
+                                              fit: BoxFit.cover,
+                                              label: '铺满屏幕',
+                                              description: '等比铺满，可能裁剪',
+                                            ),
+                                            _videoFitMenuItem(
+                                              fit: BoxFit.fill,
+                                              label: '拉伸铺满',
+                                              description: '填满画面，可能变形',
+                                            ),
+                                          ],
+                                        ),
                                         _VolumeControl(
                                           key: volumeControlKey,
                                           volume: volume,
