@@ -4,13 +4,10 @@ part of 'emby_pc_page.dart';
 extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
   Widget _buildWorkspaceHeader(BuildContext context, {required bool compact}) {
     final colors = Theme.of(context).colorScheme;
-    final mobilePlatform =
-        !kIsWeb &&
-        (defaultTargetPlatform == TargetPlatform.android ||
-            defaultTargetPlatform == TargetPlatform.iOS);
     // 仅移动端窄屏使用分层头部，Windows 等桌面平台继续保持原有排列。
-    final stackedMobileHeader =
-        mobilePlatform && MediaQuery.sizeOf(context).width < 600;
+    final stackedMobileHeader = _usesMobileWorkspaceLayout(
+      MediaQuery.sizeOf(context).width,
+    );
     final pageTitle = Text(
       _EmbyPcWorkspaceNavigation(this)._pageTitle,
       maxLines: 1,
@@ -142,51 +139,63 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
     );
   }
 
-  Widget _buildCompactLibraryMenu() => PopupMenuButton<String>(
-    tooltip: '切换内容',
-    icon: const Icon(Icons.menu),
-    onSelected: (value) {
-      if (value == 'home') {
-        _selectHome();
-      } else if (value == 'recently-played') {
-        _selectRecentlyPlayed();
-      } else if (value == 'people') {
-        _selectPeople();
-      } else if (value == 'favorite-movies' || value == 'favorite-people') {
-        _selectFavorites(value);
-      } else {
-        _selectLibrary(value);
-      }
-    },
-    itemBuilder:
-        (_) => [
-      const PopupMenuItem(value: 'home', child: Text('首页')),
-      const PopupMenuItem(
-        value: 'recently-played',
-        child: Text('播放记录'),
-      ),
-      const PopupMenuDivider(),
-      ..._libraries.map(
-            (library) =>
-            PopupMenuItem(value: library.id, child: Text(library.name)),
-      ),
-      // 紧凑布局使用弹出菜单替代侧栏，也保留演员列表入口。
-      const PopupMenuItem(value: 'people', child: Text('演员列表')),
-      const PopupMenuDivider(),
-      const PopupMenuItem(value: 'favorite-movies', child: Text('收藏影片')),
-      const PopupMenuItem(value: 'favorite-people', child: Text('收藏演员')),
-    ],
-  );
+  Widget _buildCompactLibraryMenu() {
+    if (_usesMobileWorkspaceLayout(MediaQuery.sizeOf(context).width)) {
+      return IconButton(
+        tooltip: '打开内容导航',
+        onPressed: _openMobileNavigation,
+        icon: const Icon(Icons.menu),
+      );
+    }
+    return PopupMenuButton<String>(
+      tooltip: '切换内容',
+      icon: const Icon(Icons.menu),
+      onSelected: (value) {
+        if (value == 'home') {
+          _selectHome();
+        } else if (value == 'recently-played') {
+          _selectRecentlyPlayed();
+        } else if (value == 'people') {
+          _selectPeople();
+        } else if (value == 'favorite-movies' || value == 'favorite-people') {
+          _selectFavorites(value);
+        } else {
+          _selectLibrary(value);
+        }
+      },
+      itemBuilder:
+          (_) => [
+            const PopupMenuItem(value: 'home', child: Text('首页')),
+            const PopupMenuItem(
+              value: 'recently-played',
+              child: Text('播放记录'),
+            ),
+            const PopupMenuDivider(),
+            ..._libraries.map(
+              (library) =>
+                  PopupMenuItem(value: library.id, child: Text(library.name)),
+            ),
+            // 紧凑桌面布局使用弹出菜单替代侧栏，也保留演员列表入口。
+            const PopupMenuItem(value: 'people', child: Text('演员列表')),
+            const PopupMenuDivider(),
+            const PopupMenuItem(
+              value: 'favorite-movies',
+              child: Text('收藏影片'),
+            ),
+            const PopupMenuItem(
+              value: 'favorite-people',
+              child: Text('收藏演员'),
+            ),
+          ],
+    );
+  }
 
   Widget _buildToolbar(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final mobilePlatform =
-        !kIsWeb &&
-        (defaultTargetPlatform == TargetPlatform.android ||
-            defaultTargetPlatform == TargetPlatform.iOS);
     // 移动端缩小工具栏留白，桌面端继续沿用原有间距。
-    final compactMobileToolbar =
-        mobilePlatform && MediaQuery.sizeOf(context).width < 600;
+    final compactMobileToolbar = _usesMobileWorkspaceLayout(
+      MediaQuery.sizeOf(context).width,
+    );
     // 人物接口没有视频筛选和布局参数，避免展示不会影响请求的控件。
     final peopleList = _view == 'people' || _view == 'favorite-people';
     return Material(

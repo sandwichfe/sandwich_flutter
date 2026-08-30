@@ -109,6 +109,8 @@ class EmbyPcWorkspace extends StatefulWidget {
 }
 
 class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
+  // 页面级 Scaffold key 仅用于控制移动端导航抽屉的打开与关闭。
+  final _workspaceScaffoldKey = GlobalKey<ScaffoldState>();
   final _searchController = TextEditingController();
   final _yearController = TextEditingController();
   final _scrollController = ScrollController();
@@ -153,6 +155,23 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     super.initState();
     _scrollController.addListener(_onScroll);
     _initialize();
+  }
+
+  // 移动端专用布局与桌面端分离，避免窄窗口影响 Windows 原有样式。
+  bool _usesMobileWorkspaceLayout(double width) =>
+      !kIsWeb &&
+      width < 600 &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
+
+  void _openMobileNavigation() {
+    _workspaceScaffoldKey.currentState?.openDrawer();
+  }
+
+  void _selectFromMobileNavigation(VoidCallback action) {
+    // 先收起抽屉再切换内容，避免新页面加载状态出现在抽屉下方。
+    _workspaceScaffoldKey.currentState?.closeDrawer();
+    action();
   }
 
   Future<void> _initialize() async {
@@ -848,7 +867,17 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final compact = constraints.maxWidth < 820;
+        final mobileWorkspace = _usesMobileWorkspaceLayout(
+          constraints.maxWidth,
+        );
         return Scaffold(
+          key: _workspaceScaffoldKey,
+          drawer:
+              mobileWorkspace
+                  ? _EmbyPcWorkspaceNavigation(
+                    this,
+                  )._buildMobileNavigationDrawer(context)
+                  : null,
           body: _error.isNotEmpty && _libraries.isEmpty
               ? _WorkspaceError(message: _error, onRetry: _initialize)
               : Row(

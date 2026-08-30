@@ -365,6 +365,126 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
     );
   }
 
+  Widget _buildMobileNavigationDrawer(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final drawerWidth = screenWidth * 0.82 > 320 ? 320.0 : screenWidth * 0.82;
+    // 移动端抽屉复用桌面侧栏条目，使分组、数量和选中态保持一致。
+    return Drawer(
+      width: drawerWidth,
+      backgroundColor: colors.surfaceContainerLow,
+      surfaceTintColor: Colors.transparent,
+      child: SafeArea(
+        child: Column(
+          children: [
+            SizedBox(
+              height: 58,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '内容导航',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: '关闭导航',
+                      onPressed:
+                          () => _workspaceScaffoldKey.currentState?.closeDrawer(),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Divider(height: 1, color: colors.outlineVariant),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(10, 10, 10, 16),
+                children: [
+                  _SidebarButton(
+                    icon: Icons.home_outlined,
+                    title: '首页',
+                    count: null,
+                    showCount: false,
+                    active: _view == 'home',
+                    onPressed:
+                        () => _selectFromMobileNavigation(_selectHome),
+                  ),
+                  _SidebarButton(
+                    icon: Icons.history_rounded,
+                    title: '播放记录',
+                    count: null,
+                    showCount: false,
+                    active: _view == 'recently-played',
+                    onPressed:
+                        () => _selectFromMobileNavigation(
+                          _selectRecentlyPlayed,
+                        ),
+                  ),
+                  const Divider(height: 28),
+                  const _SidebarSectionTitle('媒体库'),
+                  ..._libraries.map(
+                    (library) => _SidebarButton(
+                      icon: Icons.video_library_outlined,
+                      title: library.name,
+                      count: _libraryCounts[library.id],
+                      active:
+                          _view == 'library' && library.id == _activeId,
+                      onPressed:
+                          () => _selectFromMobileNavigation(
+                            () => _selectLibrary(library.id),
+                          ),
+                    ),
+                  ),
+                  // 演员入口与媒体库分组显示，避免与动态媒体库名称混淆。
+                  const Divider(height: 28),
+                  _SidebarButton(
+                    icon: Icons.groups_outlined,
+                    title: '演员列表',
+                    count: null,
+                    showCount: false,
+                    active: _view == 'people',
+                    onPressed:
+                        () => _selectFromMobileNavigation(_selectPeople),
+                  ),
+                  const Divider(height: 28),
+                  const _SidebarSectionTitle('收藏'),
+                  _SidebarButton(
+                    icon: Icons.movie_outlined,
+                    title: '影片',
+                    count: _favoriteMovieCount,
+                    active: _view == 'favorite-movies',
+                    loading: _favoriteMovieLoading,
+                    onPressed:
+                        () => _selectFromMobileNavigation(
+                          () => _selectFavorites('favorite-movies'),
+                        ),
+                  ),
+                  _SidebarButton(
+                    icon: Icons.person_outline,
+                    title: '演员',
+                    count: _favoritePeopleCount,
+                    active: _view == 'favorite-people',
+                    loading: _favoritePeopleLoading,
+                    onPressed:
+                        () => _selectFromMobileNavigation(
+                          () => _selectFavorites('favorite-people'),
+                        ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildSidebarToggle(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final label = _sidebarCollapsed ? '展开侧栏' : '收起侧栏';
