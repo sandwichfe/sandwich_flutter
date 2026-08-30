@@ -21,9 +21,9 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
       height: 42,
       child: TextField(
         controller: _searchController,
-        enabled: !_loading,
-        onChanged: (_) => setState(() {}),
-        onSubmitted: (_) => _applyQuery(),
+        // 查询期间保持可输入，并像首页搜索一样在输入变化后自动触发查询。
+        onChanged: _scheduleSearch,
+        onSubmitted: _submitSearch,
         decoration: InputDecoration(
           isDense: true,
           filled: true,
