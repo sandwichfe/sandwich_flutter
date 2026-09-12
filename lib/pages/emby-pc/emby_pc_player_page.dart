@@ -1195,6 +1195,8 @@ class _PlayerControlsState extends State<_PlayerControls> {
                   opacity: controlsVisible ? 1 : 0,
                   duration: const Duration(milliseconds: 180),
                   child: Listener(
+                    // 整个控制栏矩形都拦截点击，避免透明间距将事件透传给视频播放区域。
+                    behavior: HitTestBehavior.opaque,
                     // 操作按钮或拖动进度条期间暂停倒计时，松手后重新计时。
                     onPointerDown: _handleControlsPointerDown,
                     onPointerUp: _handleControlsPointerEnd,
@@ -1213,6 +1215,8 @@ class _PlayerControlsState extends State<_PlayerControls> {
                           return Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
+                              // 向进度条上方扩展透明命中范围，不改变现有控件的屏幕位置。
+                              const SizedBox(height: 8),
                               // 时间轴只保留极窄的窗口边距，下方按钮继续使用舒适的操作间距。
                               Padding(
                                 padding: const EdgeInsets.symmetric(
