@@ -839,6 +839,9 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   }
 
   Future<void> _playItem(EmbyPcItem item) async {
+    // 直接播放返回后会刷新列表，提前记录位置，避免列表重建时滚动到顶部。
+    final scrollOffset =
+        _scrollController.hasClients ? _scrollController.offset : null;
     final played = await Navigator.of(context).push<bool>(
       embyPcFadeRoute(
         context,
@@ -849,7 +852,19 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       ),
     );
     // 直接播放返回后刷新当前工作台视图，避免继续显示旧的播放进度。
-    if (played == true && mounted) await _reloadMediaAfterChange();
+    if (played != true || !mounted) return;
+    await _reloadMediaAfterChange();
+    if (!mounted || scrollOffset == null) return;
+    // 列表刷新后的尺寸需要到下一帧才能确定，再将位置恢复到有效滚动范围。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      final position = _scrollController.position;
+      _scrollController.jumpTo(
+        scrollOffset
+            .clamp(position.minScrollExtent, position.maxScrollExtent)
+            .toDouble(),
+      );
+    });
   }
 
   @override
