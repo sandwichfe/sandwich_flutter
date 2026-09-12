@@ -444,7 +444,7 @@ class _Summary extends StatelessWidget {
   }
 }
 
-// 媒体源使用紧凑下拉选择器展示，单版本时仍显示当前默认源。
+// 单版本使用静态胶囊展示，多版本使用带数量提示的紧凑下拉选择器。
 class _MediaSourcesSection extends StatelessWidget {
   final List<EmbyPcMediaSource> sources;
   final ValueChanged<String> onSelect;
@@ -459,81 +459,132 @@ class _MediaSourcesSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    // 服务端将首个媒体源作为当前默认版本，胶囊和菜单勾选保持一致。
+    // 服务端将首个媒体源作为当前默认版本，展示内容和菜单勾选保持一致。
     final selectedSource = sources.first;
+    final selectedTitle = _sourceTitle(selectedSource, 0);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Text('版本', style: TextStyle(color: colors.onSurfaceVariant)),
         const SizedBox(width: 10),
-        // 窄屏时下拉选择器可在标签后的剩余宽度内收缩，避免右侧内容溢出。
+        // 名称保持单行，空间不足时通过悬停提示查看完整内容，避免改变摘要区高度。
         Flexible(
-          child: PopupMenuButton<String?>(
-            tooltip: '选择媒体版本',
-            offset: const Offset(0, 8),
-            position: PopupMenuPosition.under,
-            color: colors.surfaceContainerHigh,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
-            onSelected: (mediaSourceId) {
-              if (mediaSourceId != null && mediaSourceId.isNotEmpty) {
-                onSelect(mediaSourceId);
-              }
-            },
-            itemBuilder: (context) => [
-              for (var index = 0; index < sources.length; index++)
-                PopupMenuItem<String?>(
-                  value: sources[index].id.isEmpty ? null : sources[index].id,
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.check,
-                        color: sources[index].id == selectedSource.id
-                            ? colors.onSurface
-                            : Colors.transparent,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 10),
-                      Flexible(
-                        child: Text(
-                          _sourceTitle(sources[index], index),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+          child:
+              sources.length == 1
+                  ? Tooltip(
+                    message: selectedTitle,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 310),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: colors.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 7,
+                          ),
+                          child: Text(
+                            selectedTitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                       ),
+                    ),
+                  )
+                  : PopupMenuButton<String?>(
+                    tooltip: '选择媒体版本：$selectedTitle',
+                    offset: const Offset(0, 8),
+                    position: PopupMenuPosition.under,
+                    color: colors.surfaceContainerHigh,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    onSelected: (mediaSourceId) {
+                      if (mediaSourceId != null && mediaSourceId.isNotEmpty) {
+                        onSelect(mediaSourceId);
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      for (var index = 0; index < sources.length; index++)
+                        PopupMenuItem<String?>(
+                          value:
+                              sources[index].id.isEmpty
+                                  ? null
+                                  : sources[index].id,
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.check,
+                                color:
+                                    sources[index].id == selectedSource.id
+                                        ? colors.onSurface
+                                        : Colors.transparent,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 10),
+                              Flexible(
+                                child: Tooltip(
+                                  message: _sourceTitle(sources[index], index),
+                                  child: Text(
+                                    _sourceTitle(sources[index], index),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                     ],
-                  ),
-                ),
-            ],
-            child: ConstrainedBox(
-              // 保持桌面端原有最大宽度，同时将移动端可用宽度传递给标题。
-              constraints: const BoxConstraints(maxWidth: 310),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: colors.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Padding(
-                  padding: const EdgeInsetsDirectional.fromSTEB(14, 7, 10, 7),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Flexible(
-                        child: Text(
-                          _sourceTitle(selectedSource, 0),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                    child: Tooltip(
+                      message: selectedTitle,
+                      child: ConstrainedBox(
+                        // 数量和箭头固定显示，名称在剩余宽度内省略。
+                        constraints: const BoxConstraints(maxWidth: 310),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: colors.surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsetsDirectional.fromSTEB(
+                              14,
+                              7,
+                              10,
+                              7,
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    selectedTitle,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  '${sources.length} 个',
+                                  style: TextStyle(
+                                    color: colors.onSurfaceVariant,
+                                  ),
+                                ),
+                                const SizedBox(width: 2),
+                                const Icon(
+                                  Icons.keyboard_arrow_down_rounded,
+                                  size: 20,
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
-                      const SizedBox(width: 6),
-                      const Icon(Icons.keyboard_arrow_down_rounded, size: 20),
-                    ],
+                    ),
                   ),
-                ),
-              ),
-            ),
-          ),
         ),
       ],
     );
