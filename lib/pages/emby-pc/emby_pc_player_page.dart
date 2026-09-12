@@ -1089,6 +1089,20 @@ class _PlayerControlsState extends State<_PlayerControls> {
 
     return CallbackShortcuts(
       bindings: {
+        // 桌面端播放快捷键仅响应首次按下，避免长按造成播放状态或全屏状态反复切换。
+        const SingleActivator(
+          LogicalKeyboardKey.space,
+          includeRepeats: false,
+        ): onTogglePlay,
+        const SingleActivator(
+          LogicalKeyboardKey.enter,
+          includeRepeats: false,
+        ): () => unawaited(_toggleFullscreen(context)),
+        // 同时支持桌面键盘的数字键盘回车键切换全屏。
+        const SingleActivator(
+          LogicalKeyboardKey.numpadEnter,
+          includeRepeats: false,
+        ): () => unawaited(_toggleFullscreen(context)),
         // 自定义控制层接管默认控制层的方向键交互。
         const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
             _seekBy(_keyboardRewindStep),
