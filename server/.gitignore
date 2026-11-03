@@ -1,0 +1,7 @@
+data/
+config.yaml
+embyx.log
+embyx.log.old
+*.exe
+*.test
+*.out
