@@ -3,5 +3,6 @@ config.yaml
 embyx.log
 embyx.log.old
 *.exe
+*.exe~
 *.test
 *.out

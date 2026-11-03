@@ -35,6 +35,10 @@ dist
 /build/
 /coverage/
 
+# 运行时数据 / 本地数据库
+/data/
+/server/data/
+
 # Symbolication related
 app.*.symbols
 
