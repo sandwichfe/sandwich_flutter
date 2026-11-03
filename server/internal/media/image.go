@@ -86,6 +86,11 @@ func (s *ImageStore) LoadUserAvatar(userID string) ([]byte, error) {
 	return readFileOrNotFound(s.UserAvatarPath(userID))
 }
 
+// RemoveItem 删除某个条目的全部图片，用于媒体库条目被清理时同步回收磁盘。
+func (s *ImageStore) RemoveItem(itemID string) error {
+	return os.RemoveAll(filepath.Join(s.root, sanitizeID(itemID)))
+}
+
 // Render 按客户端传入的最大宽度和画质重新编码，避免原图直出拖垮列表滚动。
 func Render(raw []byte, maxWidth int, quality int) ([]byte, error) {
 	if quality <= 0 || quality > 100 {

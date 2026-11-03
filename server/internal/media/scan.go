@@ -2,10 +2,10 @@ package media
 
 import (
 	"context"
-	"crypto/sha1"
-	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -37,23 +37,53 @@ func NewScanner(s *store.Store, prober *Prober, images *ImageStore) *Scanner {
 	return &Scanner{store: s, prober: prober, images: images}
 }
 
-// Scan 遍历媒体目录并入库；重复执行是幂等的（ID 由路径派生）。
-func (s *Scanner) Scan(ctx context.Context, roots []string, logf func(string, ...any)) (int, error) {
+// ScanAll 扫描数据库中配置的全部媒体库。
+func (s *Scanner) ScanAll(ctx context.Context, logf func(string, ...any)) (int, error) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
 
-	imported := 0
-	for order, root := range roots {
-		libraryID := stableID("library:" + root)
-		libraryName := filepath.Base(root)
-		if err := s.store.UpsertLibrary(ctx, libraryID, libraryName, "movies", root, order); err != nil {
-			return imported, err
-		}
-		logf("扫描媒体库 %s (%s)", libraryName, root)
+	libraries, err := s.store.Libraries(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if len(libraries) == 0 {
+		logf("尚未配置媒体库，跳过扫描")
+		return 0, nil
+	}
 
-		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-			if err != nil {
+	total := 0
+	for _, lib := range libraries {
+		imported, scanErr := s.ScanLibrary(ctx, lib, logf)
+		total += imported
+		if scanErr != nil {
+			logf("扫描媒体库 %s 失败: %v", lib.Name, scanErr)
+		}
+	}
+	logf("全部扫描完成，共导入 %d 个条目", total)
+	return total, nil
+}
+
+// ScanLibrary 扫描单个媒体库的所有目录；重复执行是幂等的（条目 ID 由路径派生）。
+func (s *Scanner) ScanLibrary(ctx context.Context, lib store.Library, logf func(string, ...any)) (int, error) {
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	if len(lib.Paths) == 0 {
+		logf("媒体库 %s 没有配置目录，跳过", lib.Name)
+		return 0, nil
+	}
+
+	imported := 0
+	for _, root := range lib.Paths {
+		if info, err := os.Stat(root); err != nil || !info.IsDir() {
+			logf("媒体库 %s 的目录不可访问，跳过: %s", lib.Name, root)
+			continue
+		}
+		logf("扫描媒体库 %s (%s)", lib.Name, root)
+
+		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
 				return nil
 			}
 			if ctx.Err() != nil {
@@ -69,7 +99,7 @@ func (s *Scanner) Scan(ctx context.Context, roots []string, logf func(string, ..
 				return nil
 			}
 
-			item, probeErr := s.buildItem(ctx, libraryID, path, logf)
+			item, probeErr := s.buildItem(ctx, lib.ID, path, logf)
 			if probeErr != nil {
 				logf("跳过 %s: %v", path, probeErr)
 				return nil
@@ -81,11 +111,11 @@ func (s *Scanner) Scan(ctx context.Context, roots []string, logf func(string, ..
 			imported++
 			return nil
 		})
-		if err != nil && err != context.Canceled {
+		if err != nil && !errors.Is(err, context.Canceled) {
 			return imported, err
 		}
 	}
-	logf("扫描完成，共导入 %d 个条目", imported)
+	logf("媒体库 %s 扫描完成，共处理 %d 个条目", lib.Name, imported)
 	return imported, nil
 }
 
@@ -97,7 +127,7 @@ func (s *Scanner) buildItem(ctx context.Context, libraryID, path string, logf fu
 
 	fileTitle, fileYear := parseFileName(filepath.Base(path))
 	item := &store.Item{
-		ID: stableID("item:" + path),
+		ID: store.StableID("item:" + path),
 		// Emby 语义里媒体库是条目的父节点，客户端浏览库内内容时传 ParentId=<库ID>。
 		LibraryID:      libraryID,
 		ParentID:       libraryID,
@@ -181,11 +211,6 @@ func cleanTitle(value string) string {
 	cleaned := titleSeparators.ReplaceAllString(value, " ")
 	cleaned = strings.ReplaceAll(cleaned, "  ", " ")
 	return strings.Trim(cleaned, " .-_[](){}")
-}
-
-func stableID(seed string) string {
-	sum := sha1.Sum([]byte(seed))
-	return hex.EncodeToString(sum[:16])
 }
 
 func (s *Scanner) String() string {

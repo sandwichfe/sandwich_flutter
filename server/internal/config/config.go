@@ -19,7 +19,6 @@ const defaultConfigName = "config.yaml"
 type Config struct {
 	Addr          string
 	DataDir       string
-	MediaRoots    []string
 	FFprobePath   string
 	FFmpegPath    string
 	AdminUser     string
@@ -36,9 +35,6 @@ type fileConfig struct {
 		Addr    string `yaml:"addr"`
 		DataDir string `yaml:"data_dir"`
 	} `yaml:"server"`
-	Library struct {
-		Roots []string `yaml:"roots"`
-	} `yaml:"library"`
 	Account struct {
 		AdminUser     string `yaml:"admin_user"`
 		AdminPassword string `yaml:"admin_password"`
@@ -117,10 +113,9 @@ func loadFile(path string) (fileConfig, error) {
 // yamlPathHint 针对最常见的"Windows 路径写进双引号"给出可直接照抄的写法。
 const yamlPathHint = `
 提示：路径请用单引号包裹，或改用正斜杠。双引号里的反斜杠会被 YAML 当作转义符：
-  roots:
-    - 'D:\Media\电影'                      # 单引号，推荐
-    - "D:/Media/电影"                      # 正斜杠
-    - '\\192.168.1.10\share\movies'        # UNC 网络路径必须用单引号`
+  ffmpeg:
+    ffprobe: 'D:\ffmpeg\bin\ffprobe.exe'   # 单引号，推荐
+    ffmpeg: "D:/ffmpeg/bin/ffmpeg.exe"     # 正斜杠`
 
 func (c *Config) applyFile(fc fileConfig) {
 	if value := strings.TrimSpace(fc.Server.Addr); value != "" {
@@ -128,9 +123,6 @@ func (c *Config) applyFile(fc fileConfig) {
 	}
 	if value := strings.TrimSpace(fc.Server.DataDir); value != "" {
 		c.DataDir = value
-	}
-	if len(fc.Library.Roots) > 0 {
-		c.MediaRoots = normalizeRootList(fc.Library.Roots)
 	}
 	if value := strings.TrimSpace(fc.Account.AdminUser); value != "" {
 		c.AdminUser = value
@@ -161,9 +153,6 @@ func (c *Config) applyEnv() {
 	if value := lookupEnv("EMBYX_DATA_DIR"); value != "" {
 		c.DataDir = value
 	}
-	if value := lookupEnv("EMBYX_MEDIA_ROOTS"); value != "" {
-		c.MediaRoots = splitRootString(value)
-	}
 	if value := lookupEnv("EMBYX_ADMIN_USER"); value != "" {
 		c.AdminUser = value
 	}
@@ -178,29 +167,13 @@ func (c *Config) applyEnv() {
 	}
 }
 
-// finalize 归一化路径、过滤不存在的媒体目录、创建数据目录。
+// finalize 归一化数据目录并创建所需子目录。
 func (c *Config) finalize() error {
 	abs, err := filepath.Abs(c.DataDir)
 	if err != nil {
 		return fmt.Errorf("解析数据目录失败: %w", err)
 	}
 	c.DataDir = abs
-
-	roots := make([]string, 0, len(c.MediaRoots))
-	for _, root := range c.MediaRoots {
-		absRoot, err := filepath.Abs(root)
-		if err != nil {
-			log.Printf("媒体目录路径无效，已跳过: %s", root)
-			continue
-		}
-		info, err := os.Stat(absRoot)
-		if err != nil || !info.IsDir() {
-			log.Printf("媒体目录不存在，已跳过: %s", absRoot)
-			continue
-		}
-		roots = append(roots, absRoot)
-	}
-	c.MediaRoots = roots
 
 	for _, dir := range []string{
 		c.DataDir,
@@ -215,38 +188,13 @@ func (c *Config) finalize() error {
 	return nil
 }
 
-// normalizeRootList 处理 YAML 列表：去空白、去包裹引号，不做分隔符切分
-// （目录名本身可能包含逗号或分号）。
-func normalizeRootList(values []string) []string {
-	seen := make(map[string]bool, len(values))
-	roots := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		value = strings.Trim(value, `"'`)
-		if value == "" || seen[value] {
-			continue
-		}
-		seen[value] = true
-		roots = append(roots, value)
-	}
-	return roots
-}
-
-// splitRootString 解析环境变量里的多目录写法（分号或逗号分隔）。
-func splitRootString(value string) []string {
-	parts := strings.FieldsFunc(value, func(r rune) bool {
-		return r == ';' || r == ','
-	})
-	return normalizeRootList(parts)
-}
-
 func lookupEnv(key string) string {
 	return strings.TrimSpace(os.Getenv(key))
 }
 
 const defaultConfigTemplate = `# embyx 配置文件
 # 修改后重启服务生效。
-# 环境变量（EMBYX_ADDR / EMBYX_MEDIA_ROOTS / EMBYX_ADMIN_PASSWORD ...）
+# 环境变量（EMBYX_ADDR / EMBYX_DATA_DIR / EMBYX_ADMIN_PASSWORD ...）
 # 优先级高于本文件，可用于临时覆盖。
 
 server:
@@ -254,16 +202,6 @@ server:
   addr: ":8096"
   # 数据库、图片、缓存目录；相对路径基于启动时的工作目录
   data_dir: "./data"
-
-library:
-  # 每个目录会生成一个媒体库，库名取目录名，子目录递归扫描。
-  # 路径建议用正斜杠，或用单引号包裹，避免 YAML 把反斜杠当转义符：
-  #   - 'D:\Media\电影'
-  roots: []
-  # 示例：
-  # roots:
-  #   - "D:/Media/电影"
-  #   - "D:/Media/剧集"
 
 account:
   # 仅在账号不存在时用于创建管理员；已存在的账号不会被这里覆盖

@@ -7,7 +7,7 @@ Emby 协议兼容的轻量媒体服务器骨架，目标是替换现有 Flutter 
 ## 已完成（P0 / P1 骨架）
 
 - 认证：`POST /emby/Users/AuthenticateByName`，令牌同时支持 `X-Emby-Token` 头与 `api_key` 参数
-- 媒体库：`GET /Users/{id}/Views`、`POST /Library/Refresh`（异步扫描）
+- 媒体库：`GET /Users/{id}/Views`、`GET/POST /Library/VirtualFolders`、`PUT /Library/VirtualFolders/{id}`、`POST /Library/VirtualFolders/Name`、`DELETE /Library/VirtualFolders`、`POST /Library/Refresh`（异步扫描）
 - 条目：`/Users/{id}/Items`（过滤/搜索/排序/分页）、`/Items/Resume`、`/Users/{id}/Items/{id}`、`/Persons`、`/Items/{id}/Similar`
 - 图片：条目图片 GET/上传/删除/列表，用户头像 GET/上传，按 `maxWidth` + `quality` 缩放
 - 播放：`POST /Items/{id}/PlaybackInfo`、`GET /Videos/{id}/stream`（完整 Range 支持）、`GET /Videos/{id}/index.bif`
@@ -116,11 +116,6 @@ server:
   addr: ":8096"          # 监听地址，":8096" 表示所有网卡
   data_dir: "./data"     # 数据库 / 图片 / 缓存目录
 
-library:
-  roots:                 # 每个目录 = 一个媒体库，库名取目录名
-    - "D:/Media/电影"
-    - "D:/Media/剧集"
-
 account:
   admin_user: admin
   admin_password: admin  # 仅在首次创建账号时使用
@@ -130,14 +125,16 @@ ffmpeg:
   ffmpeg: ffmpeg
 ```
 
-路径写法：
+媒体库不再写在配置文件里，改由客户端「设置 → 媒体库管理」维护（`Library/VirtualFolders` 接口），
+启动时也不会自动扫描，需要在设置页点扫描或调用 `POST /Library/Refresh`。
+
+路径写法（`ffmpeg`、`data_dir` 等路径字段同理）：
 
 | 写法 | 示例 | 说明 |
 |---|---|---|
-| 单引号（推荐） | `- 'D:\Media\电影'` | 反斜杠原样保留 |
-| 正斜杠 | `- "D:/Media/电影"` | 跨平台写法 |
-| UNC 网络路径 | `- '\\192.168.1.10\share\movies'` | **必须用单引号** |
-| 双引号 + 反斜杠 | `- "\\192.168\share"` | 报 `unknown escape character` |
+| 单引号（推荐） | `ffprobe: 'D:\ffmpeg\bin\ffprobe.exe'` | 反斜杠原样保留 |
+| 正斜杠 | `ffprobe: "D:/ffmpeg/bin/ffprobe.exe"` | 跨平台写法 |
+| 双引号 + 反斜杠 | `ffprobe: "D:\ffmpeg\bin\ffprobe.exe"` | 报 `unknown escape character` |
 
 双引号里的反斜杠会被 YAML 当成转义符，这是最常见的启动失败原因。
 
@@ -155,7 +152,6 @@ ffmpeg:
 | `EMBYX_CONFIG` | 配置文件路径，默认 `./config.yaml` |
 | `EMBYX_ADDR` | 监听地址 |
 | `EMBYX_DATA_DIR` | 数据目录 |
-| `EMBYX_MEDIA_ROOTS` | 媒体目录，多个用 `;` 或 `,` 分隔 |
 | `EMBYX_ADMIN_USER` / `EMBYX_ADMIN_PASSWORD` | 管理员账号 |
 | `EMBYX_FFPROBE` / `EMBYX_FFMPEG` | ffmpeg 工具路径 |
 

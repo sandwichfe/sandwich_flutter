@@ -180,16 +180,22 @@ func (s *Server) handleUpdateItem(w http.ResponseWriter, r *http.Request) {
 	writeNoContent(w)
 }
 
-// handleRefreshItem 预留给元数据刮削管线，当前只记录请求。
+// handleRefreshItem 当 id 是媒体库时触发该库扫描，否则保留元数据刷新占位。
 func (s *Server) handleRefreshItem(w http.ResponseWriter, r *http.Request) {
-	user := currentUser(r)
-	if user == nil || !user.IsAdmin {
-		writeError(w, http.StatusForbidden, "需要管理员权限")
+	if !s.requireAdmin(w, r) {
 		return
 	}
+	itemID := r.PathValue("itemId")
+
+	if lib, err := s.store.LibraryByID(r.Context(), itemID); err == nil {
+		s.scanLibraryAsync(lib)
+		writeNoContent(w)
+		return
+	}
+
 	log.Printf("收到元数据刷新请求 item=%s mode=%s",
-		r.PathValue("itemId"), r.URL.Query().Get("MetadataRefreshMode"))
-	// TODO: 接入 TMDB/TVDB 刮削后在这里下发任务。
+		itemID, r.URL.Query().Get("MetadataRefreshMode"))
+	// TODO: NFO 重新解析后在这里下发任务。
 	writeNoContent(w)
 }
 

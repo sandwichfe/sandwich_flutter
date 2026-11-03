@@ -51,7 +51,7 @@ func applyNFO(item *store.Item, nfo *NFOData) {
 	if len(nfo.Studios) > 0 {
 		studios := make([]dto.NameIDPair, 0, len(nfo.Studios))
 		for _, name := range nfo.Studios {
-			studios = append(studios, dto.NameIDPair{ID: stableID("studio:" + name), Name: name})
+			studios = append(studios, dto.NameIDPair{ID: store.StableID("studio:" + name), Name: name})
 		}
 		item.Studios = studios
 	}
@@ -84,7 +84,7 @@ func buildPeople(nfo *NFOData) []dto.PersonDto {
 		}
 		seen[key] = true
 		people = append(people, dto.PersonDto{
-			ID:   stableID("person:" + name),
+			ID:   store.StableID("person:" + name),
 			Name: name,
 			Role: role,
 			Type: kind,
@@ -171,7 +171,7 @@ func (s *Scanner) importArtwork(item *store.Item, videoPath string, logf func(st
 
 	// .actors/<演员名>.jpg 由 tinyMediaManager 一类工具生成。
 	for name, path := range FindActorImages(videoPath) {
-		personID := stableID("person:" + name)
+		personID := store.StableID("person:" + name)
 		tag, err := s.saveArtwork(personID, "Primary", 0, path)
 		if err != nil {
 			continue

@@ -2,6 +2,7 @@ package store
 
 import (
 	"crypto/rand"
+	"crypto/sha1"
 	"database/sql"
 	_ "embed"
 	"encoding/hex"
@@ -37,7 +38,74 @@ func Open(dbPath string) (*Store, error) {
 	if _, err := db.Exec(schemaSQL); err != nil {
 		return nil, fmt.Errorf("初始化表结构失败: %w", err)
 	}
-	return &Store{db: db}, nil
+	store := &Store{db: db}
+	if err := store.migrate(); err != nil {
+		return nil, err
+	}
+	return store, nil
+}
+
+// migrate 处理建表语句覆盖不到的增量变更（CREATE TABLE IF NOT EXISTS 不会补列）。
+func (s *Store) migrate() error {
+	columns, err := s.tableColumns("libraries")
+	if err != nil {
+		return err
+	}
+	if !columns["paths"] {
+		if _, err := s.db.Exec(`ALTER TABLE libraries ADD COLUMN paths TEXT NOT NULL DEFAULT '[]'`); err != nil {
+			return fmt.Errorf("为 libraries 增加 paths 列失败: %w", err)
+		}
+	}
+
+	// 把旧的单目录 path 回填到 paths。
+	rows, err := s.db.Query(`SELECT id, path FROM libraries WHERE paths = '[]' AND path <> ''`)
+	if err != nil {
+		return err
+	}
+	type pendingRow struct{ id, path string }
+	pending := make([]pendingRow, 0, 4)
+	for rows.Next() {
+		var row pendingRow
+		if err := rows.Scan(&row.id, &row.path); err != nil {
+			rows.Close()
+			return err
+		}
+		pending = append(pending, row)
+	}
+	rows.Close()
+
+	for _, row := range pending {
+		if _, err := s.db.Exec(`UPDATE libraries SET paths = ? WHERE id = ?`,
+			marshalJSON([]string{row.path}), row.id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) tableColumns(table string) (map[string]bool, error) {
+	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return nil, fmt.Errorf("读取表结构失败: %w", err)
+	}
+	defer rows.Close()
+
+	columns := map[string]bool{}
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			columnType string
+			notNull    int
+			defaultVal sql.NullString
+			primaryKey int
+		)
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultVal, &primaryKey); err != nil {
+			return nil, err
+		}
+		columns[name] = true
+	}
+	return columns, rows.Err()
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -51,6 +119,12 @@ func NewID() string {
 		return fmt.Sprintf("%d", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(buf)
+}
+
+// StableID 由种子派生固定 ID，用于路径、姓名这类需要幂等的对象。
+func StableID(seed string) string {
+	sum := sha1.Sum([]byte(seed))
+	return hex.EncodeToString(sum[:16])
 }
 
 func NowISO() string {

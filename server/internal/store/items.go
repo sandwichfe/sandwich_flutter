@@ -282,49 +282,6 @@ func (s *Store) getRawItem(ctx context.Context, itemID string) (*Item, error) {
 	return item, err
 }
 
-// Libraries 返回媒体库列表，对应客户端 /Users/{id}/Views。
-func (s *Store) Libraries(ctx context.Context) ([]dto.BaseItemDto, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, collection_type, path FROM libraries ORDER BY sort_order ASC, name ASC`)
-	if err != nil {
-		return nil, fmt.Errorf("查询媒体库失败: %w", err)
-	}
-	defer rows.Close()
-
-	result := make([]dto.BaseItemDto, 0, 8)
-	for rows.Next() {
-		var id, name, collectionType, path string
-		if err := rows.Scan(&id, &name, &collectionType, &path); err != nil {
-			return nil, err
-		}
-		item := dto.BaseItemDto{
-			ID:             id,
-			Name:           name,
-			Type:           "CollectionFolder",
-			CollectionType: collectionType,
-			IsFolder:       true,
-			ImageTags:      map[string]string{},
-		}
-		if path != "" {
-			item.Locations = []string{path}
-		}
-		result = append(result, item)
-	}
-	return result, rows.Err()
-}
-
-func (s *Store) UpsertLibrary(ctx context.Context, id, name, collectionType, path string, sortOrder int) error {
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO libraries (id, name, collection_type, path, sort_order)
-		 VALUES (?, ?, ?, ?, ?)
-		 ON CONFLICT(id) DO UPDATE SET
-		   name = excluded.name, collection_type = excluded.collection_type,
-		   path = excluded.path, sort_order = excluded.sort_order`,
-		id, name, collectionType, path, sortOrder,
-	)
-	return err
-}
-
 // 插入列顺序与 UpsertItem 的参数顺序严格一致；占位符动态生成，避免手数出错。
 var itemInsertColumns = []string{
 	"id", "library_id", "parent_id", "type", "name", "sort_name", "overview",

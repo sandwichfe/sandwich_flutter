@@ -165,7 +165,7 @@ SQLite，单文件 `data/embyx.db`，WAL 模式，`SetMaxOpenConns(1)`。
 |---|---|---|
 | `users` | 用户 | 账号、sha256 加盐密码哈希、是否管理员、头像 tag |
 | `tokens` | 登录令牌 | `token → user_id`，当前**没有过期机制** |
-| `libraries` | 媒体库 | 一个 `roots` 目录一行，`id = sha1("library:"+路径)` |
+| `libraries` | 媒体库 | 界面创建的库，一行可挂多个目录（`paths` JSON 列） |
 | `items` | 媒体条目 | 一部视频一行，29 个字段，复杂结构用 JSON 列 |
 | `user_data` | 用户×条目 | 收藏、已看、播放进度、播放次数、最后播放时间 |
 | `play_sessions` | 播放会话 | 目前只写不读，为后续"正在播放"看板预留 |
@@ -243,26 +243,26 @@ is_favorite | played | playback_position_ticks | play_count | last_played_date
 config.Load
   ├─ 读 config.yaml（不存在则生成模板）
   ├─ 环境变量覆盖
-  ├─ 媒体目录规范化：相对→绝对，不存在的剔除并告警
+  ├─ 数据目录相对→绝对
   └─ 创建 data/ 子目录
       ↓
 store.Open → 建表（IF NOT EXISTS）
       ↓
 store.EnsureAdmin → 账号不存在才创建
       ↓
-httpapi.New → 注册 27 条路由
+httpapi.New → 注册 32 条路由
       ↓
 ListenAndServe :8096
-      ↓
-若 library.roots 非空 → goroutine 后台扫描（不阻塞启动）
 ```
 
-扫描是异步的，所以**启动瞬间客户端可能看到空库**，等日志出现「扫描完成」再刷新。
+启动时既不初始化也不扫描媒体库：库列表全部来自数据库，由客户端「设置 → 媒体库管理」
+（`Library/VirtualFolders` 接口）创建和维护；扫描由 `POST /Library/Refresh` 或
+`POST /Items/{id}/Refresh`（id 为媒体库时）异步触发。
 
 ### 4.2 扫描入库
 
 ```
-library.roots[i]
+扫描目标的媒体库目录（libraries.paths）
    ↓ filepath.WalkDir（递归，跳过 @eaDir / $RECYCLE.BIN 等）
 视频文件（.mkv .mp4 .avi .mov .wmv .ts .m2ts .flv .webm .rmvb）
    ↓ ffprobe -show_format -show_streams
@@ -374,7 +374,7 @@ GET /Videos/{id}/index.bif?Width=320
 
 | 对象 | 种子 | 稳定性 |
 |---|---|---|
-| 媒体库 | `library:` + 根目录绝对路径 | 改路径会变 |
+| 媒体库 | 随机 | — |
 | 条目 | `item:` + 视频绝对路径 | 改名/移动会变 |
 | 人物 | `person:` + 姓名 | 姓名不变就稳定 |
 | 工作室 | `studio:` + 名称 | 稳定 |

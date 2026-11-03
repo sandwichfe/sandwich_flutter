@@ -19,7 +19,9 @@ CREATE TABLE IF NOT EXISTS libraries (
     id              TEXT PRIMARY KEY,
     name            TEXT NOT NULL,
     collection_type TEXT NOT NULL DEFAULT 'movies',
+    -- path 保留作为单目录兼容字段，paths 是权威数据（JSON 数组，支持一个库多个目录）
     path            TEXT NOT NULL DEFAULT '',
+    paths           TEXT NOT NULL DEFAULT '[]',
     sort_order      INTEGER NOT NULL DEFAULT 0
 );
 

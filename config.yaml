@@ -1,0 +1,33 @@
+# embyx 配置文件
+# 修改后重启服务生效。
+# 环境变量（EMBYX_ADDR / EMBYX_MEDIA_ROOTS / EMBYX_ADMIN_PASSWORD ...）
+# 优先级高于本文件，可用于临时覆盖。
+
+server:
+  # 监听地址；":8096" 表示监听所有网卡的 8096 端口
+  addr: ":8096"
+  # 数据库、图片、缓存目录；相对路径基于启动时的工作目录
+  data_dir: "./data"
+
+library:
+  # 每个目录会生成一个媒体库，库名取目录名，子目录递归扫描。
+  # 路径建议用正斜杠，或用单引号包裹，避免 YAML 把反斜杠当转义符：
+  #   - 'D:\Media\电影'
+  roots: []
+  # 示例：
+  # roots:
+  #   - "D:/Media/电影"
+  #   - "D:/Media/剧集"
+
+account:
+  # 仅在账号不存在时用于创建管理员；已存在的账号不会被这里覆盖
+  admin_user: admin
+  admin_password: admin
+
+ffmpeg:
+  # 不在 PATH 中时填写绝对路径
+  ffprobe: ffprobe
+  ffmpeg: ffmpeg
+
+# 登录令牌有效期（Go duration 格式），预留项
+token_ttl: 720h

@@ -66,13 +66,10 @@ func main() {
 		}
 	}()
 
-	// 首次启动时如果配置了媒体目录，后台异步扫描一遍。
-	if len(cfg.MediaRoots) > 0 {
-		go func() {
-			if _, err := scanner.Scan(context.Background(), cfg.MediaRoots, log.Printf); err != nil {
-				log.Printf("启动扫描失败: %v", err)
-			}
-		}()
+	// 媒体库完全由设置页（VirtualFolders 接口）维护，
+	// 启动时既不初始化也不扫描，这里只打印数据库里已有的数量。
+	if libraries, err := st.Libraries(context.Background()); err == nil {
+		log.Printf("已配置媒体库 %d 个（扫描需手动触发）", len(libraries))
 	}
 
 	stop := make(chan os.Signal, 1)

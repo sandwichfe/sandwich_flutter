@@ -48,6 +48,11 @@ func (s *Server) routes() {
 	// 媒体库
 	s.mux.HandleFunc("GET /emby/Users/{userId}/Views", s.handleViews)
 	s.mux.HandleFunc("POST /emby/Library/Refresh", s.handleLibraryRefresh)
+	s.mux.HandleFunc("GET /emby/Library/VirtualFolders", s.handleListVirtualFolders)
+	s.mux.HandleFunc("POST /emby/Library/VirtualFolders", s.handleCreateVirtualFolder)
+	s.mux.HandleFunc("DELETE /emby/Library/VirtualFolders", s.handleDeleteVirtualFolder)
+	s.mux.HandleFunc("POST /emby/Library/VirtualFolders/Name", s.handleRenameVirtualFolder)
+	s.mux.HandleFunc("PUT /emby/Library/VirtualFolders/{libraryId}", s.handleUpdateVirtualFolder)
 
 	// 条目查询
 	s.mux.HandleFunc("GET /emby/Users/{userId}/Items", s.handleItems)
