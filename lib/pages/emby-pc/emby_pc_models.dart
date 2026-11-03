@@ -431,6 +431,33 @@ class EmbyPcPage {
   }
 }
 
+// 媒体库管理走 VirtualFolders 接口，比 Views 多返回目录列表和条目数。
+class EmbyPcVirtualFolder {
+  final String id;
+  final String name;
+  final String collectionType;
+  final List<String> locations;
+  final int itemCount;
+
+  const EmbyPcVirtualFolder({
+    required this.id,
+    required this.name,
+    required this.collectionType,
+    required this.locations,
+    required this.itemCount,
+  });
+
+  factory EmbyPcVirtualFolder.fromJson(Map<String, dynamic> json) =>
+      EmbyPcVirtualFolder(
+        // ItemId 与 Views 的 Id 是同一个媒体库主键，PUT/DELETE 都用它。
+        id: _text(json['ItemId']),
+        name: _text(json['Name']),
+        collectionType: _text(json['CollectionType']),
+        locations: _strings(json['Locations']),
+        itemCount: _integer(json['ItemCount']),
+      );
+}
+
 Map<String, dynamic> _map(dynamic value) =>
     value is Map ? Map<String, dynamic>.from(value) : <String, dynamic>{};
 

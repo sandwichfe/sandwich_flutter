@@ -713,7 +713,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         barrierDismissible: false,
         builder: (context) => EmbyPcItemImagesDialog(item: library),
       );
-      if (changed == true && mounted) await _reloadLibrariesAfterImageChange();
+      if (changed == true && mounted) await _reloadLibraries();
       return;
     }
 
@@ -767,7 +767,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     }
   }
 
-  Future<void> _reloadLibrariesAfterImageChange() async {
+  // 图像、媒体库增删改都会改变侧边栏结构，统一重新拉取 Views。
+  Future<void> _reloadLibraries() async {
     try {
       final libraries = await EmbyPcService.instance.getLibraries();
       if (!mounted) return;

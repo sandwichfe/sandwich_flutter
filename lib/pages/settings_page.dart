@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
+import 'emby-pc/emby_pc_detail_page.dart';
+import 'emby-pc/emby_pc_library_admin_page.dart';
 import 'emby-pc/emby_pc_service.dart';
 import 'user_profile_page.dart';
 import '../utils/theme_manager.dart';
@@ -99,6 +101,20 @@ class _SettingsPageState extends State<SettingsPage> {
               trailing: const Icon(Icons.chevron_right),
               // 排序状态仍由媒体工作台维护，设置页只承载功能入口。
               onTap: widget.onAdjustLibraryOrder,
+            ),
+            const Divider(height: 1, indent: 72),
+            ListTile(
+              leading: const Icon(Icons.video_library_outlined),
+              title: const Text('媒体库管理'),
+              subtitle: const Text('新建、编辑、删除与扫描媒体库'),
+              trailing: const Icon(Icons.chevron_right),
+              // 管理页需要管理员权限，失败时由服务层统一提示。
+              onTap: () => Navigator.of(context).push(
+                embyPcFadeRoute(
+                  context,
+                  (_) => const EmbyPcLibraryAdminPage(),
+                ),
+              ),
             ),
             const Divider(height: 1, indent: 72),
             const _SettingsSectionTitle('显示'),

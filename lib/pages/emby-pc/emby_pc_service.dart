@@ -126,6 +126,92 @@ class EmbyPcService {
     return _responseText(response, '扫描媒体库失败');
   }
 
+  // ---- 媒体库（VirtualFolders）管理 ----
+
+  Future<List<EmbyPcVirtualFolder>> getVirtualFolders() async {
+    final response = await http.get(
+      _uri('/emby/Library/VirtualFolders'),
+      headers: _tokenHeader,
+    );
+    _ensureSuccess(response, '读取媒体库失败');
+    if (response.bodyBytes.isEmpty) return const [];
+    final data = jsonDecode(utf8.decode(response.bodyBytes));
+    if (data is! List) throw const EmbyPcException('读取媒体库失败：响应格式错误');
+    return data
+        .whereType<Map>()
+        .map((item) => EmbyPcVirtualFolder.fromJson(_asMap(item)))
+        .toList();
+  }
+
+  // 后端以同名视为更新，因此新建与"保存"共用这一个入口。
+  Future<void> createVirtualFolder({
+    required String name,
+    required String collectionType,
+    required List<String> paths,
+    bool refreshLibrary = true,
+  }) async {
+    final response = await http.post(
+      // paths 允许重复出现，Uri 的 queryParameters 支持可迭代值。
+      _uri('/emby/Library/VirtualFolders', {
+        'name': name.trim(),
+        'collectionType': collectionType,
+        'paths': paths,
+        'refreshLibrary': '$refreshLibrary',
+      }),
+      headers: _tokenHeader,
+    );
+    _ensureSuccess(response, '创建媒体库失败');
+  }
+
+  Future<void> updateVirtualFolder(
+    String libraryId, {
+    required String name,
+    required String collectionType,
+    required List<String> paths,
+  }) async {
+    final response = await http.put(
+      _uri('/emby/Library/VirtualFolders/$libraryId'),
+      headers: {..._tokenHeader, 'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'Name': name.trim(),
+        'CollectionType': collectionType,
+        'Paths': paths,
+      }),
+    );
+    _ensureSuccess(response, '保存媒体库失败');
+  }
+
+  Future<void> renameVirtualFolder({
+    required String name,
+    required String newName,
+  }) async {
+    final response = await http.post(
+      _uri('/emby/Library/VirtualFolders/Name', {
+        'name': name,
+        'newName': newName.trim(),
+      }),
+      headers: _tokenHeader,
+    );
+    _ensureSuccess(response, '重命名媒体库失败');
+  }
+
+  Future<void> deleteVirtualFolder(String libraryId) async {
+    final response = await http.delete(
+      _uri('/emby/Library/VirtualFolders', {'id': libraryId}),
+      headers: _tokenHeader,
+    );
+    _ensureSuccess(response, '删除媒体库失败');
+  }
+
+  // 条目级刷新：后端发现 id 属于媒体库时直接触发该库扫描。
+  Future<String> scanLibraryItem(String libraryId) async {
+    final response = await http.post(
+      _uri('/emby/Items/$libraryId/Refresh', {'Recursive': 'true'}),
+      headers: _tokenHeader,
+    );
+    return _responseText(response, '扫描媒体库失败');
+  }
+
   Future<String> refreshMetadata(
     String itemId, {
     required String mode,
@@ -610,7 +696,8 @@ class EmbyPcService {
     return _decodeResponse(response, 'Emby 请求失败');
   }
 
-  Uri _uri(String path, [Map<String, String>? query]) =>
+  // 值支持 Iterable<String>，用于 paths 这类需要重复同名参数的接口。
+  Uri _uri(String path, [Map<String, dynamic>? query]) =>
       Uri.parse('$serverUrl$path').replace(queryParameters: query);
 
   Map<String, String> get _tokenHeader => {'X-Emby-Token': accessToken};
