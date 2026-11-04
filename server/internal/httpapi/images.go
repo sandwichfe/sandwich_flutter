@@ -88,15 +88,28 @@ func (s *Server) loadItemImage(r *http.Request, itemID, imageType string, index 
 	if s.preferGeneratedArtwork(r, itemID) {
 		raw, err := s.images.LoadGeneratedImage(itemID, imageType, index)
 		if errors.Is(err, media.ErrImageNotFound) {
+			s.logArtworkPick(r, "generated 缺失→回退 local", s.images.ItemPath(itemID, imageType, index))
 			return s.images.LoadItemImage(itemID, imageType, index)
 		}
+		s.logArtworkPick(r, "generated", s.images.GeneratedPath(itemID, imageType, index))
 		return raw, err
 	}
 	raw, err := s.images.LoadItemImage(itemID, imageType, index)
 	if errors.Is(err, media.ErrImageNotFound) {
+		s.logArtworkPick(r, "local 缺失→回退 generated", s.images.GeneratedPath(itemID, imageType, index))
 		return s.images.LoadGeneratedImage(itemID, imageType, index)
 	}
+	s.logArtworkPick(r, "local", s.images.ItemPath(itemID, imageType, index))
 	return raw, err
+}
+
+// logArtworkPick 打印客户端这次实际读到的图片文件，用于确认界面显示的是目录图还是生成图。
+// 只在 URL 带 debugArtwork=1 时输出，避免每个图片请求都刷日志。
+func (s *Server) logArtworkPick(r *http.Request, source string, path string) {
+	if r.URL.Query().Get("debugArtwork") == "" {
+		return
+	}
+	log.Printf("[image] 读取=%s 文件=%q", source, path)
 }
 
 // preferGeneratedArtwork 的优先级：显式 Source 参数（图像编辑弹窗预览用）>

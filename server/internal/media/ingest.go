@@ -130,6 +130,13 @@ func normalizeProviderIDs(ids map[string]string) map[string]string {
 // importArtwork 把目录里的本地图片拷进自管图片目录，并把 tag 回写到条目。
 func (s *Scanner) importArtwork(item *store.Item, videoPath string, logf func(string, ...any)) {
 	art := FindArtwork(videoPath)
+	// 目录图回退（poster/folder/cover/movie）会让同目录多个视频共用一张图，
+	// 这行日志能直接看出每个条目的海报究竟来自哪个文件。
+	primarySource := art.Primary
+	if primarySource == "" {
+		primarySource = "（未找到）"
+	}
+	logf("匹配图片 %s → 海报=%s 背景=%d 张", videoPath, primarySource, len(art.Backdrops))
 
 	if art.Primary != "" {
 		if tag, err := s.saveArtwork(item.ID, "Primary", 0, art.Primary); err == nil {

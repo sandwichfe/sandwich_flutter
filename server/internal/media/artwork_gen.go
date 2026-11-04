@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"image"
 	_ "image/jpeg"
+	"log"
 	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -96,6 +98,9 @@ func (g *ArtworkGenerator) Generate(ctx context.Context, itemID string, opts Art
 			durationSeconds = float64(info.DurationTicks) / 10_000_000
 		}
 	}
+	// 排查"生成出来不是本片画面"时，先确认这条日志里的源文件是不是目标视频。
+	log.Printf("[artwork] 生成请求 item=%s 源文件=%q 时长=%.2fs 类型=%v",
+		itemID, opts.SourcePath, durationSeconds, types)
 
 	unlock := g.lockItem(itemID)
 	defer unlock()
@@ -113,6 +118,8 @@ func (g *ArtworkGenerator) Generate(ctx context.Context, itemID string, opts Art
 		positionSeconds = durationSeconds * 0.95
 	}
 	result.PositionTicks = int64(math.Round(positionSeconds * 10_000_000))
+	log.Printf("[artwork] 截取源头 item=%s 源文件=%q 位置=%.3fs 嗅探=%v 时长=%.2fs",
+		itemID, opts.SourcePath, positionSeconds, result.Sniffed, durationSeconds)
 
 	for _, imageType := range types {
 		width, height := artworkSize(imageType, opts.Width)
@@ -128,6 +135,8 @@ func (g *ArtworkGenerator) Generate(ctx context.Context, itemID string, opts Art
 		if err != nil {
 			return result, err
 		}
+		log.Printf("[artwork] 落盘 item=%s 类型=%s 目标=%q 字节=%d tag=%s",
+			itemID, imageType, target, len(raw), tag)
 		result.Tags[imageType] = tag
 	}
 	return result, nil
@@ -229,7 +238,8 @@ func (g *ArtworkGenerator) extractFrame(ctx context.Context, sourcePath string, 
 	args = append(args, "-q:v", "3", target)
 
 	if output, err := exec.CommandContext(ctx, g.ffmpegPath, args...).CombinedOutput(); err != nil {
-		return fmt.Errorf("ffmpeg 抽帧失败: %w (%s)", err, truncate(string(output), 300))
+		return fmt.Errorf("ffmpeg 抽帧失败: %w (命令: %s %s) (输出: %s)",
+			err, g.ffmpegPath, strings.Join(args, " "), truncate(string(output), 300))
 	}
 	info, err := os.Stat(target)
 	if err != nil || info.Size() == 0 {
