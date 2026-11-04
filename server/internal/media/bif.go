@@ -44,14 +44,85 @@ func NewBifCache(dir, ffmpegPath string) *BifCache {
 	}
 }
 
-func (c *BifCache) Path(itemID string) string {
+// Path 返回指定参数对应的 BIF 缓存路径。
+// 文件名带上宽度与抽帧间隔：换参数就是另一个文件，"是否已生成"直接由磁盘回答，
+// 不需要在数据库里再维护一个标记字段。
+func (c *BifCache) Path(itemID string, width int, intervalMs uint32) string {
+	return filepath.Join(c.dir, fmt.Sprintf("%s-w%d-i%d.bif", sanitizeID(itemID), width, intervalMs))
+}
+
+// legacyPath 是早期不带参数后缀的缓存名，仅在升级后用于继续复用老文件。
+func (c *BifCache) legacyPath(itemID string) string {
 	return filepath.Join(c.dir, sanitizeID(itemID)+".bif")
 }
 
-// Exists 报告条目是否已有可用的 BIF 缓存。
-func (c *BifCache) Exists(itemID string) bool {
-	info, err := os.Stat(c.Path(itemID))
-	return err == nil && info.Size() > 0
+// cacheHit 判断缓存文件是否可复用：内容非空，且不比源文件旧（片源换过就要重抽）。
+func cacheHit(path, sourcePath string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.Size() == 0 {
+		return false
+	}
+	if sourcePath == "" {
+		return true
+	}
+	src, err := os.Stat(sourcePath)
+	if err != nil {
+		return true
+	}
+	return !src.ModTime().After(info.ModTime())
+}
+
+// reuse 返回当前条目可复用的缓存：先找参数完全一致的文件，再退到早期无参数命名。
+// 老文件名里没有参数信息，命中一次后就改名成带参数的名字，避免反复判定。
+func (c *BifCache) reuse(itemID, sourcePath, target string) string {
+	if cacheHit(target, sourcePath) {
+		return target
+	}
+	legacy := c.legacyPath(itemID)
+	if sameFilePath(legacy, target) || !cacheHit(legacy, sourcePath) {
+		return ""
+	}
+	if err := os.Rename(legacy, target); err == nil {
+		return target
+	}
+	return legacy
+}
+
+// anyVariant 返回同一条目其它参数的可用缓存，供播放侧避免为宽度差异重新解码整部影片。
+func (c *BifCache) anyVariant(itemID, sourcePath string) string {
+	entries, err := os.ReadDir(c.dir)
+	if err != nil {
+		return ""
+	}
+	prefix := sanitizeID(itemID)
+	best := ""
+	var bestTime time.Time
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		rest := strings.TrimPrefix(name, prefix)
+		// 只认 prefix.bif 与 prefix-w<宽>-i<间隔>.bif，避免误命中前缀相同的其它条目。
+		if rest == name || !strings.HasSuffix(strings.ToLower(rest), ".bif") {
+			continue
+		}
+		if rest != ".bif" && !strings.HasPrefix(rest, "-w") {
+			continue
+		}
+		path := filepath.Join(c.dir, name)
+		if !cacheHit(path, sourcePath) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if best == "" || info.ModTime().After(bestTime) {
+			best, bestTime = path, info.ModTime()
+		}
+	}
+	return best
 }
 
 // FFmpegPath 暴露配置的 ffmpeg 可执行文件，供任务启动前做可用性检查。
@@ -61,7 +132,12 @@ func (c *BifCache) FFmpegPath() string {
 
 // Ensure 返回 BIF 缓存文件路径；缓存缺失时现场生成。
 func (c *BifCache) Ensure(ctx context.Context, itemID, sourcePath string, intervalMs uint32, width int) (string, error) {
-	path, _, err := c.Generate(ctx, itemID, sourcePath, BifOptions{IntervalMs: intervalMs, Width: width})
+	path, _, _, err := c.Generate(ctx, itemID, sourcePath, BifOptions{
+		IntervalMs: intervalMs,
+		Width:      width,
+		// 播放只是拿来当进度条预览，能用其它宽度的现成缓存就不必再解一遍全片。
+		ReuseAnyVariant: true,
+	})
 	return path, err
 }
 
@@ -71,46 +147,57 @@ type BifOptions struct {
 	Width      int
 	// Force 为 true 时忽略已有缓存重新抽帧。
 	Force bool
+	// ReuseAnyVariant 允许复用同一条目其它参数的缓存（播放侧使用）。
+	ReuseAnyVariant bool
 	// OnProgress 以已解码的媒体时间（毫秒）回调，调用方据此换算条目内进度。
 	OnProgress func(elapsedMs int64)
 }
 
-// Generate 生成 BIF 缓存并返回文件路径与实际帧数。
-func (c *BifCache) Generate(ctx context.Context, itemID, sourcePath string, opts BifOptions) (string, int, error) {
+// Generate 生成 BIF 缓存，返回文件路径、帧数以及是否复用了已有文件（未执行抽帧）。
+func (c *BifCache) Generate(ctx context.Context, itemID, sourcePath string, opts BifOptions) (string, int, bool, error) {
 	intervalMs := opts.IntervalMs
-	width := opts.Width
-	force := opts.Force
-
-	target := c.Path(itemID)
-	if !force && c.Exists(itemID) {
-		return target, countBIFrames(target), nil
-	}
-	if sourcePath == "" {
-		return "", 0, fmt.Errorf("条目缺少源文件路径")
-	}
-	if _, err := os.Stat(sourcePath); err != nil {
-		return "", 0, fmt.Errorf("源文件不可读: %w", err)
-	}
 	if intervalMs == 0 {
 		intervalMs = 10000
 	}
+	width := opts.Width
 	if width <= 0 {
 		width = 320
+	}
+	force := opts.Force
+	target := c.Path(itemID, width, intervalMs)
+
+	if !force {
+		if hit := c.reuse(itemID, sourcePath, target); hit != "" {
+			return hit, countBIFrames(hit), true, nil
+		}
+		if opts.ReuseAnyVariant {
+			if hit := c.anyVariant(itemID, sourcePath); hit != "" {
+				return hit, countBIFrames(hit), true, nil
+			}
+		}
+	}
+	if sourcePath == "" {
+		return "", 0, false, fmt.Errorf("条目缺少源文件路径")
+	}
+	if _, err := os.Stat(sourcePath); err != nil {
+		return "", 0, false, fmt.Errorf("源文件不可读: %w", err)
 	}
 
 	unlock := c.lockItem(itemID)
 	defer unlock()
 
 	// 双检：等锁期间可能已被其他请求生成。
-	if !force && c.Exists(itemID) {
-		return target, countBIFrames(target), nil
+	if !force {
+		if hit := c.reuse(itemID, sourcePath, target); hit != "" {
+			return hit, countBIFrames(hit), true, nil
+		}
 	}
 
 	// 媒体目录里已经有预生成的 BIF 时直接拿来用，网络盘上可以省掉整段抽帧。
 	// 强制重生成时跳过复用，否则新间隔不会生效。
-	if local := FindLocalBIF(sourcePath); !force && local != "" && !sameFilePath(local, target) {
+	if local := FindLocalBIF(sourcePath); !force && local != "" && !sameFilePath(local, target) && cacheHit(local, sourcePath) {
 		if err := copyFile(local, target); err == nil {
-			return target, countBIFrames(target), nil
+			return target, countBIFrames(target), true, nil
 		}
 	}
 
@@ -118,12 +205,12 @@ func (c *BifCache) Generate(ctx context.Context, itemID, sourcePath string, opts
 	case c.sem <- struct{}{}:
 		defer func() { <-c.sem }()
 	case <-ctx.Done():
-		return "", 0, ctx.Err()
+		return "", 0, false, ctx.Err()
 	}
 
 	tempDir, err := os.MkdirTemp(c.dir, "bif-*")
 	if err != nil {
-		return "", 0, fmt.Errorf("创建临时目录失败: %w", err)
+		return "", 0, false, fmt.Errorf("创建临时目录失败: %w", err)
 	}
 	defer os.RemoveAll(tempDir)
 
@@ -148,29 +235,29 @@ func (c *BifCache) Generate(ctx context.Context, itemID, sourcePath string, opts
 		filepath.Join(tempDir, "frame_%05d.jpg"),
 	}
 	if err := runFFmpeg(ctx, c.ffmpegPath, args, opts.OnProgress); err != nil {
-		return "", 0, err
+		return "", 0, false, err
 	}
 
 	frames, err := collectFrames(tempDir)
 	if err != nil {
-		return "", 0, err
+		return "", 0, false, err
 	}
 	if len(frames) == 0 {
 		// 短视频不足一个抽帧间隔时，至少取首帧，避免整个进度预览失效。
 		frames, err = extractSingleFrame(ctx, c.ffmpegPath, sourcePath, tempDir, width)
 		if err != nil {
-			return "", 0, err
+			return "", 0, false, err
 		}
 	}
 	if len(frames) == 0 {
-		return "", 0, fmt.Errorf("未生成任何缩略图帧")
+		return "", 0, false, fmt.Errorf("未生成任何缩略图帧")
 	}
 
 	packed := PackBIF(frames, intervalMs)
 	if err := writeFileAtomic(target, packed); err != nil {
-		return "", 0, err
+		return "", 0, false, err
 	}
-	return target, len(frames), nil
+	return target, len(frames), false, nil
 }
 
 // runFFmpeg 启动 ffmpeg 并同步消费 -progress 输出。

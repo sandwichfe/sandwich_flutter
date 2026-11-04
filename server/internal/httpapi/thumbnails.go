@@ -24,6 +24,8 @@ type thumbnailJobDto struct {
 	Completed   int    `json:"Completed"`
 	Failed      int    `json:"Failed"`
 	Skipped     int    `json:"Skipped"`
+	// Reused 是已有缓存直接复用的条目数，与异常跳过分开统计。
+	Reused      int    `json:"Reused"`
 	Status      string `json:"Status"`
 	CurrentItem string `json:"CurrentItem"`
 	// CurrentItemProgress 是当前条目内 0~1 的抽帧进度。
@@ -55,6 +57,7 @@ func thumbnailJobToDto(snapshot media.ThumbnailJobSnapshot) thumbnailJobDto {
 		Completed:                  snapshot.Completed,
 		Failed:                     snapshot.Failed,
 		Skipped:                    snapshot.Skipped,
+		Reused:                     snapshot.Reused,
 		Status:                     snapshot.Status,
 		CurrentItem:                snapshot.CurrentItem,
 		CurrentItemProgress:        snapshot.CurrentItemProgress,
@@ -71,7 +74,8 @@ func thumbnailJobToDto(snapshot media.ThumbnailJobSnapshot) thumbnailJobDto {
 }
 
 // handleCreateThumbnailJob POST /ThumbnailJobs
-// 正文：{ "LibraryId": "...", "IntervalSeconds": 10, "Width": 320 }
+// 正文：{ "LibraryId": "...", "IntervalSeconds": 10, "Width": 320, "Force": false }
+// Force 默认 false：已有同参数缓存的条目直接复用，只有换参数、片源更新或手动删文件才会重新抽帧。
 // 预生成是重活，任务在后台跑，接口立即返回初始进度。
 func (s *Server) handleCreateThumbnailJob(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdmin(w, r) {
@@ -82,6 +86,7 @@ func (s *Server) handleCreateThumbnailJob(w http.ResponseWriter, r *http.Request
 		LibraryId       string `json:"LibraryId"`
 		IntervalSeconds int    `json:"IntervalSeconds"`
 		Width           int    `json:"Width"`
+		Force           bool   `json:"Force"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&payload); err != nil {
 		writeError(w, http.StatusBadRequest, "请求体格式错误")
@@ -147,7 +152,7 @@ func (s *Server) handleCreateThumbnailJob(w http.ResponseWriter, r *http.Request
 		})
 	}
 
-	snapshot, err := s.thumbs.Start(library.ID, library.Name, targets, intervalSeconds*1000, width)
+	snapshot, err := s.thumbs.Start(library.ID, library.Name, targets, intervalSeconds*1000, width, payload.Force)
 	if errors.Is(err, media.ErrThumbnailJobRunning) {
 		writeError(w, http.StatusConflict, "已有缩略图预生成任务在运行，请等待完成或先取消")
 		return

@@ -52,6 +52,8 @@ type ThumbnailJobSnapshot struct {
 	Completed   int
 	Failed      int
 	Skipped     int
+	// Reused 是"已有缓存直接复用、没有重新抽帧"的条目数，和异常跳过区分开。
+	Reused      int
 	Status      string
 	CurrentItem string
 	// CurrentItemProgress 是当前条目内 0~1 的抽帧进度，由 ffmpeg -progress 换算。
@@ -78,7 +80,7 @@ func (s ThumbnailJobSnapshot) Progress() float64 {
 	if s.Total <= 0 {
 		return 0
 	}
-	done := s.Completed + s.Failed + s.Skipped
+	done := s.Completed + s.Failed + s.Skipped + s.Reused
 	if done >= s.Total {
 		return 1
 	}
@@ -128,7 +130,8 @@ func NewThumbnailJobManager(bif *BifCache) *ThumbnailJobManager {
 }
 
 // Start 启动一个预生成任务，返回初始快照。任务在后台 goroutine 中执行。
-func (m *ThumbnailJobManager) Start(libraryID, libraryName string, targets []ThumbnailTarget, intervalMs, width int) (ThumbnailJobSnapshot, error) {
+// force 为 false 时已有同参数缓存（且不比片源旧）的条目直接复用，不会重新抽帧。
+func (m *ThumbnailJobManager) Start(libraryID, libraryName string, targets []ThumbnailTarget, intervalMs, width int, force bool) (ThumbnailJobSnapshot, error) {
 	if m.bif == nil {
 		return ThumbnailJobSnapshot{}, errors.New("缩略图缓存未初始化")
 	}
@@ -189,7 +192,7 @@ func (m *ThumbnailJobManager) Start(libraryID, libraryName string, targets []Thu
 	snapshot := job.copy()
 	m.mu.Unlock()
 
-	go m.run(ctx, job, targets)
+	go m.run(ctx, job, targets, force)
 	return snapshot, nil
 }
 
@@ -250,7 +253,7 @@ func (m *ThumbnailJobManager) Cancel(jobID string) (ThumbnailJobSnapshot, error)
 	return job.copy(), nil
 }
 
-func (m *ThumbnailJobManager) run(ctx context.Context, job *thumbnailJob, targets []ThumbnailTarget) {
+func (m *ThumbnailJobManager) run(ctx context.Context, job *thumbnailJob, targets []ThumbnailTarget, force bool) {
 	defer job.cancel()
 
 	initial := job.copy()
@@ -337,10 +340,10 @@ func (m *ThumbnailJobManager) run(ctx context.Context, job *thumbnailJob, target
 			})
 		}
 
-		_, frames, err := m.bif.Generate(ctx, target.ItemID, target.Path, BifOptions{
+		_, frames, reused, err := m.bif.Generate(ctx, target.ItemID, target.Path, BifOptions{
 			IntervalMs: intervalMs,
 			Width:      width,
-			Force:      true,
+			Force:      force,
 			OnProgress: onProgress,
 		})
 		if err != nil {
@@ -372,11 +375,20 @@ func (m *ThumbnailJobManager) run(ctx context.Context, job *thumbnailJob, target
 		doneBaseDuration += target.DurationSeconds
 		doneBaseFrames += frames
 		job.update(func(s *ThumbnailJobSnapshot) {
-			s.Completed++
+			if reused {
+				s.Reused++
+			} else {
+				s.Completed++
+			}
 			s.CurrentItemProgress = 0
 			s.DoneDurationSeconds = doneBaseDuration
 			s.GeneratedFrames = doneBaseFrames
 		})
+		if reused {
+			log.Printf("[thumbnails] [%d/%d] 复用 %s 已有缓存 帧=%d",
+				index+1, len(targets), target.Name, frames)
+			continue
+		}
 		log.Printf("[thumbnails] [%d/%d] 完成 %s 帧=%d 耗时=%s",
 			index+1, len(targets), target.Name, frames, time.Since(itemStarted).Round(time.Millisecond))
 	}
@@ -389,8 +401,8 @@ func (m *ThumbnailJobManager) run(ctx context.Context, job *thumbnailJob, target
 		s.CurrentItemDurationSeconds = 0
 		s.FinishedAt = time.Now().Format(time.RFC3339)
 	})
-	log.Printf("[thumbnails] 任务 %s 完成: 成功=%d 失败=%d 跳过=%d 已生成帧=%d 耗时=%s",
-		final.ID, final.Completed, final.Failed, final.Skipped, final.GeneratedFrames,
+	log.Printf("[thumbnails] 任务 %s 完成: 成功=%d 复用=%d 失败=%d 跳过=%d 已生成帧=%d 耗时=%s",
+		final.ID, final.Completed, final.Reused, final.Failed, final.Skipped, final.GeneratedFrames,
 		time.Since(startedAt).Round(time.Second))
 }
 

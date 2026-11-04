@@ -206,10 +206,12 @@ class EmbyPcService {
   // ---- 进度条缩略图预生成 ----
 
   // 按媒体库批量生成 BIF 缩略图；任务在后台跑，返回初始进度快照。
+  // force 为 false 时服务端会跳过已有同参数缓存的条目。
   Future<EmbyPcThumbnailJob> startThumbnailJob({
     required String libraryId,
     required int intervalSeconds,
     int width = 320,
+    bool force = false,
   }) async {
     final response = await http.post(
       _uri('/emby/ThumbnailJobs'),
@@ -218,6 +220,7 @@ class EmbyPcService {
         'LibraryId': libraryId,
         'IntervalSeconds': intervalSeconds,
         'Width': width,
+        'Force': force,
       }),
     );
     // 409 代表已有任务在跑，用明确文案代替通用的 HTTP 状态码提示。

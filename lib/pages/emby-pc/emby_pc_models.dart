@@ -469,6 +469,8 @@ class EmbyPcThumbnailJob {
   final int completed;
   final int failed;
   final int skipped;
+  // 已有缓存直接复用、没有重新抽帧的条目数，与异常跳过分开统计。
+  final int reused;
   final String status;
   final String currentItem;
   final double progress;
@@ -494,6 +496,7 @@ class EmbyPcThumbnailJob {
     required this.completed,
     required this.failed,
     required this.skipped,
+    required this.reused,
     required this.status,
     required this.currentItem,
     required this.progress,
@@ -512,7 +515,7 @@ class EmbyPcThumbnailJob {
 
   bool get isCanceled => status == 'canceled';
 
-  int get finishedCount => completed + failed + skipped;
+  int get finishedCount => completed + reused + failed + skipped;
 
   // 失败与跳过都算已处理，进度条不会因为个别坏文件停在中途。
   double get ratio => progress.clamp(0.0, 1.0);
@@ -535,6 +538,7 @@ class EmbyPcThumbnailJob {
         completed: _integer(json['Completed']),
         failed: _integer(json['Failed']),
         skipped: _integer(json['Skipped']),
+        reused: _integer(json['Reused']),
         status: _text(json['Status']),
         currentItem: _text(json['CurrentItem']),
         progress: _doubleOrNull(json['Progress']) ?? 0,

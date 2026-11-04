@@ -23,6 +23,8 @@ class _EmbyPcThumbnailJobPageState extends State<EmbyPcThumbnailJobPage> {
   String _selectedLibraryId = '';
   double _intervalSeconds = 10;
   int _width = 320;
+  // 默认复用已有缩略图，避免每次点「开始生成」都把整库重新解一遍。
+  bool _skipExisting = true;
 
   bool _loading = true;
   bool _starting = false;
@@ -150,6 +152,7 @@ class _EmbyPcThumbnailJobPageState extends State<EmbyPcThumbnailJobPage> {
         libraryId: _selectedLibraryId,
         intervalSeconds: _intervalSeconds.round(),
         width: _width,
+        force: !_skipExisting,
       );
       if (!mounted) return;
       setState(() {
@@ -342,7 +345,23 @@ class _EmbyPcThumbnailJobPageState extends State<EmbyPcThumbnailJobPage> {
                 ),
               ],
             ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 8),
+            SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              value: _skipExisting,
+              onChanged: disabled
+                  ? null
+                  : (value) => setState(() => _skipExisting = value),
+              title: const Text('跳过已生成的影片'),
+              subtitle: Text(
+                _skipExisting
+                    ? '间隔与宽度相同的缓存直接复用；想重新生成就改参数、关掉本开关，或删掉缓存文件。'
+                    : '忽略已有缓存，库内条目全部重新抽帧。',
+                style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
+              ),
+            ),
+            const SizedBox(height: 10),
             Row(
               children: [
                 Expanded(
@@ -502,6 +521,7 @@ class _EmbyPcThumbnailJobPageState extends State<EmbyPcThumbnailJobPage> {
                     highlight: true,
                   ),
                   _ProgressStat(label: '成功', value: '${job.completed}'),
+                  _ProgressStat(label: '复用', value: '${job.reused}'),
                   _ProgressStat(label: '失败', value: '${job.failed}'),
                   _ProgressStat(label: '跳过', value: '${job.skipped}'),
                   _ProgressStat(

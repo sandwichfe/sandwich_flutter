@@ -22,7 +22,7 @@ data/
 ├── embyx.db                        SQLite 主库
 ├── images/{itemId}/{type}/{index}.jpg   条目图片（自管副本）
 ├── users/{userId}/primary.jpg     用户头像
-└── cache/bif/{itemId}.bif         进度条缩略图缓存
+└── cache/bif/{itemId}-w{宽}-i{间隔毫秒}.bif   进度条缩略图缓存（文件名带参数）
 ```
 
 ---
@@ -361,7 +361,8 @@ media_kit 打开 GET /Videos/{id}/stream?static=true&api_key=…
 
 ```
 GET /Videos/{id}/index.bif?Width=320
-   ↓ 缓存命中 data/cache/bif/{itemId}.bif → 直接返回
+   ↓ 缓存命中 data/cache/bif/{itemId}-w{宽}-i{间隔}.bif → 直接返回
+   ↓ 该参数的缓存缺失，但条目有其它参数且不比片源旧的缓存 → 直接复用（不为几像素宽度重解全片）
    ↓ 媒体目录有预生成的 *.bif → 复制进缓存（网络盘上省掉抽帧）
    ↓ 都没有 → ffmpeg 每 10 秒抽一帧 → 打包成 BIF
 ```

@@ -11,7 +11,7 @@ Emby 协议兼容的轻量媒体服务器骨架，目标是替换现有 Flutter 
 - 条目：`/Users/{id}/Items`（过滤/搜索/排序/分页）、`/Items/Resume`、`/Users/{id}/Items/{id}`、`/Persons`、`/Items/{id}/Similar`
 - 图片：条目图片 GET/上传/删除/列表，用户头像 GET/上传，按 `maxWidth` + `quality` 缩放
 - 播放：`POST /Items/{id}/PlaybackInfo`、`GET /Videos/{id}/stream`（完整 Range 支持）、`GET /Videos/{id}/index.bif`
-- 缩略图预生成：`POST /emby/ThumbnailJobs`（按媒体库批量生成，可指定抽帧间隔/宽度）、`GET /emby/ThumbnailJobs`、`GET /emby/ThumbnailJobs/{jobId}`、`POST /emby/ThumbnailJobs/{jobId}/Cancel`
+- 缩略图预生成：`POST /emby/ThumbnailJobs`（按媒体库批量生成，可指定抽帧间隔/宽度，默认复用已有缓存，传 `Force: true` 强制重建）、`GET /emby/ThumbnailJobs`、`GET /emby/ThumbnailJobs/{jobId}`、`POST /emby/ThumbnailJobs/{jobId}/Cancel`
 - 进度：`POST /Sessions/Playing`、`/Playing/Progress`、`/Playing/Stopped`
 - 收藏：`POST/DELETE /Users/{id}/FavoriteItems/{id}`
 - 扫描：遍历媒体目录 → `ffprobe` 提取技术信息 → 读取 NFO 元数据 → 导入本地图片 → 入库
@@ -74,7 +74,8 @@ Emby 协议兼容的轻量媒体服务器骨架，目标是替换现有 Flutter 
 - `<视频名>.bif`
 - `<视频名>-<宽>-<间隔>.bif`，例如 `IPX712.[4K]-320-10.bif`
 
-没有才会现场生成，结果缓存在 `data/cache/bif/`。
+没有才会现场生成，结果缓存在 `data/cache/bif/{itemId}-w{宽}-i{间隔毫秒}.bif`。
+文件名带参数，"是否已生成"直接由磁盘回答：参数不变时预生成任务默认复用（换参数、片源更新或手动删文件才会重新抽帧）。
 
 ### 典型目录
 
@@ -171,7 +172,7 @@ server/
     ├── embyx.db
     ├── images/{itemId}/{type}/{index}.jpg
     ├── users/{userId}/primary.jpg
-    └── cache/bif/{itemId}.bif
+    └── cache/bif/{itemId}-w{宽}-i{间隔毫秒}.bif
 ```
 
 ## 数据目录说明
