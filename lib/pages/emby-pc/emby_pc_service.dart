@@ -224,6 +224,16 @@ class EmbyPcService {
     if (response.statusCode == 409) {
       throw const EmbyPcException('已有缩略图预生成任务在运行');
     }
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw const EmbyPcException('登录已失效或当前账号没有管理权限');
+    }
+    // 其他失败（如找不到 ffmpeg）服务端会返回中文原因，直接透出便于定位。
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final message = utf8.decode(response.bodyBytes).trim();
+      throw EmbyPcException(
+        message.isEmpty ? '启动缩略图预生成失败：HTTP ${response.statusCode}' : message,
+      );
+    }
     final data = _decodeResponse(response, '启动缩略图预生成失败');
     return EmbyPcThumbnailJob.fromJson(data);
   }

@@ -124,12 +124,13 @@ class _EmbyPcThumbnailJobPageState extends State<EmbyPcThumbnailJobPage> {
         );
       }
       _syncPolling();
-    } catch (_) {
-      // 服务端重启会丢失任务，连续失败后停止轮询，避免空转请求。
+    } catch (error) {
+      // 服务端重启会丢失任务，连续失败后停止轮询并明确提示，不再静默停摆。
       _pollFailures++;
       if (_pollFailures >= 3) {
         _pollTimer?.cancel();
         _pollTimer = null;
+        _toast('无法获取生成进度：$error', type: EmbyPcToastType.error);
       }
     } finally {
       _polling = false;
@@ -188,6 +189,24 @@ class _EmbyPcThumbnailJobPageState extends State<EmbyPcThumbnailJobPage> {
   }) {
     if (!mounted) return;
     EmbyPcToast.show(context, message, type: type);
+  }
+
+  // 时长按中文习惯分级展示，避免出现 "7320 秒" 这类难读的数字。
+  static String _formatDuration(int seconds) {
+    if (seconds <= 0) return '0 分';
+    final hours = seconds ~/ 3600;
+    final minutes = (seconds % 3600) ~/ 60;
+    if (hours > 0) {
+      return minutes > 0 ? '$hours 小时 $minutes 分' : '$hours 小时';
+    }
+    if (minutes > 0) return '$minutes 分';
+    return '$seconds 秒';
+  }
+
+  // 条目缺少时长信息时总时长为 0，这里直接说明，避免显示 0 分产生误解。
+  static String _durationRange(int done, int total) {
+    if (total <= 0) return '未知（条目缺少时长信息）';
+    return '${_formatDuration(done)} / 共 ${_formatDuration(total)}';
   }
 
   @override
@@ -408,6 +427,71 @@ class _EmbyPcThumbnailJobPageState extends State<EmbyPcThumbnailJobPage> {
                 style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
               )
             else ...[
+              // 时长是主口径，帧数是辅助口径，二者都由服务端在条目完成时累加。
+              _ProgressLine(
+                label: '已完成时长',
+                value: _durationRange(
+                  job.doneDurationSeconds,
+                  job.totalDurationSeconds,
+                ),
+                highlight: true,
+              ),
+              const SizedBox(height: 6),
+              _ProgressLine(
+                label: '已生成帧数',
+                value: job.estimatedFrames > 0
+                    ? '${job.generatedFrames} / 约 ${job.estimatedFrames} 张'
+                    : '${job.generatedFrames} 张',
+              ),
+              if (job.isRunning && job.currentItem.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                _ProgressLine(
+                  label: '正在处理',
+                  value: job.currentItemDurationSeconds > 0
+                      ? '${job.currentItem}（${_formatDuration(job.currentItemDurationSeconds)}）'
+                      : job.currentItem,
+                ),
+                const SizedBox(height: 6),
+                // 条目内进度来自 ffmpeg -progress，能看出大文件解码是否在推进。
+                Row(
+                  children: [
+                    const SizedBox(width: 76),
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(2),
+                        child: LinearProgressIndicator(
+                          value: job.currentItemProgress,
+                          minHeight: 3,
+                          backgroundColor: colors.surfaceContainerHighest,
+                          color: colors.primary.withValues(alpha: 0.65),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${(job.currentItemProgress * 100).round()}%',
+                      style: TextStyle(
+                        color: colors.onSurfaceVariant,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+                if (job.currentItemProgress <= 0) ...[
+                  const SizedBox(height: 6),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 76),
+                    child: Text(
+                      '正在启动抽帧，长片或网络盘上首个条目可能需要数分钟。',
+                      style: TextStyle(
+                        color: colors.onSurfaceVariant,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+              const SizedBox(height: 10),
               Wrap(
                 spacing: 14,
                 runSpacing: 6,
@@ -426,18 +510,6 @@ class _EmbyPcThumbnailJobPageState extends State<EmbyPcThumbnailJobPage> {
                   ),
                 ],
               ),
-              if (job.isRunning && job.currentItem.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Text(
-                  '正在处理：${job.currentItem}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: colors.onSurfaceVariant,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
               if (job.errors.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 Theme(
@@ -527,6 +599,48 @@ class _ProgressStat extends StatelessWidget {
             color: highlight ? colors.primary : colors.onSurface,
             fontSize: 12,
             fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// 进度卡片里的键值行：标签定宽对齐，值过长时换行截断。
+class _ProgressLine extends StatelessWidget {
+  final String label;
+  final String value;
+  final bool highlight;
+
+  const _ProgressLine({
+    required this.label,
+    required this.value,
+    this.highlight = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 76,
+          child: Text(
+            label,
+            style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: highlight ? colors.primary : colors.onSurface,
+              fontSize: highlight ? 13 : 12,
+              fontWeight: highlight ? FontWeight.w600 : FontWeight.w500,
+            ),
           ),
         ),
       ],

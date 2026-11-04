@@ -475,6 +475,14 @@ class EmbyPcThumbnailJob {
   final List<String> errors;
   final String startedAt;
   final String finishedAt;
+  // 当前条目内 0~1 的抽帧进度，0 表示刚开始或时长未知。
+  final double currentItemProgress;
+  // 时长统一用秒，由页面格式化成中文时间。
+  final int currentItemDurationSeconds;
+  final int totalDurationSeconds;
+  final int doneDurationSeconds;
+  final int estimatedFrames;
+  final int generatedFrames;
 
   const EmbyPcThumbnailJob({
     required this.id,
@@ -492,6 +500,12 @@ class EmbyPcThumbnailJob {
     required this.errors,
     required this.startedAt,
     required this.finishedAt,
+    required this.currentItemProgress,
+    required this.currentItemDurationSeconds,
+    required this.totalDurationSeconds,
+    required this.doneDurationSeconds,
+    required this.estimatedFrames,
+    required this.generatedFrames,
   });
 
   bool get isRunning => status == 'running';
@@ -527,6 +541,14 @@ class EmbyPcThumbnailJob {
         errors: _strings(json['Errors']),
         startedAt: _text(json['StartedAt']),
         finishedAt: _text(json['FinishedAt']),
+        currentItemProgress: _doubleOrNull(json['CurrentItemProgress']) ?? 0,
+        currentItemDurationSeconds: _integer(
+          json['CurrentItemDurationSeconds'],
+        ),
+        totalDurationSeconds: _integer(json['TotalDurationSeconds']),
+        doneDurationSeconds: _integer(json['DoneDurationSeconds']),
+        estimatedFrames: _integer(json['EstimatedFrames']),
+        generatedFrames: _integer(json['GeneratedFrames']),
       );
 }
 
