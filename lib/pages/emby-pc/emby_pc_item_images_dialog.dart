@@ -40,7 +40,13 @@ class _EmbyPcItemImagesDialogState extends State<EmbyPcItemImagesDialog> {
   final Set<String> _busyTypes = {};
   bool _loading = true;
   bool _changed = false;
+  bool _generating = false;
   int _imageRevision = 0;
+
+  // 只有视频条目能从画面抽帧生成图片（剧集、媒体库等没有可抽帧的文件）。
+  bool get _canGenerateArtwork =>
+      widget.item.type.isNotEmpty &&
+      const {'Movie', 'Video', 'Episode'}.contains(widget.item.type);
 
   @override
   void initState() {
@@ -65,11 +71,11 @@ class _EmbyPcItemImagesDialogState extends State<EmbyPcItemImagesDialog> {
     }
   }
 
+  // 同一类型可能同时存在目录图与生成图，槽位优先展示目录图，
+  // 只有生成图时（目录里没有海报）自然回退到生成图。
   EmbyPcImageInfo? _imageFor(String type) {
-    for (final image in _images) {
-      if (image.type == type) return image;
-    }
-    return null;
+    final matches = _imagesFor(type);
+    return matches.isEmpty ? null : matches.first;
   }
 
   List<EmbyPcImageInfo> _imagesFor(String type) {
@@ -116,6 +122,49 @@ class _EmbyPcItemImagesDialogState extends State<EmbyPcItemImagesDialog> {
     }
   }
 
+  // 从视频画面生成海报/封面：可选自动嗅探，或指定一个进度点。
+  Future<void> _generateArtwork() async {
+    final options = await showDialog<_ArtworkGenerateOptions>(
+      context: context,
+      builder: (context) => _ArtworkGenerateDialog(item: widget.item),
+    );
+    if (options == null || !mounted) return;
+
+    setState(() => _generating = true);
+    try {
+      final result = await EmbyPcService.instance.generateArtwork(
+        widget.item.id,
+        sniff: options.sniff,
+        positionTicks: options.positionTicks,
+        types: options.types,
+      );
+      _changed = true;
+      _imageRevision++;
+      await _loadImages(showProgress: false);
+      if (!mounted) return;
+      final position = _formatTicks(result.positionTicks);
+      _showMessage(
+        result.sniffed ? '已自动嗅探画面并生成图片（$position）' : '已生成图片（$position）',
+      );
+    } catch (error) {
+      if (mounted) _showMessage(error.toString(), type: EmbyPcToastType.error);
+    } finally {
+      if (mounted) setState(() => _generating = false);
+    }
+  }
+
+  String _formatTicks(int ticks) {
+    if (ticks <= 0) return '00:00';
+    final totalSeconds = Duration(microseconds: ticks ~/ 10).inSeconds;
+    final hours = totalSeconds ~/ 3600;
+    final minutes = (totalSeconds % 3600) ~/ 60;
+    final seconds = totalSeconds % 60;
+    String two(int value) => value.toString().padLeft(2, '0');
+    return hours > 0
+        ? '${two(hours)}:${two(minutes)}:${two(seconds)}'
+        : '${two(minutes)}:${two(seconds)}';
+  }
+
   Future<void> _delete(_ItemImageSlot slot, EmbyPcImageInfo image) async {
     if (_busyTypes.contains(slot.type)) return;
     final confirmed = await showDialog<bool>(
@@ -143,6 +192,7 @@ class _EmbyPcItemImagesDialogState extends State<EmbyPcItemImagesDialog> {
         widget.item.id,
         type: image.type,
         index: image.index,
+        source: image.source,
       );
       _changed = true;
       _imageRevision++;
@@ -214,6 +264,20 @@ class _EmbyPcItemImagesDialogState extends State<EmbyPcItemImagesDialog> {
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                   ),
+                  if (_canGenerateArtwork)
+                    _generating
+                        ? const Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 16),
+                            child: SizedBox.square(
+                              dimension: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                        : IconButton(
+                            tooltip: '从视频画面生成海报/封面',
+                            onPressed: _generateArtwork,
+                            icon: const Icon(Icons.auto_awesome_outlined),
+                          ),
                 ],
               ),
             ),
@@ -256,9 +320,11 @@ class _EmbyPcItemImagesDialogState extends State<EmbyPcItemImagesDialog> {
                                 return _buildAddBackdropSlot();
                               }
                               final image = backdropImages[index];
-                              final title = image.fileName.trim().isEmpty
-                                  ? '${_backdropImageSlot.label} ${index + 1}'
-                                  : image.fileName;
+                              final title = image.isGenerated
+                                  ? '${_backdropImageSlot.label}（生成）'
+                                  : (image.fileName.trim().isEmpty
+                                        ? '${_backdropImageSlot.label} ${index + 1}'
+                                        : image.fileName);
                               return _buildImageSlot(
                                 _backdropImageSlot,
                                 image,
@@ -340,6 +406,7 @@ class _EmbyPcItemImagesDialogState extends State<EmbyPcItemImagesDialog> {
             index: image.index,
             maxWidth: 520,
             cacheKey: '$_imageRevision',
+            source: image.source,
           );
     return Material(
       color: colors.surfaceContainerLow,
@@ -368,7 +435,10 @@ class _EmbyPcItemImagesDialogState extends State<EmbyPcItemImagesDialog> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        title ?? slot.label,
+                        title ??
+                            (image?.isGenerated == true
+                                ? '${slot.label}（生成）'
+                                : slot.label),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontWeight: FontWeight.w600),
@@ -413,6 +483,136 @@ class _EmbyPcItemImagesDialogState extends State<EmbyPcItemImagesDialog> {
           ),
         ],
       ),
+    );
+  }
+}
+
+// 生成封面时用户选择的取帧方式与输出类型。
+class _ArtworkGenerateOptions {
+  final bool sniff;
+  final int positionTicks;
+  final List<String> types;
+
+  const _ArtworkGenerateOptions({
+    required this.sniff,
+    required this.positionTicks,
+    required this.types,
+  });
+}
+
+// 默认自动嗅探；关掉嗅探后可用滑块指定进度点取帧。
+class _ArtworkGenerateDialog extends StatefulWidget {
+  final EmbyPcItem item;
+
+  const _ArtworkGenerateDialog({required this.item});
+
+  @override
+  State<_ArtworkGenerateDialog> createState() => _ArtworkGenerateDialogState();
+}
+
+class _ArtworkGenerateDialogState extends State<_ArtworkGenerateDialog> {
+  bool _sniff = true;
+  // 默认取 30% 处，避开片头黑场与字幕。
+  double _percent = 0.30;
+  bool _primary = true;
+  bool _backdrop = true;
+
+  // 前端拿不到时长时无法给出进度点，只能走自动嗅探。
+  bool get _hasDuration => widget.item.runTimeTicks > 0;
+  bool get _effectiveSniff => _sniff || !_hasDuration;
+
+  int get _positionTicks => (widget.item.runTimeTicks * _percent).round();
+
+  String get _positionLabel {
+    final totalSeconds = (_positionTicks / 10000000).round();
+    final hours = totalSeconds ~/ 3600;
+    final minutes = (totalSeconds % 3600) ~/ 60;
+    final seconds = totalSeconds % 60;
+    String two(int value) => value.toString().padLeft(2, '0');
+    return hours > 0
+        ? '${two(hours)}:${two(minutes)}:${two(seconds)}'
+        : '${two(minutes)}:${two(seconds)}';
+  }
+
+  List<String> get _types => [
+    if (_primary) 'Primary',
+    if (_backdrop) 'Backdrop',
+  ];
+
+  void _confirm() {
+    Navigator.pop(
+      context,
+      _ArtworkGenerateOptions(
+        sniff: _effectiveSniff,
+        positionTicks: _effectiveSniff ? 0 : _positionTicks,
+        types: _types,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('生成海报与封面 · ${widget.item.name}', maxLines: 1),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('自动嗅探画面'),
+              subtitle: Text(
+                _hasDuration
+                    ? '在片长中段抽样若干帧，自动选择画面最清晰的一帧'
+                    : '缺少片长信息，只能自动嗅探画面',
+              ),
+              value: _effectiveSniff,
+              onChanged: _hasDuration
+                  ? (value) => setState(() => _sniff = value)
+                  : null,
+            ),
+            if (!_effectiveSniff) ...[
+              const SizedBox(height: 8),
+              Text('取帧进度：$_positionLabel'),
+              Slider(
+                value: _percent,
+                min: 0.02,
+                max: 0.98,
+                divisions: 96,
+                label: _positionLabel,
+                onChanged: (value) => setState(() => _percent = value),
+              ),
+            ],
+            const SizedBox(height: 8),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('生成海报'),
+              subtitle: const Text('竖版 2:3'),
+              value: _primary,
+              onChanged: (value) => setState(() => _primary = value ?? false),
+            ),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('生成封面'),
+              subtitle: const Text('横版 16:9'),
+              value: _backdrop,
+              onChanged: (value) => setState(() => _backdrop = value ?? false),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: _types.isEmpty ? null : _confirm,
+          child: const Text('生成'),
+        ),
+      ],
     );
   }
 }

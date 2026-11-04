@@ -17,11 +17,16 @@ type Library struct {
 	CollectionType string
 	Paths          []string
 	SortOrder      int
+	// PreferLocalArtwork 决定这个库优先读目录里的海报/封面，还是服务端生成的图片。
+	PreferLocalArtwork bool
 }
+
+// libraryColumns 集中维护查询列，避免各处 SELECT 漏字段。
+const libraryColumns = `id, name, collection_type, paths, sort_order, prefer_local_artwork`
 
 func (s *Store) Libraries(ctx context.Context) ([]Library, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, collection_type, paths, sort_order
+		`SELECT `+libraryColumns+`
 		 FROM libraries ORDER BY sort_order ASC, name ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("查询媒体库失败: %w", err)
@@ -31,16 +36,18 @@ func (s *Store) Libraries(ctx context.Context) ([]Library, error) {
 	libraries := make([]Library, 0, 8)
 	for rows.Next() {
 		var (
-			lib      Library
-			rawPaths string
+			lib         Library
+			rawPaths    string
+			preferLocal int
 		)
-		if err := rows.Scan(&lib.ID, &lib.Name, &lib.CollectionType, &rawPaths, &lib.SortOrder); err != nil {
+		if err := rows.Scan(&lib.ID, &lib.Name, &lib.CollectionType, &rawPaths, &lib.SortOrder, &preferLocal); err != nil {
 			return nil, err
 		}
 		unmarshalJSON(rawPaths, &lib.Paths)
 		if lib.Paths == nil {
 			lib.Paths = []string{}
 		}
+		lib.PreferLocalArtwork = preferLocal != 0
 		libraries = append(libraries, lib)
 	}
 	return libraries, rows.Err()
@@ -48,21 +55,22 @@ func (s *Store) Libraries(ctx context.Context) ([]Library, error) {
 
 func (s *Store) LibraryByID(ctx context.Context, id string) (*Library, error) {
 	return s.scanLibraryRow(s.db.QueryRowContext(ctx,
-		`SELECT id, name, collection_type, paths, sort_order FROM libraries WHERE id = ?`, id))
+		`SELECT `+libraryColumns+` FROM libraries WHERE id = ?`, id))
 }
 
 func (s *Store) LibraryByName(ctx context.Context, name string) (*Library, error) {
 	return s.scanLibraryRow(s.db.QueryRowContext(ctx,
-		`SELECT id, name, collection_type, paths, sort_order FROM libraries WHERE name = ? COLLATE NOCASE`,
+		`SELECT `+libraryColumns+` FROM libraries WHERE name = ? COLLATE NOCASE`,
 		strings.TrimSpace(name)))
 }
 
 func (s *Store) scanLibraryRow(row *sql.Row) (*Library, error) {
 	var (
-		lib      Library
-		rawPaths string
+		lib         Library
+		rawPaths    string
+		preferLocal int
 	)
-	err := row.Scan(&lib.ID, &lib.Name, &lib.CollectionType, &rawPaths, &lib.SortOrder)
+	err := row.Scan(&lib.ID, &lib.Name, &lib.CollectionType, &rawPaths, &lib.SortOrder, &preferLocal)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -73,6 +81,7 @@ func (s *Store) scanLibraryRow(row *sql.Row) (*Library, error) {
 	if lib.Paths == nil {
 		lib.Paths = []string{}
 	}
+	lib.PreferLocalArtwork = preferLocal != 0
 	return &lib, nil
 }
 
@@ -106,20 +115,36 @@ func (s *Store) SaveLibrary(ctx context.Context, lib Library) error {
 	}
 
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO libraries (id, name, collection_type, path, paths, sort_order)
-		 VALUES (?, ?, ?, ?, ?, ?)
+		`INSERT INTO libraries (id, name, collection_type, path, paths, sort_order, prefer_local_artwork)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		   name = excluded.name,
 		   collection_type = excluded.collection_type,
 		   path = excluded.path,
 		   paths = excluded.paths,
-		   sort_order = excluded.sort_order`,
+		   sort_order = excluded.sort_order,
+		   prefer_local_artwork = excluded.prefer_local_artwork`,
 		lib.ID, lib.Name, lib.CollectionType, firstPath(lib.Paths), marshalJSON(lib.Paths), lib.SortOrder,
+		boolToInt(lib.PreferLocalArtwork),
 	)
 	if err != nil {
 		return fmt.Errorf("保存媒体库失败: %w", err)
 	}
 	return nil
+}
+
+// ItemPreferLocalArtwork 返回条目所属媒体库的封面来源偏好。
+// 条目找不到对应媒体库时按"读取目录图"处理，保持和升级前一致的表现。
+func (s *Store) ItemPreferLocalArtwork(ctx context.Context, itemID string) bool {
+	var preferLocal int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT l.prefer_local_artwork FROM items i
+		 JOIN libraries l ON l.id = i.library_id
+		 WHERE i.id = ?`, itemID).Scan(&preferLocal)
+	if err != nil {
+		return true
+	}
+	return preferLocal != 0
 }
 
 func (s *Store) nextLibrarySortOrder(ctx context.Context) (int, error) {

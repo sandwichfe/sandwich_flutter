@@ -56,6 +56,12 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("为 libraries 增加 paths 列失败: %w", err)
 		}
 	}
+	// 老库没有这个列，默认按"读取目录内海报"处理，保持原行为。
+	if !columns["prefer_local_artwork"] {
+		if _, err := s.db.Exec(`ALTER TABLE libraries ADD COLUMN prefer_local_artwork INTEGER NOT NULL DEFAULT 1`); err != nil {
+			return fmt.Errorf("为 libraries 增加 prefer_local_artwork 列失败: %w", err)
+		}
+	}
 
 	// 把旧的单目录 path 回填到 paths。
 	rows, err := s.db.Query(`SELECT id, path FROM libraries WHERE paths = '[]' AND path <> ''`)

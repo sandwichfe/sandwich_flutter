@@ -192,12 +192,16 @@ class EmbyPcImageInfo {
   final int? width;
   final int? height;
 
+  // local = 目录导入或手动上传，generated = 服务端从视频画面生成。
+  final String source;
+
   const EmbyPcImageInfo({
     required this.type,
     required this.index,
     this.fileName = '',
     this.width,
     this.height,
+    this.source = 'local',
   });
 
   factory EmbyPcImageInfo.fromJson(Map<String, dynamic> json) =>
@@ -207,10 +211,41 @@ class EmbyPcImageInfo {
         fileName: _text(json['Filename']),
         width: _integerOrNull(json['Width']),
         height: _integerOrNull(json['Height']),
+        source: _text(json['Source']).isEmpty ? 'local' : _text(json['Source']),
       );
+
+  bool get isGenerated => source == 'generated';
 
   String get dimensions =>
       width == null || height == null ? '' : '${width}x$height';
+}
+
+// 生成封面接口的返回：实际取帧位置与各类图片的 tag。
+class EmbyPcArtworkGeneration {
+  final int positionTicks;
+  final bool sniffed;
+  final Map<String, String> tags;
+
+  const EmbyPcArtworkGeneration({
+    this.positionTicks = 0,
+    this.sniffed = false,
+    this.tags = const {},
+  });
+
+  factory EmbyPcArtworkGeneration.fromJson(Map<String, dynamic> json) {
+    final tags = <String, String>{};
+    final raw = json['Tags'];
+    if (raw is Map) {
+      raw.forEach((key, value) {
+        if (value != null) tags[key.toString()] = value.toString();
+      });
+    }
+    return EmbyPcArtworkGeneration(
+      positionTicks: _integer(json['PositionTicks']),
+      sniffed: json['Sniffed'] == true,
+      tags: tags,
+    );
+  }
 }
 
 // Emby 外部链接保留名称和地址，页面可在名称缺失时使用 URL 兜底显示。
@@ -439,12 +474,16 @@ class EmbyPcVirtualFolder {
   final List<String> locations;
   final int itemCount;
 
+  // true = 优先读目录里的海报/封面，false = 优先读服务端生成的图片。
+  final bool preferLocalArtwork;
+
   const EmbyPcVirtualFolder({
     required this.id,
     required this.name,
     required this.collectionType,
     required this.locations,
     required this.itemCount,
+    this.preferLocalArtwork = true,
   });
 
   factory EmbyPcVirtualFolder.fromJson(Map<String, dynamic> json) =>
@@ -455,6 +494,65 @@ class EmbyPcVirtualFolder {
         collectionType: _text(json['CollectionType']),
         locations: _strings(json['Locations']),
         itemCount: _integer(json['ItemCount']),
+        // 老服务端不返回该字段时按"读取目录图"处理。
+        preferLocalArtwork: json['PreferLocalArtwork'] != false,
+      );
+}
+
+// 整库批量生成海报/封面的任务快照，状态值由后端定义：running / completed / canceled。
+class EmbyPcArtworkJob {
+  final String id;
+  final String libraryId;
+  final String libraryName;
+  final int total;
+  final int completed;
+  final int failed;
+  // generated 是实际落盘的图片张数，一个条目可能同时生成海报和封面。
+  final int generated;
+  final String status;
+  final String currentItem;
+  final double progress;
+  // 本次任务的取帧比例：0 表示自动嗅探，否则是按片长比例指定的进度点。
+  final double positionRatio;
+  final List<String> errors;
+
+  const EmbyPcArtworkJob({
+    required this.id,
+    this.libraryId = '',
+    this.libraryName = '',
+    this.total = 0,
+    this.completed = 0,
+    this.failed = 0,
+    this.generated = 0,
+    this.status = 'running',
+    this.currentItem = '',
+    this.progress = 0,
+    this.positionRatio = 0,
+    this.errors = const [],
+  });
+
+  bool get isRunning => status == 'running';
+  bool get isCompleted => status == 'completed';
+  bool get isCanceled => status == 'canceled';
+  int get processed => completed + failed;
+
+  factory EmbyPcArtworkJob.fromJson(Map<String, dynamic> json) =>
+      EmbyPcArtworkJob(
+        id: _text(json['JobId']),
+        libraryId: _text(json['LibraryId']),
+        libraryName: _text(json['LibraryName']),
+        total: _integer(json['Total']),
+        completed: _integer(json['Completed']),
+        failed: _integer(json['Failed']),
+        generated: _integer(json['Generated']),
+        status: _text(json['Status']).isEmpty ? 'running' : _text(json['Status']),
+        currentItem: _text(json['CurrentItem']),
+        progress: (_doubleOrNull(json['Progress']) ?? 0).clamp(0.0, 1.0),
+        positionRatio: (_doubleOrNull(json['PositionRatio']) ?? 0).clamp(
+          0.0,
+          1.0,
+        ),
+        errors: _strings(json['Errors']),
       );
 }
 

@@ -418,6 +418,62 @@ func (s *Store) LibraryVideoItems(ctx context.Context, libraryID string) ([]Libr
 	return items, rows.Err()
 }
 
+// ItemSource 是生成封面需要的条目信息：源文件路径与时长。
+type ItemSource struct {
+	ID           string
+	Name         string
+	Type         string
+	Path         string
+	RunTimeTicks int64
+}
+
+func (s *Store) ItemSource(ctx context.Context, itemID string) (ItemSource, error) {
+	var source ItemSource
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, name, type, path, run_time_ticks FROM items WHERE id = ?`, itemID,
+	).Scan(&source.ID, &source.Name, &source.Type, &source.Path, &source.RunTimeTicks)
+	if errors.Is(err, sql.ErrNoRows) {
+		return source, ErrNotFound
+	}
+	return source, err
+}
+
+// EnsureImageTag 只在条目还没有该类型图片标记时写入，
+// 避免服务端生成的图覆盖目录导入或手动上传的 tag。
+func (s *Store) EnsureImageTag(ctx context.Context, itemID, imageType, tag string) error {
+	if tag == "" {
+		return nil
+	}
+
+	var imageTags, backdropTags string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT image_tags, backdrop_tags FROM items WHERE id = ?`, itemID,
+	).Scan(&imageTags, &backdropTags)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+
+	if strings.EqualFold(imageType, "Backdrop") {
+		var tags []string
+		unmarshalJSON(backdropTags, &tags)
+		if len(tags) > 0 {
+			return nil
+		}
+		return s.SetImageTags(ctx, itemID, "backdrop_tags", []string{tag})
+	}
+
+	parsed := map[string]string{}
+	unmarshalJSON(imageTags, &parsed)
+	if parsed[imageType] != "" {
+		return nil
+	}
+	parsed[imageType] = tag
+	return s.SetImageTags(ctx, itemID, "image_tags", parsed)
+}
+
 // SetImageTags 供图片上传/删除后刷新条目的图片标记。
 func (s *Store) SetImageTags(ctx context.Context, itemID, column string, value any) error {
 	allowed := map[string]bool{"image_tags": true, "backdrop_tags": true, "screenshot_tags": true}

@@ -16,6 +16,9 @@ type Server struct {
 	bif     *media.BifCache
 	scanner *media.Scanner
 	thumbs  *media.ThumbnailJobManager
+	// artwork 按需从视频画面生成海报与封面；artworkJobs 负责整库批量生成。
+	artwork     *media.ArtworkGenerator
+	artworkJobs *media.ArtworkJobManager
 
 	mux *http.ServeMux
 }
@@ -28,8 +31,11 @@ func New(cfg config.Config, st *store.Store, images *media.ImageStore, bif *medi
 		bif:     bif,
 		scanner: scanner,
 		thumbs:  thumbs,
+		artwork: media.NewArtworkGenerator(images, media.NewProber(cfg.FFprobePath), cfg.FFmpegPath),
 		mux:     http.NewServeMux(),
 	}
+	// 批量任务在后台跑，生成完成后通过回调回写图片标记。
+	server.artworkJobs = media.NewArtworkJobManager(server.artwork, server.markGeneratedImageTags)
 	server.routes()
 	return server
 }
@@ -69,9 +75,16 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /emby/Items/{itemId}/Images", s.handleListImages)
 	s.mux.HandleFunc("GET /emby/Items/{itemId}/Images/{type}", s.handleImage)
 	s.mux.HandleFunc("GET /emby/Items/{itemId}/Images/{type}/{index}", s.handleImage)
+	// 从视频画面生成海报/封面（本项目扩展，不属于 Emby 协议）。
+	s.mux.HandleFunc("POST /emby/Items/{itemId}/Images/Generate", s.handleGenerateArtwork)
 	s.mux.HandleFunc("POST /emby/Items/{itemId}/Images/{type}", s.handleUploadImage)
 	s.mux.HandleFunc("POST /emby/Items/{itemId}/Images/{type}/{index}", s.handleUploadImage)
 	s.mux.HandleFunc("DELETE /emby/Items/{itemId}/Images/{type}/{index}", s.handleDeleteImage)
+
+	// 整库批量生成海报/封面（媒体库管理页）
+	s.mux.HandleFunc("POST /emby/ArtworkJobs", s.handleCreateArtworkJob)
+	s.mux.HandleFunc("GET /emby/ArtworkJobs/{jobId}", s.handleArtworkJob)
+	s.mux.HandleFunc("POST /emby/ArtworkJobs/{jobId}/Cancel", s.handleCancelArtworkJob)
 
 	// 进度条缩略图预生成（设置页）
 	s.mux.HandleFunc("POST /emby/ThumbnailJobs", s.handleCreateThumbnailJob)

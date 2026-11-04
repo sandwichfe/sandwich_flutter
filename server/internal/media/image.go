@@ -29,8 +29,63 @@ func NewImageStore(root string) *ImageStore {
 	return &ImageStore{root: root}
 }
 
+// generatedDir 是"服务端从视频画面生成"的图片子目录。
+// 与目录导入、手动上传的图片分开存放，客户端可以用 Source 参数在两者之间切换，互不覆盖。
+const generatedDir = "generated"
+
 func (s *ImageStore) ItemPath(itemID, imageType string, index int) string {
 	return filepath.Join(s.root, sanitizeID(itemID), strings.ToLower(imageType), strconv.Itoa(index)+".jpg")
+}
+
+// GeneratedPath 返回生成图片的落盘位置。
+func (s *ImageStore) GeneratedPath(itemID, imageType string, index int) string {
+	return filepath.Join(s.root, sanitizeID(itemID), generatedDir,
+		strings.ToLower(imageType), strconv.Itoa(index)+".jpg")
+}
+
+// SaveGeneratedImage 写入服务端生成的图片，规则与上传一致：能解码就统一转成 JPEG。
+func (s *ImageStore) SaveGeneratedImage(itemID, imageType string, index int, raw []byte) (string, error) {
+	if len(raw) == 0 {
+		return "", fmt.Errorf("图片内容为空")
+	}
+	path := s.GeneratedPath(itemID, imageType, index)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", fmt.Errorf("创建生成图片目录失败: %w", err)
+	}
+	if normalized, err := transcodeToJPEG(raw, 92); err == nil {
+		raw = normalized
+	}
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		return "", fmt.Errorf("写入生成图片失败: %w", err)
+	}
+	return hashTag(raw), nil
+}
+
+func (s *ImageStore) LoadGeneratedImage(itemID, imageType string, index int) ([]byte, error) {
+	return readFileOrNotFound(s.GeneratedPath(itemID, imageType, index))
+}
+
+// HasItemImage / HasGeneratedImage 只判断文件是否存在且非空。
+// 批量检查缺图时用它们，避免为了确认存在就读整张图。
+func (s *ImageStore) HasItemImage(itemID, imageType string, index int) bool {
+	return fileExists(s.ItemPath(itemID, imageType, index))
+}
+
+func (s *ImageStore) HasGeneratedImage(itemID, imageType string, index int) bool {
+	return fileExists(s.GeneratedPath(itemID, imageType, index))
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Size() > 0
+}
+
+func (s *ImageStore) DeleteGeneratedImage(itemID, imageType string, index int) error {
+	err := os.Remove(s.GeneratedPath(itemID, imageType, index))
+	if errors.Is(err, os.ErrNotExist) {
+		return ErrImageNotFound
+	}
+	return err
 }
 
 func (s *ImageStore) UserAvatarPath(userID string) string {

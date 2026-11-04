@@ -148,6 +148,7 @@ class EmbyPcService {
     required String name,
     required String collectionType,
     required List<String> paths,
+    bool preferLocalArtwork = true,
     bool refreshLibrary = true,
   }) async {
     final response = await http.post(
@@ -156,6 +157,7 @@ class EmbyPcService {
         'name': name.trim(),
         'collectionType': collectionType,
         'paths': paths,
+        'preferLocalArtwork': '$preferLocalArtwork',
         'refreshLibrary': '$refreshLibrary',
       }),
       headers: _tokenHeader,
@@ -168,6 +170,7 @@ class EmbyPcService {
     required String name,
     required String collectionType,
     required List<String> paths,
+    bool? preferLocalArtwork,
   }) async {
     final response = await http.put(
       _uri('/emby/Library/VirtualFolders/$libraryId'),
@@ -176,9 +179,23 @@ class EmbyPcService {
         'Name': name.trim(),
         'CollectionType': collectionType,
         'Paths': paths,
+        'PreferLocalArtwork': ?preferLocalArtwork,
       }),
     );
     _ensureSuccess(response, '保存媒体库失败');
+  }
+
+  // 只切换封面来源，不重传名称与目录，适合列表里就地开关。
+  Future<void> setLibraryPreferLocalArtwork(
+    String libraryId,
+    bool preferLocal,
+  ) async {
+    final response = await http.put(
+      _uri('/emby/Library/VirtualFolders/$libraryId'),
+      headers: {..._tokenHeader, 'Content-Type': 'application/json'},
+      body: jsonEncode({'PreferLocalArtwork': preferLocal}),
+    );
+    _ensureSuccess(response, '切换封面来源失败');
   }
 
   Future<void> renameVirtualFolder({
@@ -201,6 +218,59 @@ class EmbyPcService {
       headers: _tokenHeader,
     );
     _ensureSuccess(response, '删除媒体库失败');
+  }
+
+  // ---- 整库批量生成海报/封面 ----
+
+  // 只处理缺图的条目；force 为 true 时覆盖已有生成图。
+  // positionRatio 为 0 表示自动嗅探画面，0.02~0.98 表示按各自片长的比例取帧。
+  Future<EmbyPcArtworkJob> startArtworkJob(
+    String libraryId, {
+    bool force = false,
+    List<String> types = const ['Primary', 'Backdrop'],
+    double positionRatio = 0,
+  }) async {
+    final response = await http.post(
+      _uri('/emby/ArtworkJobs'),
+      headers: {..._tokenHeader, 'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'LibraryId': libraryId,
+        'Force': force,
+        'Types': types,
+        'PositionRatio': positionRatio,
+      }),
+    );
+    // 409 代表已有任务在跑，用明确文案代替通用状态码提示。
+    if (response.statusCode == 409) {
+      throw const EmbyPcException('已有海报生成任务在运行');
+    }
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw const EmbyPcException('登录已失效或当前账号没有管理权限');
+    }
+    // 其它失败（找不到 ffmpeg、库里都已有图等）由服务端返回中文原因。
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final message = response.bodyBytes.isEmpty
+          ? ''
+          : utf8.decode(response.bodyBytes).trim();
+      throw EmbyPcException(
+        message.isEmpty ? '启动生成任务失败：HTTP ${response.statusCode}' : message,
+      );
+    }
+    return EmbyPcArtworkJob.fromJson(
+      _decodeResponse(response, '启动生成任务失败'),
+    );
+  }
+
+  Future<EmbyPcArtworkJob> getArtworkJob(String jobId) async =>
+      EmbyPcArtworkJob.fromJson(await _get('/emby/ArtworkJobs/$jobId'));
+
+  Future<EmbyPcArtworkJob> cancelArtworkJob(String jobId) async {
+    final response = await http.post(
+      _uri('/emby/ArtworkJobs/$jobId/Cancel'),
+      headers: _tokenHeader,
+    );
+    final data = _decodeResponse(response, '取消生成任务失败');
+    return EmbyPcArtworkJob.fromJson(data);
   }
 
   // ---- 进度条缩略图预生成 ----
@@ -353,9 +423,10 @@ class EmbyPcService {
     String itemId, {
     required String type,
     required int index,
+    String source = 'local',
   }) async {
     final response = await http.delete(
-      _uri('/emby/Items/$itemId/Images/$type/$index'),
+      _uri('/emby/Items/$itemId/Images/$type/$index', {'Source': source}),
       headers: _tokenHeader,
     );
     _ensureSuccess(response, '删除图像失败');
@@ -617,12 +688,15 @@ class EmbyPcService {
     return data['IsFavorite'] is bool ? data['IsFavorite'] as bool : favorite;
   }
 
+  // source 留空时由服务端按条目所属媒体库的偏好决定读目录图还是生成图；
+  // 传 local/generated 则强制指定，图像编辑弹窗预览用。
   String imageUrl(
     String itemId, {
     String type = 'Primary',
     int index = 0,
     int maxWidth = 720,
     String cacheKey = '',
+    String? source,
   }) {
     final path = type == 'Primary'
         ? '/emby/Items/$itemId/Images/Primary'
@@ -631,8 +705,43 @@ class EmbyPcService {
       'api_key': accessToken,
       'maxWidth': '$maxWidth',
       'quality': '82',
+      if (source != null && source.isNotEmpty) 'Source': source,
       if (cacheKey.isNotEmpty) 'v': cacheKey,
     }).toString();
+  }
+
+  // 从视频画面生成海报/封面：positionTicks 为 0 时由服务端自动嗅探画面。
+  Future<EmbyPcArtworkGeneration> generateArtwork(
+    String itemId, {
+    required bool sniff,
+    required int positionTicks,
+    List<String> types = const ['Primary', 'Backdrop'],
+    int width = 0,
+  }) async {
+    final response = await http.post(
+      _uri('/emby/Items/$itemId/Images/Generate'),
+      headers: {..._tokenHeader, 'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'Types': types,
+        'PositionTicks': sniff ? 0 : positionTicks,
+        'Width': width,
+      }),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      // 抽帧失败原因（缺少 ffmpeg、时间点超界等）由服务端用中文返回，直接透出。
+      final message = response.bodyBytes.isEmpty
+          ? ''
+          : utf8.decode(response.bodyBytes).trim();
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        throw const EmbyPcException('登录已失效或当前账号没有管理权限');
+      }
+      throw EmbyPcException(
+        message.isEmpty ? '生成封面失败：HTTP ${response.statusCode}' : message,
+      );
+    }
+    return EmbyPcArtworkGeneration.fromJson(
+      _decodeResponse(response, '生成封面失败'),
+    );
   }
 
   // 用户头像使用 Swagger 的 Users/{Id}/Images/{Type} 接口，请求当前登录用户的主图。

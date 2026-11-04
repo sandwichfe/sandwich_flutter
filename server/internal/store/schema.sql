@@ -22,7 +22,9 @@ CREATE TABLE IF NOT EXISTS libraries (
     -- path 保留作为单目录兼容字段，paths 是权威数据（JSON 数组，支持一个库多个目录）
     path            TEXT NOT NULL DEFAULT '',
     paths           TEXT NOT NULL DEFAULT '[]',
-    sort_order      INTEGER NOT NULL DEFAULT 0
+    sort_order      INTEGER NOT NULL DEFAULT 0,
+    -- 1 = 优先使用媒体目录里的海报/封面，0 = 优先使用服务端从视频画面生成的图片
+    prefer_local_artwork INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS items (

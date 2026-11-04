@@ -22,6 +22,8 @@ type virtualFolderDto struct {
 	CollectionType string   `json:"CollectionType,omitempty"`
 	ItemId         string   `json:"ItemId,omitempty"`
 	ItemCount      int      `json:"ItemCount"`
+	// PreferLocalArtwork 为本库的封面来源偏好：true 读目录图，false 读服务端生成图。
+	PreferLocalArtwork bool `json:"PreferLocalArtwork"`
 }
 
 func libraryToDto(lib store.Library) dto.BaseItemDto {
@@ -70,11 +72,12 @@ func (s *Server) handleListVirtualFolders(w http.ResponseWriter, r *http.Request
 			count = 0
 		}
 		result = append(result, virtualFolderDto{
-			Name:           lib.Name,
-			Locations:      lib.Paths,
-			CollectionType: lib.CollectionType,
-			ItemId:         lib.ID,
-			ItemCount:      count,
+			Name:               lib.Name,
+			Locations:          lib.Paths,
+			CollectionType:     lib.CollectionType,
+			ItemId:             lib.ID,
+			ItemCount:          count,
+			PreferLocalArtwork: lib.PreferLocalArtwork,
 		})
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -102,7 +105,8 @@ func (s *Server) handleCreateVirtualFolder(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if lib == nil {
-		lib = &store.Library{Name: name, CollectionType: "movies"}
+		// 新建默认读取目录内的海报/封面，保持与升级前一致的表现。
+		lib = &store.Library{Name: name, CollectionType: "movies", PreferLocalArtwork: true}
 	}
 
 	if collectionType := strings.TrimSpace(params.Get("collectionType")); collectionType != "" {
@@ -110,6 +114,9 @@ func (s *Server) handleCreateVirtualFolder(w http.ResponseWriter, r *http.Reques
 	}
 	if paths != nil {
 		lib.Paths = paths
+	}
+	if value := strings.TrimSpace(params.Get("preferLocalArtwork")); value != "" {
+		lib.PreferLocalArtwork = strings.EqualFold(value, "true")
 	}
 	if len(lib.Paths) == 0 {
 		writeError(w, http.StatusBadRequest, "至少需要一个 paths 参数")
@@ -159,6 +166,8 @@ func (s *Server) handleUpdateVirtualFolder(w http.ResponseWriter, r *http.Reques
 		Name           string   `json:"Name"`
 		CollectionType string   `json:"CollectionType"`
 		Paths          []string `json:"Paths"`
+		// 用指针区分"没传"和"显式关掉"，只切换封面来源时不必回传其它字段。
+		PreferLocalArtwork *bool `json:"PreferLocalArtwork"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&payload); err != nil {
 		writeError(w, http.StatusBadRequest, "请求体格式错误")
@@ -173,6 +182,9 @@ func (s *Server) handleUpdateVirtualFolder(w http.ResponseWriter, r *http.Reques
 	}
 	if payload.Paths != nil {
 		lib.Paths = normalizePathList(payload.Paths)
+	}
+	if payload.PreferLocalArtwork != nil {
+		lib.PreferLocalArtwork = *payload.PreferLocalArtwork
 	}
 	if len(lib.Paths) == 0 {
 		writeError(w, http.StatusBadRequest, "至少需要一个目录")

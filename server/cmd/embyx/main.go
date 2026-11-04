@@ -25,6 +25,9 @@ func main() {
 	configPath := flag.String("config", "", "配置文件路径（默认 ./config.yaml，也可用 EMBYX_CONFIG 指定）")
 	flag.Parse()
 
+	if wd, err := os.Getwd(); err == nil {
+		log.Printf("工作目录: %s", wd)
+	}
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)

@@ -111,6 +111,8 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
           if (!mounted) return;
           setState(() {});
           await _reloadLibraries();
+          // 媒体库管理页可能批量生成过海报/封面，返回后刷新当前列表的图片标记。
+          await _reloadMediaAfterChange();
         } else if (value == 'logout') {
           _logout();
         }

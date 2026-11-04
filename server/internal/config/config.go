@@ -61,10 +61,14 @@ func Default() Config {
 // Load 读取配置。explicitPath 来自 -config 参数，为空时回退到 EMBYX_CONFIG 与 ./config.yaml。
 func Load(explicitPath string) (Config, error) {
 	cfg := Default()
-	path := resolveConfigPath(explicitPath)
+	path, explicit := resolveConfigPath(explicitPath)
+	// 记录绝对路径：IDE 调试与命令行的工作目录可能不同，相对路径的日志看不出实际读的是哪份。
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
 	cfg.ConfigPath = path
 
-	fileCfg, err := loadFile(path)
+	fileCfg, err := loadFile(path, explicit)
 	if err != nil {
 		return cfg, err
 	}
@@ -77,21 +81,49 @@ func Load(explicitPath string) (Config, error) {
 	return cfg, nil
 }
 
-func resolveConfigPath(explicit string) string {
+// resolveConfigPath 返回配置文件路径，以及该路径是否由用户显式指定。
+func resolveConfigPath(explicit string) (string, bool) {
 	if value := strings.TrimSpace(explicit); value != "" {
-		return value
+		return value, true
 	}
 	if value := strings.TrimSpace(os.Getenv("EMBYX_CONFIG")); value != "" {
-		return value
+		return value, true
 	}
-	return defaultConfigName
+	// 找不到 ./config.yaml 时向上一级查找：IDE 与命令行的工作目录经常不是同一个目录。
+	if dir, err := os.Getwd(); err == nil {
+		for {
+			candidate := filepath.Join(dir, defaultConfigName)
+			if _, statErr := os.Stat(candidate); statErr == nil {
+				return candidate, false
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+	return defaultConfigName, false
 }
 
-func loadFile(path string) (fileConfig, error) {
+func loadFile(path string, explicit bool) (fileConfig, error) {
 	var cfg fileConfig
 
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
+		// 用户显式指定的路径写错了就报错，不在意外目录凭空生成配置。
+		if explicit {
+			return cfg, fmt.Errorf("配置文件不存在: %s（由 -config 或 EMBYX_CONFIG 指定，不会自动创建）", path)
+		}
+		// 只在"双击运行"（工作目录就是程序目录）时生成模板。
+		// IDE 调试的工作目录往往是项目根，在那里生成默认配置会让人误以为读的是另一份配置。
+		if !cwdIsExecutableDir() {
+			return cfg, fmt.Errorf(
+				"未找到配置文件 %s（当前工作目录 %s，程序目录 %s）；"+
+					"请用 -config / EMBYX_CONFIG 指定，或把 IDE 的工作目录设为配置文件所在目录",
+				path, cwdOrUnknown(), exeDirOrUnknown(),
+			)
+		}
 		// 首次启动生成一份可直接修改的模板，避免用户从零拼装。
 		if writeErr := os.WriteFile(path, []byte(defaultConfigTemplate), 0o644); writeErr != nil {
 			log.Printf("无法生成默认配置文件 %s: %v", path, writeErr)
@@ -169,7 +201,7 @@ func (c *Config) applyEnv() {
 
 // finalize 归一化数据目录并创建所需子目录。
 func (c *Config) finalize() error {
-	abs, err := filepath.Abs(c.DataDir)
+	abs, err := resolveDataDir(c.ConfigPath, c.DataDir)
 	if err != nil {
 		return fmt.Errorf("解析数据目录失败: %w", err)
 	}
@@ -188,6 +220,58 @@ func (c *Config) finalize() error {
 	return nil
 }
 
+// resolveDataDir 让相对的数据目录基于配置文件所在目录解析。
+// 这样 IDE 调试与命令行启动（工作目录不同）也会落到同一份数据库上。
+func resolveDataDir(configPath, dataDir string) (string, error) {
+	if filepath.IsAbs(dataDir) {
+		return filepath.Clean(dataDir), nil
+	}
+	base := filepath.Dir(configPath)
+	if !filepath.IsAbs(base) {
+		abs, err := filepath.Abs(base)
+		if err != nil {
+			return "", err
+		}
+		base = abs
+	}
+	return filepath.Abs(filepath.Join(base, dataDir))
+}
+
+// cwdIsExecutableDir 判断当前工作目录是否就是程序所在目录（双击启动的典型情况）。
+func cwdIsExecutableDir() bool {
+	wd, err := os.Getwd()
+	if err != nil {
+		return false
+	}
+	dir, err := exeDir()
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(filepath.Clean(wd), filepath.Clean(dir))
+}
+
+func exeDir() (string, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Dir(executable), nil
+}
+
+func cwdOrUnknown() string {
+	if wd, err := os.Getwd(); err == nil {
+		return wd
+	}
+	return "未知"
+}
+
+func exeDirOrUnknown() string {
+	if dir, err := exeDir(); err == nil {
+		return dir
+	}
+	return "未知"
+}
+
 func lookupEnv(key string) string {
 	return strings.TrimSpace(os.Getenv(key))
 }
@@ -200,7 +284,7 @@ const defaultConfigTemplate = `# embyx 配置文件
 server:
   # 监听地址；":8096" 表示监听所有网卡的 8096 端口
   addr: ":8096"
-  # 数据库、图片、缓存目录；相对路径基于启动时的工作目录
+  # 数据库、图片、缓存目录；相对路径基于本配置文件所在目录
   data_dir: "./data"
 
 account:

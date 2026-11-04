@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
@@ -24,7 +26,13 @@ const _collectionTypeLabels = <String, String>{
   'mixedcontent': '混合内容',
 };
 
-enum _LibraryAdminAction { scan, edit, delete }
+enum _LibraryAdminAction {
+  scan,
+  generateArtwork,
+  edit,
+  toggleArtworkSource,
+  delete,
+}
 
 class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
   List<EmbyPcVirtualFolder> _folders = const [];
@@ -106,6 +114,7 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
         name: draft.name,
         collectionType: draft.collectionType,
         paths: draft.paths,
+        preferLocalArtwork: draft.preferLocalArtwork,
       );
       if (!mounted) return;
       _toast('已创建「${draft.name}」，正在后台扫描');
@@ -131,6 +140,7 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
         name: draft.name,
         collectionType: draft.collectionType,
         paths: draft.paths,
+        preferLocalArtwork: draft.preferLocalArtwork,
       ),
       '已保存「${draft.name}」',
     );
@@ -174,6 +184,62 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
     },
     '已开始扫描「${folder.name}」',
   );
+
+  // 封面来源按库切换：只改渲染取图，不重扫媒体库。
+  Future<void> _toggleArtworkSource(EmbyPcVirtualFolder folder) {
+    final preferLocal = !folder.preferLocalArtwork;
+    return _runForLibrary(
+      folder,
+      () => EmbyPcService.instance.setLibraryPreferLocalArtwork(
+        folder.id,
+        preferLocal,
+      ),
+      preferLocal ? '「${folder.name}」改用目录内的海报' : '「${folder.name}」改用生成的封面',
+    );
+  }
+
+  // 整库批量生成：后端只处理缺图的条目，任务在后台跑，弹窗轮询进度。
+  Future<void> _generateLibraryArtwork(EmbyPcVirtualFolder folder) async {
+    final options = await showDialog<_GenerateArtworkOptions>(
+      context: context,
+      builder: (_) => _GenerateArtworkConfirmDialog(folder: folder),
+    );
+    if (options == null || !mounted) return;
+
+    final EmbyPcArtworkJob job;
+    try {
+      job = await EmbyPcService.instance.startArtworkJob(
+        folder.id,
+        force: options.force,
+        positionRatio: options.positionRatio,
+      );
+    } catch (error) {
+      if (mounted) _toast(error.toString(), type: EmbyPcToastType.error);
+      return;
+    }
+    if (!mounted) return;
+
+    final result = await showDialog<EmbyPcArtworkJob>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _ArtworkJobDialog(job: job),
+    );
+    if (!mounted) return;
+    // 关掉弹窗时任务还在跑，交给后台继续，不打断用户。
+    if (result == null || result.isRunning) return;
+
+    await _load(silent: true);
+    if (!mounted) return;
+    if (result.isCanceled) {
+      _toast('已取消「${folder.name}」的生成任务');
+      return;
+    }
+    _toast(
+      result.failed == 0
+          ? '「${folder.name}」已生成 ${result.generated} 张图片'
+          : '「${folder.name}」生成完成：成功 ${result.completed}，失败 ${result.failed}',
+    );
+  }
 
   Future<void> _scanAll() async {
     if (_scanningAll) return;
@@ -280,9 +346,9 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
       leading: Icon(_iconFor(folder.collectionType)),
       title: Text(folder.name),
       subtitle: Text(
-        locations.isEmpty
-            ? '未配置目录 · ${folder.itemCount} 个条目'
-            : '${locations.join(' · ')} · ${folder.itemCount} 个条目',
+        '${locations.isEmpty ? '未配置目录' : locations.join(' · ')}'
+        ' · ${folder.itemCount} 个条目'
+        ' · ${folder.preferLocalArtwork ? '海报取目录图' : '海报取生成图'}',
         // 目录可能很长，固定两行避免撑破 ListTile 高度。
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
@@ -300,21 +366,32 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
                 switch (action) {
                   case _LibraryAdminAction.scan:
                     _scanLibrary(folder);
+                  case _LibraryAdminAction.generateArtwork:
+                    _generateLibraryArtwork(folder);
                   case _LibraryAdminAction.edit:
                     _editLibrary(folder);
+                  case _LibraryAdminAction.toggleArtworkSource:
+                    _toggleArtworkSource(folder);
                   case _LibraryAdminAction.delete:
                     _deleteLibrary(folder);
                 }
               },
-              itemBuilder: (_) => const [
-                PopupMenuItem(
+              itemBuilder: (_) => [
+                const PopupMenuItem(
                   value: _LibraryAdminAction.scan,
                   child: ListTile(
                     leading: Icon(Icons.refresh),
                     title: Text('扫描媒体库'),
                   ),
                 ),
-                PopupMenuItem(
+                const PopupMenuItem(
+                  value: _LibraryAdminAction.generateArtwork,
+                  child: ListTile(
+                    leading: Icon(Icons.auto_awesome_outlined),
+                    title: Text('生成海报和封面'),
+                  ),
+                ),
+                const PopupMenuItem(
                   value: _LibraryAdminAction.edit,
                   child: ListTile(
                     leading: Icon(Icons.edit_outlined),
@@ -322,6 +399,15 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
                   ),
                 ),
                 PopupMenuItem(
+                  value: _LibraryAdminAction.toggleArtworkSource,
+                  child: ListTile(
+                    leading: const Icon(Icons.image_outlined),
+                    title: Text(
+                      folder.preferLocalArtwork ? '改用生成的封面' : '改用目录内的海报',
+                    ),
+                  ),
+                ),
+                const PopupMenuItem(
                   value: _LibraryAdminAction.delete,
                   child: ListTile(
                     leading: Icon(Icons.delete_outline),
@@ -346,11 +432,13 @@ class _LibraryDraft {
   final String name;
   final String collectionType;
   final List<String> paths;
+  final bool preferLocalArtwork;
 
   const _LibraryDraft({
     required this.name,
     required this.collectionType,
     required this.paths,
+    required this.preferLocalArtwork,
   });
 }
 
@@ -373,6 +461,8 @@ class _LibraryEditorDialogState extends State<_LibraryEditorDialog> {
     text: widget.folder?.locations.join('\n') ?? '',
   );
   late String _collectionType = widget.folder?.collectionType ?? 'movies';
+  // 每个库单独决定封面来源，默认与升级前一致：读取目录内的海报/封面。
+  late bool _preferLocalArtwork = widget.folder?.preferLocalArtwork ?? true;
 
   @override
   void dispose() {
@@ -417,6 +507,7 @@ class _LibraryEditorDialogState extends State<_LibraryEditorDialog> {
         name: _nameController.text.trim(),
         collectionType: _collectionType,
         paths: _paths,
+        preferLocalArtwork: _preferLocalArtwork,
       ),
     );
   }
@@ -481,6 +572,18 @@ class _LibraryEditorDialogState extends State<_LibraryEditorDialog> {
                   // 目录不在表单值里，校验直接读当前解析结果。
                   validator: (_) => _paths.isEmpty ? '至少需要一个目录' : null,
                 ),
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  secondary: const Icon(Icons.image_outlined),
+                  title: const Text('读取目录内的海报和封面'),
+                  subtitle: const Text(
+                    '关闭后使用服务端从视频画面生成的图片；目录内没有海报或封面时同样回退到生成图',
+                  ),
+                  value: _preferLocalArtwork,
+                  onChanged: (value) =>
+                      setState(() => _preferLocalArtwork = value),
+                ),
               ],
             ),
           ),
@@ -494,6 +597,245 @@ class _LibraryEditorDialogState extends State<_LibraryEditorDialog> {
         FilledButton(
           onPressed: _submit,
           child: Text(isEditing ? '保存' : '创建并扫描'),
+        ),
+      ],
+    );
+  }
+}
+
+// 批量生成前的确认：说明只处理缺图条目，可选是否全部重来。
+// 批量生成的取帧方式与覆盖策略，作为确认弹窗的返回值。
+class _GenerateArtworkOptions {
+  final bool force;
+  // 0 表示自动嗅探；否则是按片长比例指定的进度点（0.02~0.98）。
+  final double positionRatio;
+
+  const _GenerateArtworkOptions({
+    required this.force,
+    required this.positionRatio,
+  });
+}
+
+// 批量生成前的确认：可选自动嗅探或指定进度点，以及是否全部重来。
+// 返回 null 表示取消。
+class _GenerateArtworkConfirmDialog extends StatefulWidget {
+  final EmbyPcVirtualFolder folder;
+
+  const _GenerateArtworkConfirmDialog({required this.folder});
+
+  @override
+  State<_GenerateArtworkConfirmDialog> createState() =>
+      _GenerateArtworkConfirmDialogState();
+}
+
+class _GenerateArtworkConfirmDialogState
+    extends State<_GenerateArtworkConfirmDialog> {
+  bool _sniff = true;
+  // 与前端的单条目生成保持一致，默认取 30% 处。
+  double _percent = 0.30;
+  bool _force = false;
+
+  String get _positionLabel => '${(_percent * 100).round()}%';
+
+  void _confirm() {
+    Navigator.pop(
+      context,
+      _GenerateArtworkOptions(
+        force: _force,
+        positionRatio: _sniff ? 0 : _percent,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('生成海报和封面 · ${widget.folder.name}'),
+      content: SizedBox(
+        width: 440,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '从每个视频的画面里取一帧，生成竖版海报和横版封面。'
+                '默认只处理还没有图片的条目，条目较多时会在后台逐条执行。',
+              ),
+              const SizedBox(height: 8),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('自动嗅探画面'),
+                subtitle: const Text('在片长中段抽样若干帧，自动选择画面最清晰的一帧'),
+                value: _sniff,
+                onChanged: (value) => setState(() => _sniff = value),
+              ),
+              if (!_sniff) ...[
+                Text('取帧进度：$_positionLabel（每条视频按自己的片长换算）'),
+                Slider(
+                  value: _percent,
+                  min: 0.02,
+                  max: 0.98,
+                  divisions: 96,
+                  label: _positionLabel,
+                  onChanged: (value) => setState(() => _percent = value),
+                ),
+              ],
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('全部重新生成'),
+                subtitle: const Text('覆盖已存在的生成图，耗时明显更长'),
+                value: _force,
+                onChanged: (value) => setState(() => _force = value),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(onPressed: _confirm, child: const Text('开始生成')),
+      ],
+    );
+  }
+}
+
+// 轮询任务进度；关闭弹窗任务会继续在后台跑。
+class _ArtworkJobDialog extends StatefulWidget {
+  final EmbyPcArtworkJob job;
+
+  const _ArtworkJobDialog({required this.job});
+
+  @override
+  State<_ArtworkJobDialog> createState() => _ArtworkJobDialogState();
+}
+
+class _ArtworkJobDialogState extends State<_ArtworkJobDialog> {
+  late EmbyPcArtworkJob _job = widget.job;
+  Timer? _timer;
+  bool _canceling = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _startPolling();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _startPolling() {
+    _timer?.cancel();
+    if (!_job.isRunning) return;
+    _timer = Timer.periodic(
+      const Duration(milliseconds: 1500),
+      (_) => _poll(),
+    );
+  }
+
+  Future<void> _poll() async {
+    try {
+      final job = await EmbyPcService.instance.getArtworkJob(_job.id);
+      if (!mounted) return;
+      setState(() => _job = job);
+      if (!job.isRunning) {
+        _timer?.cancel();
+        _timer = null;
+      }
+    } catch (_) {
+      // 单次轮询失败不影响任务本身，下一次继续。
+    }
+  }
+
+  Future<void> _cancel() async {
+    if (_canceling) return;
+    setState(() => _canceling = true);
+    try {
+      final job = await EmbyPcService.instance.cancelArtworkJob(_job.id);
+      if (mounted) setState(() => _job = job);
+    } catch (error) {
+      if (mounted) {
+        EmbyPcToast.show(context, error.toString(), type: EmbyPcToastType.error);
+      }
+    } finally {
+      if (mounted) setState(() => _canceling = false);
+    }
+  }
+
+  String get _statusText {
+    if (_job.isRunning) {
+      return '已处理 ${_job.processed} / ${_job.total}，已生成 ${_job.generated} 张';
+    }
+    if (_job.isCanceled) {
+      return '已取消：成功 ${_job.completed}，失败 ${_job.failed}，已生成 ${_job.generated} 张';
+    }
+    return '已完成：成功 ${_job.completed}，失败 ${_job.failed}，已生成 ${_job.generated} 张';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final errors = _job.errors;
+    return AlertDialog(
+      title: Text('生成海报和封面 · ${_job.libraryName}'),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            LinearProgressIndicator(value: _job.progress),
+            const SizedBox(height: 12),
+            Text(_statusText),
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                _job.positionRatio > 0
+                    ? '取帧方式：固定进度 ${(_job.positionRatio * 100).round()}%（按各自片长换算）'
+                    : '取帧方式：自动嗅探画面',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+            if (_job.isRunning && _job.currentItem.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  '正在处理：${_job.currentItem}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            if (errors.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Text(
+                  errors.first,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.error,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        if (_job.isRunning)
+          TextButton(
+            onPressed: _canceling ? null : _cancel,
+            child: const Text('取消任务'),
+          ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _job),
+          child: Text(_job.isRunning ? '后台运行' : '关闭'),
         ),
       ],
     );
