@@ -193,6 +193,58 @@ func (s *Store) DeleteLibrary(ctx context.Context, id string) ([]string, error) 
 	return itemIDs, nil
 }
 
+// LibraryItemRef 是清理陈旧条目所需的最小字段集合。
+type LibraryItemRef struct {
+	ID   string
+	Path string
+}
+
+// LibraryItemRefs 返回库内所有条目的 ID 与源文件路径，供扫描后比对磁盘。
+func (s *Store) LibraryItemRefs(ctx context.Context, libraryID string) ([]LibraryItemRef, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, path FROM items WHERE library_id = ? OR parent_id = ?`, libraryID, libraryID)
+	if err != nil {
+		return nil, fmt.Errorf("查询库内条目失败: %w", err)
+	}
+	defer rows.Close()
+
+	refs := make([]LibraryItemRef, 0, 128)
+	for rows.Next() {
+		var ref LibraryItemRef
+		if err := rows.Scan(&ref.ID, &ref.Path); err != nil {
+			return nil, err
+		}
+		refs = append(refs, ref)
+	}
+	return refs, rows.Err()
+}
+
+// DeleteItems 批量删除条目，同时清掉用户数据和播放会话，避免残留孤儿行。
+// 调用方负责清理条目对应的图片目录。
+func (s *Store) DeleteItems(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for _, id := range ids {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM user_data WHERE item_id = ?`, id); err != nil {
+			return fmt.Errorf("清理条目用户数据失败: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM play_sessions WHERE item_id = ?`, id); err != nil {
+			return fmt.Errorf("清理条目播放会话失败: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM items WHERE id = ?`, id); err != nil {
+			return fmt.Errorf("删除条目失败: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *Store) CountLibraryItems(ctx context.Context, libraryID string) (int, error) {
 	var total int
 	err := s.db.QueryRowContext(ctx,

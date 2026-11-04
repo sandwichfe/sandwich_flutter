@@ -140,6 +140,10 @@ func (s *Scanner) scanLibrary(ctx context.Context, lib store.Library, logf func(
 			return imported, err
 		}
 		imported += s.processFiles(ctx, lib.ID, paths, logf)
+		// 遍历成功才清理陈旧条目：源端删片后重新扫描即可同步，避免条目长期残留。
+		if err == nil {
+			s.purgeMissingItems(ctx, lib, root, paths, logf)
+		}
 		if ctx.Err() != nil {
 			break
 		}
@@ -171,6 +175,57 @@ func collectVideoFiles(ctx context.Context, root string) ([]string, error) {
 		return nil
 	})
 	return paths, err
+}
+
+// purgeMissingItems 删除源文件已经不存在的条目，同时回收图片与用户数据。
+// 安全前提：只在本次遍历成功且确实扫到文件时执行，共享盘掉线时不会被当成"全库删除"。
+func (s *Scanner) purgeMissingItems(ctx context.Context, lib store.Library, root string, scanned []string, logf func(string, ...any)) {
+	if len(scanned) == 0 || ctx.Err() != nil {
+		return
+	}
+	refs, err := s.store.LibraryItemRefs(ctx, lib.ID)
+	if err != nil {
+		logf("媒体库 %s 清理陈旧条目失败: %v", lib.Name, err)
+		return
+	}
+
+	seen := make(map[string]bool, len(scanned))
+	for _, path := range scanned {
+		seen[path] = true
+	}
+
+	stale := make([]string, 0, 8)
+	for _, ref := range refs {
+		if seen[ref.Path] || !pathWithinRoot(ref.Path, root) {
+			continue
+		}
+		// 只有"确实不存在"才删：权限不足、网络不可达等情况保守保留。
+		if _, statErr := os.Stat(ref.Path); !errors.Is(statErr, fs.ErrNotExist) {
+			continue
+		}
+		stale = append(stale, ref.ID)
+	}
+	if len(stale) == 0 {
+		return
+	}
+
+	if err := s.store.DeleteItems(ctx, stale); err != nil {
+		logf("媒体库 %s 删除陈旧条目失败: %v", lib.Name, err)
+		return
+	}
+	for _, itemID := range stale {
+		_ = s.images.RemoveItem(itemID)
+	}
+	logf("媒体库 %s 清理了 %d 个源文件已不存在的条目", lib.Name, len(stale))
+}
+
+// pathWithinRoot 判断条目路径是否位于扫描根目录下，多目录库之间不会互相清理。
+func pathWithinRoot(path, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // processFiles 用固定数量的 worker 并发探测并入库，返回成功导入的条目数。

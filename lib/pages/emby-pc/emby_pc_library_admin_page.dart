@@ -42,10 +42,25 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
   bool _scanningAll = false;
   final Set<String> _busyIds = {};
 
+  // 扫描是后端的异步任务，接口返回时条目还没入库，
+  // 所以触发扫描后要轮询列表，否则条目数一直停在扫描前的值。
+  Timer? _scanPollTimer;
+  bool _scanPolling = false;
+  int _scanPollStableRounds = 0;
+  String _scanPollSnapshot = '';
+  static const _scanPollInterval = Duration(seconds: 2);
+  static const _scanPollStableLimit = 5;
+
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _scanPollTimer?.cancel();
+    super.dispose();
   }
 
   // silent 用于写操作后的静默刷新，避免整页闪回加载态。
@@ -81,20 +96,23 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
   }
 
   // 单个库的写操作统一走这里，复用忙碌标记与错误提示。
-  Future<void> _runForLibrary(
+  // 返回是否成功，调用方据此决定要不要启动扫描轮询。
+  Future<bool> _runForLibrary(
     EmbyPcVirtualFolder folder,
     Future<void> Function() action,
     String successMessage,
   ) async {
-    if (_busyIds.contains(folder.id)) return;
+    if (_busyIds.contains(folder.id)) return false;
     setState(() => _busyIds.add(folder.id));
     try {
       await action();
-      if (!mounted) return;
+      if (!mounted) return true;
       _toast(successMessage);
       await _load(silent: true);
+      return true;
     } catch (error) {
       if (mounted) _toast(error.toString(), type: EmbyPcToastType.error);
+      return false;
     } finally {
       if (mounted) setState(() => _busyIds.remove(folder.id));
     }
@@ -119,6 +137,7 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
       if (!mounted) return;
       _toast('已创建「${draft.name}」，正在后台扫描');
       await _load(silent: true);
+      _startScanPolling();
     } catch (error) {
       if (mounted) _toast(error.toString(), type: EmbyPcToastType.error);
     } finally {
@@ -177,13 +196,16 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
     );
   }
 
-  Future<void> _scanLibrary(EmbyPcVirtualFolder folder) => _runForLibrary(
-    folder,
-    () async {
-      await EmbyPcService.instance.scanLibraryItem(folder.id);
-    },
-    '已开始扫描「${folder.name}」',
-  );
+  Future<void> _scanLibrary(EmbyPcVirtualFolder folder) async {
+    final started = await _runForLibrary(
+      folder,
+      () async {
+        await EmbyPcService.instance.scanLibraryItem(folder.id);
+      },
+      '已开始扫描「${folder.name}」，列表会自动刷新',
+    );
+    if (started && mounted) _startScanPolling();
+  }
 
   // 封面来源按库切换：只改渲染取图，不重扫媒体库。
   Future<void> _toggleArtworkSource(EmbyPcVirtualFolder folder) {
@@ -246,13 +268,66 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
     setState(() => _scanningAll = true);
     try {
       await EmbyPcService.instance.scanLibrary();
-      if (mounted) _toast('已开始扫描全部媒体库');
+      if (!mounted) return;
+      _toast('已开始扫描全部媒体库，列表会自动刷新');
+      _startScanPolling();
     } catch (error) {
       if (mounted) _toast(error.toString(), type: EmbyPcToastType.error);
     } finally {
       if (mounted) setState(() => _scanningAll = false);
     }
   }
+
+  // 扫描进度只能靠条目数间接观察：每隔 2 秒拉一次列表，
+  // 条目数连续 5 次（约 10 秒）没有变化就认为扫描结束并停止轮询。
+  void _startScanPolling() {
+    if (!mounted) return;
+    _scanPollTimer?.cancel();
+    _scanPollSnapshot = _foldersSnapshot(_folders);
+    _scanPollStableRounds = 0;
+    setState(() => _scanPolling = true);
+    _scanPollTimer = Timer.periodic(_scanPollInterval, (_) {
+      _pollScanProgress();
+    });
+  }
+
+  void _stopScanPolling() {
+    _scanPollTimer?.cancel();
+    _scanPollTimer = null;
+    if (!mounted) {
+      _scanPolling = false;
+      return;
+    }
+    setState(() => _scanPolling = false);
+  }
+
+  Future<void> _pollScanProgress() async {
+    try {
+      final folders = await EmbyPcService.instance.getVirtualFolders();
+      if (!mounted) return;
+      final snapshot = _foldersSnapshot(folders);
+      setState(() {
+        _folders = folders;
+        _error = '';
+        _loading = false;
+        if (snapshot == _scanPollSnapshot) {
+          _scanPollStableRounds++;
+        } else {
+          _scanPollStableRounds = 0;
+          _scanPollSnapshot = snapshot;
+        }
+      });
+      if (_scanPollStableRounds >= _scanPollStableLimit) {
+        _stopScanPolling();
+      }
+    } catch (_) {
+      // 扫描期间偶发请求失败不打断页面，下一轮继续尝试。
+    }
+  }
+
+  String _foldersSnapshot(List<EmbyPcVirtualFolder> folders) => folders
+      .map((folder) => '${folder.id}:${folder.itemCount}')
+      .join('|');
 
   @override
   Widget build(BuildContext context) {
@@ -261,15 +336,24 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
         title: const Text('媒体库管理'),
         actions: [
           IconButton(
-            tooltip: '扫描全部媒体库',
-            onPressed: _scanningAll ? null : _scanAll,
-            icon: _scanningAll
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.refresh),
+            tooltip: '刷新列表',
+            onPressed: () => _load(),
+            icon: const Icon(Icons.refresh),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            // 扫描是重操作，用带文字的按钮和"刷新列表"的图标区分开。
+            child: TextButton.icon(
+              onPressed: (_scanningAll || _scanPolling) ? null : _scanAll,
+              icon: _scanningAll || _scanPolling
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.radar_outlined, size: 18),
+              label: Text(_scanPolling ? '扫描中' : '扫描全部'),
+            ),
           ),
           IconButton(
             tooltip: '新建媒体库',

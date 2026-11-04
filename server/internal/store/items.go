@@ -297,7 +297,9 @@ ON CONFLICT(id) DO UPDATE SET
 	library_id = excluded.library_id, parent_id = excluded.parent_id,
 	type = excluded.type, name = excluded.name, sort_name = excluded.sort_name,
 	overview = excluded.overview, production_year = excluded.production_year,
-	premiere_date = excluded.premiere_date, date_created = excluded.date_created,
+	premiere_date = excluded.premiere_date,
+	-- date_created 是"首次入库时间"：重复扫描保留原值，否则每次扫描都会把它刷成当前时间。
+	date_created = CASE WHEN items.date_created <> '' THEN items.date_created ELSE excluded.date_created END,
 	community_rating = excluded.community_rating, official_rating = excluded.official_rating,
 	run_time_ticks = excluded.run_time_ticks, width = excluded.width, height = excluded.height,
 	path = excluded.path, container = excluded.container, size = excluded.size,
