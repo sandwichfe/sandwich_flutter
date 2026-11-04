@@ -15,21 +15,29 @@ import (
 // thumbnailJobDto 是设置页轮询的任务状态。
 // 字段为本项目扩展（不属于 Emby 协议），命名保持 PascalCase 便于前端直接读取。
 type thumbnailJobDto struct {
-	JobId       string   `json:"JobId"`
-	LibraryId   string   `json:"LibraryId"`
-	LibraryName string   `json:"LibraryName"`
-	IntervalMs  int      `json:"IntervalMs"`
-	Width       int      `json:"Width"`
-	Total       int      `json:"Total"`
-	Completed   int      `json:"Completed"`
-	Failed      int      `json:"Failed"`
-	Skipped     int      `json:"Skipped"`
-	Status      string   `json:"Status"`
-	CurrentItem string   `json:"CurrentItem"`
-	Progress    float64  `json:"Progress"`
-	Errors      []string `json:"Errors"`
-	StartedAt   string   `json:"StartedAt"`
-	FinishedAt  string   `json:"FinishedAt"`
+	JobId       string `json:"JobId"`
+	LibraryId   string `json:"LibraryId"`
+	LibraryName string `json:"LibraryName"`
+	IntervalMs  int    `json:"IntervalMs"`
+	Width       int    `json:"Width"`
+	Total       int    `json:"Total"`
+	Completed   int    `json:"Completed"`
+	Failed      int    `json:"Failed"`
+	Skipped     int    `json:"Skipped"`
+	Status      string `json:"Status"`
+	CurrentItem string `json:"CurrentItem"`
+	// CurrentItemProgress 是当前条目内 0~1 的抽帧进度。
+	CurrentItemProgress float64 `json:"CurrentItemProgress"`
+	// 时长统一用秒，前端自行格式化成"x 小时 y 分"。
+	CurrentItemDurationSeconds int64    `json:"CurrentItemDurationSeconds"`
+	TotalDurationSeconds       int64    `json:"TotalDurationSeconds"`
+	DoneDurationSeconds        int64    `json:"DoneDurationSeconds"`
+	EstimatedFrames            int      `json:"EstimatedFrames"`
+	GeneratedFrames            int      `json:"GeneratedFrames"`
+	Progress                   float64  `json:"Progress"`
+	Errors                     []string `json:"Errors"`
+	StartedAt                  string   `json:"StartedAt"`
+	FinishedAt                 string   `json:"FinishedAt"`
 }
 
 func thumbnailJobToDto(snapshot media.ThumbnailJobSnapshot) thumbnailJobDto {
@@ -38,21 +46,27 @@ func thumbnailJobToDto(snapshot media.ThumbnailJobSnapshot) thumbnailJobDto {
 		errors = []string{}
 	}
 	return thumbnailJobDto{
-		JobId:       snapshot.ID,
-		LibraryId:   snapshot.LibraryID,
-		LibraryName: snapshot.LibraryName,
-		IntervalMs:  snapshot.IntervalMs,
-		Width:       snapshot.Width,
-		Total:       snapshot.Total,
-		Completed:   snapshot.Completed,
-		Failed:      snapshot.Failed,
-		Skipped:     snapshot.Skipped,
-		Status:      snapshot.Status,
-		CurrentItem: snapshot.CurrentItem,
-		Progress:    snapshot.Progress(),
-		Errors:      errors,
-		StartedAt:   snapshot.StartedAt,
-		FinishedAt:  snapshot.FinishedAt,
+		JobId:                      snapshot.ID,
+		LibraryId:                  snapshot.LibraryID,
+		LibraryName:                snapshot.LibraryName,
+		IntervalMs:                 snapshot.IntervalMs,
+		Width:                      snapshot.Width,
+		Total:                      snapshot.Total,
+		Completed:                  snapshot.Completed,
+		Failed:                     snapshot.Failed,
+		Skipped:                    snapshot.Skipped,
+		Status:                     snapshot.Status,
+		CurrentItem:                snapshot.CurrentItem,
+		CurrentItemProgress:        snapshot.CurrentItemProgress,
+		CurrentItemDurationSeconds: snapshot.CurrentItemDurationSeconds,
+		TotalDurationSeconds:       snapshot.TotalDurationSeconds,
+		DoneDurationSeconds:        snapshot.DoneDurationSeconds,
+		EstimatedFrames:            snapshot.EstimatedFrames,
+		GeneratedFrames:            snapshot.GeneratedFrames,
+		Progress:                   snapshot.Progress(),
+		Errors:                     errors,
+		StartedAt:                  snapshot.StartedAt,
+		FinishedAt:                 snapshot.FinishedAt,
 	}
 }
 
@@ -128,6 +142,8 @@ func (s *Server) handleCreateThumbnailJob(w http.ResponseWriter, r *http.Request
 			ItemID: item.ID,
 			Name:   item.Name,
 			Path:   item.Path,
+			// RunTimeTicks 是 100ns 单位，1 秒 = 10,000,000 ticks。
+			DurationSeconds: item.RunTimeTicks / 10_000_000,
 		})
 	}
 
@@ -137,7 +153,9 @@ func (s *Server) handleCreateThumbnailJob(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "启动缩略图预生成任务失败")
+		// 例如 ffmpeg 路径无效：把原因原样交给前端，避免只显示"0 张"。
+		log.Printf("启动缩略图预生成任务失败: %v", err)
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 

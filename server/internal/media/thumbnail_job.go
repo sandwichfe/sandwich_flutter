@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"os"
+	"os/exec"
 	"sync"
 	"time"
 )
@@ -35,6 +37,8 @@ type ThumbnailTarget struct {
 	ItemID string
 	Name   string
 	Path   string
+	// DurationSeconds 来自入库时 ffprobe 的结果，用于按时长展示进度。
+	DurationSeconds int64
 }
 
 // ThumbnailJobSnapshot 是任务状态的只读快照，可直接序列化给前端。
@@ -50,9 +54,20 @@ type ThumbnailJobSnapshot struct {
 	Skipped     int
 	Status      string
 	CurrentItem string
-	Errors      []string
-	StartedAt   string
-	FinishedAt  string
+	// CurrentItemProgress 是当前条目内 0~1 的抽帧进度，由 ffmpeg -progress 换算。
+	CurrentItemProgress float64
+	// CurrentItemDurationSeconds 是正在处理条目的时长，界面用它显示"当前视频多长"。
+	CurrentItemDurationSeconds int64
+	// TotalDurationSeconds 只统计时长有效的条目，避免探测失败的条目把分母拉偏。
+	TotalDurationSeconds int64
+	// DoneDurationSeconds 只累加成功条目，失败/跳过的时长不计入。
+	DoneDurationSeconds int64
+	// EstimatedFrames 按 时长/间隔 预估，GeneratedFrames 是实际写进 BIF 的帧数。
+	EstimatedFrames int
+	GeneratedFrames int
+	Errors          []string
+	StartedAt       string
+	FinishedAt      string
 }
 
 // Progress 返回 0~1 的完成比例，供前端进度条直接使用。
@@ -107,6 +122,13 @@ func (m *ThumbnailJobManager) Start(libraryID, libraryName string, targets []Thu
 	if m.bif == nil {
 		return ThumbnailJobSnapshot{}, errors.New("缩略图缓存未初始化")
 	}
+	// 启动前先确认 ffmpeg 可用，否则任务会逐条失败，界面上只看到"0 张"。
+	if _, err := exec.LookPath(m.bif.FFmpegPath()); err != nil {
+		return ThumbnailJobSnapshot{}, fmt.Errorf(
+			"找不到 ffmpeg（当前配置：%q），请安装 ffmpeg 或用 EMBYX_FFMPEG / config.yaml 指定完整路径",
+			m.bif.FFmpegPath(),
+		)
+	}
 	if intervalMs <= 0 {
 		intervalMs = 10000
 	}
@@ -120,17 +142,34 @@ func (m *ThumbnailJobManager) Start(libraryID, libraryName string, targets []Thu
 		return ThumbnailJobSnapshot{}, ErrThumbnailJobRunning
 	}
 
+	// 总时长与预估帧数在启动时一次算清，后续进度只做累加。
+	intervalSeconds := int64(intervalMs / 1000)
+	if intervalSeconds <= 0 {
+		intervalSeconds = 1
+	}
+	var totalDuration int64
+	estimatedFrames := 0
+	for _, target := range targets {
+		if target.DurationSeconds <= 0 {
+			continue
+		}
+		totalDuration += target.DurationSeconds
+		estimatedFrames += int((target.DurationSeconds + intervalSeconds - 1) / intervalSeconds)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	job := &thumbnailJob{cancel: cancel}
 	job.snapshot = ThumbnailJobSnapshot{
-		ID:          newThumbnailJobID(),
-		LibraryID:   libraryID,
-		LibraryName: libraryName,
-		IntervalMs:  intervalMs,
-		Width:       width,
-		Total:       len(targets),
-		Status:      ThumbnailJobRunning,
-		StartedAt:   time.Now().Format(time.RFC3339),
+		ID:                   newThumbnailJobID(),
+		LibraryID:            libraryID,
+		LibraryName:          libraryName,
+		IntervalMs:           intervalMs,
+		Width:                width,
+		Total:                len(targets),
+		Status:               ThumbnailJobRunning,
+		TotalDurationSeconds: totalDuration,
+		EstimatedFrames:      estimatedFrames,
+		StartedAt:            time.Now().Format(time.RFC3339),
 	}
 
 	m.jobs[job.snapshot.ID] = job
@@ -208,20 +247,34 @@ func (m *ThumbnailJobManager) run(ctx context.Context, job *thumbnailJob, target
 	intervalMs := uint32(initial.IntervalMs)
 	width := initial.Width
 
-	for _, target := range targets {
+	startedAt := time.Now()
+	log.Printf("[thumbnails] 任务 %s 开始: 库=%s 条目=%d 间隔=%dms 宽度=%d 总时长=%ds 预估帧=%d",
+		initial.ID, initial.LibraryName, initial.Total, initial.IntervalMs, initial.Width,
+		initial.TotalDurationSeconds, initial.EstimatedFrames)
+
+	for index, target := range targets {
 		if ctx.Err() != nil {
 			job.update(func(s *ThumbnailJobSnapshot) {
 				s.Status = ThumbnailJobCanceled
 				s.CurrentItem = ""
+				s.CurrentItemProgress = 0
+				s.CurrentItemDurationSeconds = 0
 				s.FinishedAt = time.Now().Format(time.RFC3339)
 			})
+			log.Printf("[thumbnails] 任务 %s 已取消: 成功=%d 失败=%d 跳过=%d",
+				initial.ID, job.copy().Completed, job.copy().Failed, job.copy().Skipped)
 			return
 		}
 
-		job.update(func(s *ThumbnailJobSnapshot) { s.CurrentItem = target.Name })
+		job.update(func(s *ThumbnailJobSnapshot) {
+			s.CurrentItem = target.Name
+			s.CurrentItemProgress = 0
+			s.CurrentItemDurationSeconds = target.DurationSeconds
+		})
 
 		if target.Path == "" {
 			job.update(func(s *ThumbnailJobSnapshot) { s.Skipped++ })
+			log.Printf("[thumbnails] [%d/%d] 跳过 %s: 条目没有文件路径", index+1, len(targets), target.Name)
 			continue
 		}
 		if _, err := os.Stat(target.Path); err != nil {
@@ -229,32 +282,82 @@ func (m *ThumbnailJobManager) run(ctx context.Context, job *thumbnailJob, target
 				s.Skipped++
 				appendThumbnailError(s, fmt.Sprintf("%s: 源文件不可读", target.Name))
 			})
+			log.Printf("[thumbnails] [%d/%d] 跳过 %s: 源文件不可读 (%v)", index+1, len(targets), target.Name, err)
 			continue
 		}
 
-		if _, err := m.bif.Generate(ctx, target.ItemID, target.Path, intervalMs, width, true); err != nil {
+		itemStarted := time.Now()
+		log.Printf("[thumbnails] [%d/%d] 开始 %s (时长 %ds) 路径=%s",
+			index+1, len(targets), target.Name, target.DurationSeconds, target.Path)
+
+		// ffmpeg 每 0.5 秒输出一次进度，这里只在整数百分比变化时更新快照。
+		lastPercent := -1
+		onProgress := func(elapsedMs int64) {
+			if target.DurationSeconds <= 0 {
+				return
+			}
+			percent := int(elapsedMs * 100 / (target.DurationSeconds * 1000))
+			if percent > 99 {
+				percent = 99
+			}
+			if percent <= lastPercent {
+				return
+			}
+			lastPercent = percent
+			job.update(func(s *ThumbnailJobSnapshot) {
+				s.CurrentItemProgress = float64(percent) / 100
+			})
+		}
+
+		_, frames, err := m.bif.Generate(ctx, target.ItemID, target.Path, BifOptions{
+			IntervalMs: intervalMs,
+			Width:      width,
+			Force:      true,
+			OnProgress: onProgress,
+		})
+		if err != nil {
 			if ctx.Err() != nil {
 				job.update(func(s *ThumbnailJobSnapshot) {
 					s.Status = ThumbnailJobCanceled
 					s.CurrentItem = ""
+					s.CurrentItemProgress = 0
+					s.CurrentItemDurationSeconds = 0
 					s.FinishedAt = time.Now().Format(time.RFC3339)
 				})
+				log.Printf("[thumbnails] 任务 %s 已取消", initial.ID)
 				return
 			}
 			job.update(func(s *ThumbnailJobSnapshot) {
 				s.Failed++
+				s.CurrentItemProgress = 0
 				appendThumbnailError(s, fmt.Sprintf("%s: %v", target.Name, err))
 			})
+			log.Printf("[thumbnails] [%d/%d] 失败 %s: %v", index+1, len(targets), target.Name, err)
 			continue
 		}
-		job.update(func(s *ThumbnailJobSnapshot) { s.Completed++ })
+
+		// 只有成功条目才累加时长与帧数，失败和跳过不推进"已完成"口径。
+		job.update(func(s *ThumbnailJobSnapshot) {
+			s.Completed++
+			s.CurrentItemProgress = 0
+			s.DoneDurationSeconds += target.DurationSeconds
+			s.GeneratedFrames += frames
+		})
+		log.Printf("[thumbnails] [%d/%d] 完成 %s 帧=%d 耗时=%s",
+			index+1, len(targets), target.Name, frames, time.Since(itemStarted).Round(time.Millisecond))
 	}
 
+	final := job.copy()
 	job.update(func(s *ThumbnailJobSnapshot) {
 		s.Status = ThumbnailJobCompleted
 		s.CurrentItem = ""
+		s.CurrentItemProgress = 0
+		s.CurrentItemDurationSeconds = 0
 		s.FinishedAt = time.Now().Format(time.RFC3339)
 	})
+	log.Printf("[thumbnails] 任务 %s 完成: 成功=%d 失败=%d 跳过=%d 已生成帧=%d 耗时=%s",
+		final.ID, final.Completed, final.Failed, final.Skipped, final.GeneratedFrames,
+		time.Since(startedAt).Round(time.Second))
 }
 
 // trimLocked 丢弃超出保留数量的旧任务；调用方需持有 m.mu。
