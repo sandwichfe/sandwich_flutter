@@ -386,6 +386,38 @@ func (s *Store) UpdateItemMetadata(ctx context.Context, itemID string, payload m
 	return nil
 }
 
+// LibraryVideoItem 是缩略图预生成任务需要的最小条目信息。
+type LibraryVideoItem struct {
+	ID           string
+	Name         string
+	Path         string
+	RunTimeTicks int64
+}
+
+// LibraryVideoItems 返回库内所有带文件路径的视频条目，供缩略图预生成任务遍历。
+func (s *Store) LibraryVideoItems(ctx context.Context, libraryID string) ([]LibraryVideoItem, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, name, path, run_time_ticks FROM items
+		 WHERE (library_id = ? OR parent_id = ?)
+		   AND type IN ('Movie', 'Video', 'Episode')
+		   AND path <> ''
+		 ORDER BY sort_name ASC, name ASC`, libraryID, libraryID)
+	if err != nil {
+		return nil, fmt.Errorf("查询媒体库条目失败: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]LibraryVideoItem, 0, 64)
+	for rows.Next() {
+		var item LibraryVideoItem
+		if err := rows.Scan(&item.ID, &item.Name, &item.Path, &item.RunTimeTicks); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 // SetImageTags 供图片上传/删除后刷新条目的图片标记。
 func (s *Store) SetImageTags(ctx context.Context, itemID, column string, value any) error {
 	allowed := map[string]bool{"image_tags": true, "backdrop_tags": true, "screenshot_tags": true}

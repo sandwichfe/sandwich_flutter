@@ -11,6 +11,7 @@ Emby 协议兼容的轻量媒体服务器骨架，目标是替换现有 Flutter 
 - 条目：`/Users/{id}/Items`（过滤/搜索/排序/分页）、`/Items/Resume`、`/Users/{id}/Items/{id}`、`/Persons`、`/Items/{id}/Similar`
 - 图片：条目图片 GET/上传/删除/列表，用户头像 GET/上传，按 `maxWidth` + `quality` 缩放
 - 播放：`POST /Items/{id}/PlaybackInfo`、`GET /Videos/{id}/stream`（完整 Range 支持）、`GET /Videos/{id}/index.bif`
+- 缩略图预生成：`POST /emby/ThumbnailJobs`（按媒体库批量生成，可指定抽帧间隔/宽度）、`GET /emby/ThumbnailJobs`、`GET /emby/ThumbnailJobs/{jobId}`、`POST /emby/ThumbnailJobs/{jobId}/Cancel`
 - 进度：`POST /Sessions/Playing`、`/Playing/Progress`、`/Playing/Stopped`
 - 收藏：`POST/DELETE /Users/{id}/FavoriteItems/{id}`
 - 扫描：遍历媒体目录 → `ffprobe` 提取技术信息 → 读取 NFO 元数据 → 导入本地图片 → 入库

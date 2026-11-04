@@ -25,21 +25,42 @@ type BifCache struct {
 	dir        string
 	ffmpegPath string
 
-	mu sync.Mutex
+	// 同一条目只允许一个抽帧进程，预生成任务与播放请求不会重复消耗 ffmpeg。
+	mu        sync.Mutex
+	itemLocks map[string]*sync.Mutex
+	// sem 限制同时运行的 ffmpeg 数量，批量预生成时不会把机器跑满。
+	sem chan struct{}
 }
 
 func NewBifCache(dir, ffmpegPath string) *BifCache {
-	return &BifCache{dir: dir, ffmpegPath: ffmpegPath}
+	return &BifCache{
+		dir:        dir,
+		ffmpegPath: ffmpegPath,
+		itemLocks:  make(map[string]*sync.Mutex),
+		sem:        make(chan struct{}, 2),
+	}
 }
 
 func (c *BifCache) Path(itemID string) string {
 	return filepath.Join(c.dir, sanitizeID(itemID)+".bif")
 }
 
+// Exists 报告条目是否已有可用的 BIF 缓存。
+func (c *BifCache) Exists(itemID string) bool {
+	info, err := os.Stat(c.Path(itemID))
+	return err == nil && info.Size() > 0
+}
+
 // Ensure 返回 BIF 缓存文件路径；缓存缺失时现场生成。
 func (c *BifCache) Ensure(ctx context.Context, itemID, sourcePath string, intervalMs uint32, width int) (string, error) {
+	return c.Generate(ctx, itemID, sourcePath, intervalMs, width, false)
+}
+
+// Generate 生成 BIF 缓存。force 为 true 时忽略已有缓存重新抽帧，
+// 预生成任务用它按用户选择的间隔覆盖旧的缩略图文件。
+func (c *BifCache) Generate(ctx context.Context, itemID, sourcePath string, intervalMs uint32, width int, force bool) (string, error) {
 	target := c.Path(itemID)
-	if info, err := os.Stat(target); err == nil && info.Size() > 0 {
+	if !force && c.Exists(itemID) {
 		return target, nil
 	}
 	if sourcePath == "" {
@@ -55,19 +76,27 @@ func (c *BifCache) Ensure(ctx context.Context, itemID, sourcePath string, interv
 		width = 320
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	unlock := c.lockItem(itemID)
+	defer unlock()
 
 	// 双检：等锁期间可能已被其他请求生成。
-	if info, err := os.Stat(target); err == nil && info.Size() > 0 {
+	if !force && c.Exists(itemID) {
 		return target, nil
 	}
 
 	// 媒体目录里已经有预生成的 BIF 时直接拿来用，网络盘上可以省掉整段抽帧。
-	if local := FindLocalBIF(sourcePath); local != "" {
+	// 强制重生成时跳过复用，否则新间隔不会生效。
+	if local := FindLocalBIF(sourcePath); !force && local != "" && !sameFilePath(local, target) {
 		if err := copyFile(local, target); err == nil {
 			return target, nil
 		}
+	}
+
+	select {
+	case c.sem <- struct{}{}:
+		defer func() { <-c.sem }()
+	case <-ctx.Done():
+		return "", ctx.Err()
 	}
 
 	tempDir, err := os.MkdirTemp(c.dir, "bif-*")
@@ -108,10 +137,60 @@ func (c *BifCache) Ensure(ctx context.Context, itemID, sourcePath string, interv
 	}
 
 	packed := PackBIF(frames, intervalMs)
-	if err := os.WriteFile(target, packed, 0o644); err != nil {
-		return "", fmt.Errorf("写入 BIF 失败: %w", err)
+	if err := writeFileAtomic(target, packed); err != nil {
+		return "", err
 	}
 	return target, nil
+}
+
+// lockItem 为单个条目加进程内互斥锁，避免并发请求重复抽同一个视频。
+func (c *BifCache) lockItem(itemID string) func() {
+	c.mu.Lock()
+	lock, ok := c.itemLocks[itemID]
+	if !ok {
+		lock = &sync.Mutex{}
+		c.itemLocks[itemID] = lock
+	}
+	c.mu.Unlock()
+
+	lock.Lock()
+	return lock.Unlock
+}
+
+// writeFileAtomic 先写临时文件再改名，避免播放请求读到写了一半的 BIF。
+func writeFileAtomic(target string, data []byte) error {
+	temp, err := os.CreateTemp(filepath.Dir(target), "bif-*.tmp")
+	if err != nil {
+		return fmt.Errorf("创建临时文件失败: %w", err)
+	}
+	tempPath := temp.Name()
+	defer os.Remove(tempPath)
+
+	if _, err := temp.Write(data); err != nil {
+		temp.Close()
+		return fmt.Errorf("写入 BIF 失败: %w", err)
+	}
+	if err := temp.Sync(); err != nil {
+		temp.Close()
+		return fmt.Errorf("写入 BIF 失败: %w", err)
+	}
+	if err := temp.Close(); err != nil {
+		return fmt.Errorf("写入 BIF 失败: %w", err)
+	}
+	if err := os.Rename(tempPath, target); err != nil {
+		return fmt.Errorf("写入 BIF 失败: %w", err)
+	}
+	return nil
+}
+
+// sameFilePath 判断两个路径是否指向同一文件，避免把缓存文件当成媒体目录里的 BIF 再复制。
+func sameFilePath(a, b string) bool {
+	absA, errA := filepath.Abs(a)
+	absB, errB := filepath.Abs(b)
+	if errA != nil || errB != nil {
+		return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
+	}
+	return strings.EqualFold(filepath.Clean(absA), filepath.Clean(absB))
 }
 
 // extractSingleFrame 用于时长不足一个抽帧间隔的视频。

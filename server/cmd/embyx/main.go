@@ -47,8 +47,9 @@ func main() {
 	bifCache := media.NewBifCache(filepath.Join(cfg.DataDir, "cache", "bif"), cfg.FFmpegPath)
 	prober := media.NewProber(cfg.FFprobePath)
 	scanner := media.NewScanner(st, prober, images)
+	thumbs := media.NewThumbnailJobManager(bifCache)
 
-	api := httpapi.New(cfg, st, images, bifCache, scanner)
+	api := httpapi.New(cfg, st, images, bifCache, scanner, thumbs)
 
 	server := &http.Server{
 		Addr:              cfg.Addr,

@@ -15,17 +15,19 @@ type Server struct {
 	images  *media.ImageStore
 	bif     *media.BifCache
 	scanner *media.Scanner
+	thumbs  *media.ThumbnailJobManager
 
 	mux *http.ServeMux
 }
 
-func New(cfg config.Config, st *store.Store, images *media.ImageStore, bif *media.BifCache, scanner *media.Scanner) *Server {
+func New(cfg config.Config, st *store.Store, images *media.ImageStore, bif *media.BifCache, scanner *media.Scanner, thumbs *media.ThumbnailJobManager) *Server {
 	server := &Server{
 		cfg:     cfg,
 		store:   st,
 		images:  images,
 		bif:     bif,
 		scanner: scanner,
+		thumbs:  thumbs,
 		mux:     http.NewServeMux(),
 	}
 	server.routes()
@@ -70,6 +72,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /emby/Items/{itemId}/Images/{type}", s.handleUploadImage)
 	s.mux.HandleFunc("POST /emby/Items/{itemId}/Images/{type}/{index}", s.handleUploadImage)
 	s.mux.HandleFunc("DELETE /emby/Items/{itemId}/Images/{type}/{index}", s.handleDeleteImage)
+
+	// 进度条缩略图预生成（设置页）
+	s.mux.HandleFunc("POST /emby/ThumbnailJobs", s.handleCreateThumbnailJob)
+	s.mux.HandleFunc("GET /emby/ThumbnailJobs", s.handleThumbnailJobs)
+	s.mux.HandleFunc("GET /emby/ThumbnailJobs/{jobId}", s.handleThumbnailJob)
+	s.mux.HandleFunc("POST /emby/ThumbnailJobs/{jobId}/Cancel", s.handleCancelThumbnailJob)
 
 	// 播放
 	s.mux.HandleFunc("POST /emby/Items/{itemId}/PlaybackInfo", s.handlePlaybackInfo)
