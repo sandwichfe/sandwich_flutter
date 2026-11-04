@@ -3,6 +3,7 @@ import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'emby-pc/emby_pc_detail_page.dart';
 import 'emby-pc/emby_pc_library_admin_page.dart';
 import 'emby-pc/emby_pc_service.dart';
+import 'emby-pc/emby_pc_thumbnail_job_page.dart';
 import 'user_profile_page.dart';
 import '../utils/theme_manager.dart';
 
@@ -110,10 +111,18 @@ class _SettingsPageState extends State<SettingsPage> {
               trailing: const Icon(Icons.chevron_right),
               // 管理页需要管理员权限，失败时由服务层统一提示。
               onTap: () => Navigator.of(context).push(
-                embyPcFadeRoute(
-                  context,
-                  (_) => const EmbyPcLibraryAdminPage(),
-                ),
+                embyPcFadeRoute(context, (_) => const EmbyPcLibraryAdminPage()),
+              ),
+            ),
+            const Divider(height: 1, indent: 72),
+            ListTile(
+              leading: const Icon(Icons.movie_filter_outlined),
+              title: const Text('进度条缩略图'),
+              subtitle: const Text('按媒体库批量预生成，可控抽帧间隔并查看进度'),
+              trailing: const Icon(Icons.chevron_right),
+              // 预生成任务在服务端后台执行，页面只负责提交参数与轮询进度。
+              onTap: () => Navigator.of(context).push(
+                embyPcFadeRoute(context, (_) => const EmbyPcThumbnailJobPage()),
               ),
             ),
             const Divider(height: 1, indent: 72),

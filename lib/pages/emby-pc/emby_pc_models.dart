@@ -458,6 +458,78 @@ class EmbyPcVirtualFolder {
       );
 }
 
+// 缩略图预生成任务快照，状态值由后端定义：running / completed / canceled。
+class EmbyPcThumbnailJob {
+  final String id;
+  final String libraryId;
+  final String libraryName;
+  final int intervalMs;
+  final int width;
+  final int total;
+  final int completed;
+  final int failed;
+  final int skipped;
+  final String status;
+  final String currentItem;
+  final double progress;
+  final List<String> errors;
+  final String startedAt;
+  final String finishedAt;
+
+  const EmbyPcThumbnailJob({
+    required this.id,
+    required this.libraryId,
+    required this.libraryName,
+    required this.intervalMs,
+    required this.width,
+    required this.total,
+    required this.completed,
+    required this.failed,
+    required this.skipped,
+    required this.status,
+    required this.currentItem,
+    required this.progress,
+    required this.errors,
+    required this.startedAt,
+    required this.finishedAt,
+  });
+
+  bool get isRunning => status == 'running';
+
+  bool get isCanceled => status == 'canceled';
+
+  int get finishedCount => completed + failed + skipped;
+
+  // 失败与跳过都算已处理，进度条不会因为个别坏文件停在中途。
+  double get ratio => progress.clamp(0.0, 1.0);
+
+  String get statusLabel => switch (status) {
+    'running' => '生成中',
+    'completed' => '已完成',
+    'canceled' => '已取消',
+    _ => status,
+  };
+
+  factory EmbyPcThumbnailJob.fromJson(Map<String, dynamic> json) =>
+      EmbyPcThumbnailJob(
+        id: _text(json['JobId']),
+        libraryId: _text(json['LibraryId']),
+        libraryName: _text(json['LibraryName']),
+        intervalMs: _integer(json['IntervalMs']),
+        width: _integer(json['Width']),
+        total: _integer(json['Total']),
+        completed: _integer(json['Completed']),
+        failed: _integer(json['Failed']),
+        skipped: _integer(json['Skipped']),
+        status: _text(json['Status']),
+        currentItem: _text(json['CurrentItem']),
+        progress: _doubleOrNull(json['Progress']) ?? 0,
+        errors: _strings(json['Errors']),
+        startedAt: _text(json['StartedAt']),
+        finishedAt: _text(json['FinishedAt']),
+      );
+}
+
 Map<String, dynamic> _map(dynamic value) =>
     value is Map ? Map<String, dynamic>.from(value) : <String, dynamic>{};
 

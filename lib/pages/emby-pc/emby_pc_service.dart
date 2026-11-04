@@ -203,6 +203,60 @@ class EmbyPcService {
     _ensureSuccess(response, '删除媒体库失败');
   }
 
+  // ---- 进度条缩略图预生成 ----
+
+  // 按媒体库批量生成 BIF 缩略图；任务在后台跑，返回初始进度快照。
+  Future<EmbyPcThumbnailJob> startThumbnailJob({
+    required String libraryId,
+    required int intervalSeconds,
+    int width = 320,
+  }) async {
+    final response = await http.post(
+      _uri('/emby/ThumbnailJobs'),
+      headers: {..._tokenHeader, 'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'LibraryId': libraryId,
+        'IntervalSeconds': intervalSeconds,
+        'Width': width,
+      }),
+    );
+    // 409 代表已有任务在跑，用明确文案代替通用的 HTTP 状态码提示。
+    if (response.statusCode == 409) {
+      throw const EmbyPcException('已有缩略图预生成任务在运行');
+    }
+    final data = _decodeResponse(response, '启动缩略图预生成失败');
+    return EmbyPcThumbnailJob.fromJson(data);
+  }
+
+  Future<List<EmbyPcThumbnailJob>> getThumbnailJobs() async {
+    final response = await http.get(
+      _uri('/emby/ThumbnailJobs'),
+      headers: _tokenHeader,
+    );
+    _ensureSuccess(response, '读取缩略图任务失败');
+    if (response.bodyBytes.isEmpty) return const [];
+    final data = jsonDecode(utf8.decode(response.bodyBytes));
+    if (data is! List) throw const EmbyPcException('读取缩略图任务失败：响应格式错误');
+    return data
+        .whereType<Map>()
+        .map((item) => EmbyPcThumbnailJob.fromJson(_asMap(item)))
+        .toList();
+  }
+
+  Future<EmbyPcThumbnailJob> getThumbnailJob(String jobId) async {
+    final data = await _get('/emby/ThumbnailJobs/$jobId');
+    return EmbyPcThumbnailJob.fromJson(data);
+  }
+
+  Future<EmbyPcThumbnailJob> cancelThumbnailJob(String jobId) async {
+    final response = await http.post(
+      _uri('/emby/ThumbnailJobs/$jobId/Cancel'),
+      headers: _tokenHeader,
+    );
+    final data = _decodeResponse(response, '取消缩略图任务失败');
+    return EmbyPcThumbnailJob.fromJson(data);
+  }
+
   // 条目级刷新：后端发现 id 属于媒体库时直接触发该库扫描。
   Future<String> scanLibraryItem(String libraryId) async {
     final response = await http.post(
@@ -455,12 +509,13 @@ class EmbyPcService {
     final rawSources = data['MediaSources'];
     final sources = rawSources is List
         ? rawSources
-            .whereType<Map>()
-            .map(
-              (value) =>
-                  EmbyPcMediaSource.fromJson(Map<String, dynamic>.from(value)),
-            )
-            .toList()
+              .whereType<Map>()
+              .map(
+                (value) => EmbyPcMediaSource.fromJson(
+                  Map<String, dynamic>.from(value),
+                ),
+              )
+              .toList()
         : <EmbyPcMediaSource>[];
     for (final source in sources) {
       if (source.id == mediaSourceId) return source;
@@ -636,8 +691,7 @@ class EmbyPcService {
       // 只有停止接口使用 Failed；开始和进度接口不发送无关字段。
       if (event == EmbyPcPlaybackEvent.stopped) 'Failed': false,
       // EventName 属于进度请求，开始和停止请求不再固定伪装成 TimeUpdate。
-      if (event == EmbyPcPlaybackEvent.progress)
-        'EventName': progressEventName,
+      if (event == EmbyPcPlaybackEvent.progress) 'EventName': progressEventName,
     };
     final response = await http.post(
       _uri(eventPath),
