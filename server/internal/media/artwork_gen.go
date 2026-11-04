@@ -99,8 +99,8 @@ func (g *ArtworkGenerator) Generate(ctx context.Context, itemID string, opts Art
 		}
 	}
 	// 排查"生成出来不是本片画面"时，先确认这条日志里的源文件是不是目标视频。
-	log.Printf("[artwork] 生成请求 item=%s 源文件=%q 时长=%.2fs 类型=%v",
-		itemID, opts.SourcePath, durationSeconds, types)
+	log.Printf("[artwork] 生成请求 item=%s 源文件=%q 时长=%s 类型=%v",
+		itemID, opts.SourcePath, formatClock(durationSeconds), types)
 
 	unlock := g.lockItem(itemID)
 	defer unlock()
@@ -118,8 +118,8 @@ func (g *ArtworkGenerator) Generate(ctx context.Context, itemID string, opts Art
 		positionSeconds = durationSeconds * 0.95
 	}
 	result.PositionTicks = int64(math.Round(positionSeconds * 10_000_000))
-	log.Printf("[artwork] 截取源头 item=%s 源文件=%q 位置=%.3fs 嗅探=%v 时长=%.2fs",
-		itemID, opts.SourcePath, positionSeconds, result.Sniffed, durationSeconds)
+	log.Printf("[artwork] 截取源头 item=%s 源文件=%q 位置=%s 嗅探=%v 时长=%s",
+		itemID, opts.SourcePath, formatClock(positionSeconds), result.Sniffed, formatClock(durationSeconds))
 
 	for _, imageType := range types {
 		width, height := artworkSize(imageType, opts.Width)
@@ -140,6 +140,16 @@ func (g *ArtworkGenerator) Generate(ctx context.Context, itemID string, opts Art
 		result.Tags[imageType] = tag
 	}
 	return result, nil
+}
+
+// formatClock 把秒数格式化成 时:分:秒，便于日志里直读进度。
+// 调用方多为非负值，负数（探测失败）统一显示 00:00:00。
+func formatClock(seconds float64) string {
+	if seconds <= 0 {
+		return "00:00:00"
+	}
+	total := int(math.Round(seconds))
+	return fmt.Sprintf("%02d:%02d:%02d", total/3600, total%3600/60, total%60)
 }
 
 // sniffPosition 在几个候选时间点抽帧，挑画面信息量最大的一帧。
