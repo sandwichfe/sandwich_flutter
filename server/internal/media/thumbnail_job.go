@@ -60,9 +60,11 @@ type ThumbnailJobSnapshot struct {
 	CurrentItemDurationSeconds int64
 	// TotalDurationSeconds 只统计时长有效的条目，避免探测失败的条目把分母拉偏。
 	TotalDurationSeconds int64
-	// DoneDurationSeconds 只累加成功条目，失败/跳过的时长不计入。
+	// DoneDurationSeconds 是"已处理时长"：成功条目的总时长 + 当前条目已解码的秒数，
+	// 这样长片抽帧时数字也会持续增长，而不是等整条跑完才跳一次。
 	DoneDurationSeconds int64
-	// EstimatedFrames 按 时长/间隔 预估，GeneratedFrames 是实际写进 BIF 的帧数。
+	// EstimatedFrames 按 时长/间隔 预估；GeneratedFrames 为已处理帧数，
+	// 成功条目用实际写进 BIF 的帧数，处理中按已解码时长折算。
 	EstimatedFrames int
 	GeneratedFrames int
 	Errors          []string
@@ -71,6 +73,7 @@ type ThumbnailJobSnapshot struct {
 }
 
 // Progress 返回 0~1 的完成比例，供前端进度条直接使用。
+// 运行中会把当前条目的解码进度折算进分子，否则条目少时进度条会长时间停在原地。
 func (s ThumbnailJobSnapshot) Progress() float64 {
 	if s.Total <= 0 {
 		return 0
@@ -79,7 +82,14 @@ func (s ThumbnailJobSnapshot) Progress() float64 {
 	if done >= s.Total {
 		return 1
 	}
-	return float64(done) / float64(s.Total)
+	fraction := 0.0
+	if s.Status == ThumbnailJobRunning && s.CurrentItemProgress > 0 {
+		fraction = s.CurrentItemProgress
+		if fraction > 1 {
+			fraction = 1
+		}
+	}
+	return (float64(done) + fraction) / float64(s.Total)
 }
 
 type thumbnailJob struct {
@@ -246,6 +256,13 @@ func (m *ThumbnailJobManager) run(ctx context.Context, job *thumbnailJob, target
 	initial := job.copy()
 	intervalMs := uint32(initial.IntervalMs)
 	width := initial.Width
+	intervalSeconds := int64(intervalMs / 1000)
+	if intervalSeconds <= 0 {
+		intervalSeconds = 1
+	}
+	// 已完成条目的累计值先放在本地，快照里再叠加当前条目的实时进度。
+	var doneBaseDuration int64
+	var doneBaseFrames int
 
 	startedAt := time.Now()
 	log.Printf("[thumbnails] 任务 %s 开始: 库=%s 条目=%d 间隔=%dms 宽度=%d 总时长=%ds 预估帧=%d",
@@ -290,8 +307,9 @@ func (m *ThumbnailJobManager) run(ctx context.Context, job *thumbnailJob, target
 		log.Printf("[thumbnails] [%d/%d] 开始 %s (时长 %ds) 路径=%s",
 			index+1, len(targets), target.Name, target.DurationSeconds, target.Path)
 
-		// ffmpeg 每 0.5 秒输出一次进度，这里只在整数百分比变化时更新快照。
+		// ffmpeg 每 0.5 秒输出一次进度，这里按秒节流更新快照。
 		lastPercent := -1
+		lastElapsedSeconds := int64(-1)
 		onProgress := func(elapsedMs int64) {
 			if target.DurationSeconds <= 0 {
 				return
@@ -300,12 +318,22 @@ func (m *ThumbnailJobManager) run(ctx context.Context, job *thumbnailJob, target
 			if percent > 99 {
 				percent = 99
 			}
-			if percent <= lastPercent {
+			elapsedSeconds := elapsedMs / 1000
+			if elapsedSeconds > target.DurationSeconds {
+				elapsedSeconds = target.DurationSeconds
+			}
+			// 百分比和秒都没变就不写快照，避免长片每个 0.5 秒都抢一次锁。
+			if percent <= lastPercent && elapsedSeconds <= lastElapsedSeconds {
 				return
 			}
 			lastPercent = percent
+			lastElapsedSeconds = elapsedSeconds
+			// 当前条目的已解码时长折算成帧数，和"共约 N 张"同一口径。
+			partialFrames := int(elapsedSeconds / intervalSeconds)
 			job.update(func(s *ThumbnailJobSnapshot) {
 				s.CurrentItemProgress = float64(percent) / 100
+				s.DoneDurationSeconds = doneBaseDuration + elapsedSeconds
+				s.GeneratedFrames = doneBaseFrames + partialFrames
 			})
 		}
 
@@ -330,18 +358,24 @@ func (m *ThumbnailJobManager) run(ctx context.Context, job *thumbnailJob, target
 			job.update(func(s *ThumbnailJobSnapshot) {
 				s.Failed++
 				s.CurrentItemProgress = 0
+				// 失败条目不推进"已处理"口径，把处理中临时加上的部分回退掉。
+				s.DoneDurationSeconds = doneBaseDuration
+				s.GeneratedFrames = doneBaseFrames
 				appendThumbnailError(s, fmt.Sprintf("%s: %v", target.Name, err))
 			})
 			log.Printf("[thumbnails] [%d/%d] 失败 %s: %v", index+1, len(targets), target.Name, err)
 			continue
 		}
 
-		// 只有成功条目才累加时长与帧数，失败和跳过不推进"已完成"口径。
+		// 只有成功条目才累加时长与帧数，失败和跳过不推进"已处理"口径。
+		// 完成时用实际帧数收口，和抽帧过程中的折算值基本一致，不会出现跳变。
+		doneBaseDuration += target.DurationSeconds
+		doneBaseFrames += frames
 		job.update(func(s *ThumbnailJobSnapshot) {
 			s.Completed++
 			s.CurrentItemProgress = 0
-			s.DoneDurationSeconds += target.DurationSeconds
-			s.GeneratedFrames += frames
+			s.DoneDurationSeconds = doneBaseDuration
+			s.GeneratedFrames = doneBaseFrames
 		})
 		log.Printf("[thumbnails] [%d/%d] 完成 %s 帧=%d 耗时=%s",
 			index+1, len(targets), target.Name, frames, time.Since(itemStarted).Round(time.Millisecond))

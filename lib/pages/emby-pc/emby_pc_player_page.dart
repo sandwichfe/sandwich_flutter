@@ -703,14 +703,16 @@ class _BifPreviewData {
     }
 
     final view = ByteData.sublistView(bytes);
-    final declaredFrameCount = view.getUint32(12, Endian.little);
-    final declaredMultiplier = view.getUint32(16, Endian.little);
-    final timestampMultiplier =
-        declaredMultiplier == 0 ? 1000 : declaredMultiplier;
     final maxFrameCount = math.max(
       0,
       ((bytes.length - headerLength) ~/ indexEntryLength) - 1,
     );
+    // 规范布局：偏移 8 是帧数、偏移 12 是帧间隔(ms)；
+    // 历史服务端把帧数写在偏移 12、偏移 8 留 0，读到 0 或越界时按旧布局回退。
+    var declaredFrameCount = view.getUint32(8, Endian.little);
+    if (declaredFrameCount == 0 || declaredFrameCount > maxFrameCount) {
+      declaredFrameCount = view.getUint32(12, Endian.little);
+    }
     final frameCount = math.min(declaredFrameCount, maxFrameCount);
     final frames = <_BifPreviewFrame>[];
 
@@ -727,7 +729,8 @@ class _BifPreviewData {
       }
       frames.add(
         _BifPreviewFrame(
-          timestampMs: timestamp * timestampMultiplier,
+          // 索引里的时间戳已经是毫秒，不能再乘帧间隔，否则只有首帧会被命中。
+          timestampMs: timestamp,
           offset: offset,
           nextOffset: nextOffset,
         ),

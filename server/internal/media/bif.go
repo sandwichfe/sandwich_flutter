@@ -21,8 +21,8 @@ import (
 //
 // 客户端解析规则（emby_pc_player_page.dart / _BifPreviewData）：
 //   - 头部固定 64 字节，bytes[0]=0x89，bytes[1..3]="BIF"
-//   - 偏移 12：帧数(uint32 LE)，偏移 16：时间戳乘数(ms，uint32 LE)
-//   - 偏移 64 起为索引表，每项 8 字节：timestamp + 数据偏移
+//   - 偏移 4：版本号，偏移 8：帧数(uint32 LE)，偏移 12：帧间隔(ms，uint32 LE)
+//   - 偏移 64 起为索引表，每项 8 字节：绝对时间戳(ms) + 数据偏移
 //   - 索引表共 帧数+1 项，最后一项仅用于确定数据区结束位置
 type BifCache struct {
 	dir        string
@@ -226,7 +226,8 @@ func parseFFmpegProgress(line string) (int64, bool) {
 	return value / 1000, true
 }
 
-// countBIFrames 从 BIF 头部读取帧数（偏移 12，uint32 小端），读不到时返回 0。
+// countBIFrames 从 BIF 头部读取帧数（偏移 8，uint32 小端），读不到时返回 0。
+// 历史文件曾把帧数写在偏移 12，读到 0 时按旧布局回退，避免把已有缓存算成 0 帧。
 func countBIFrames(path string) int {
 	file, err := os.Open(path)
 	if err != nil {
@@ -234,9 +235,12 @@ func countBIFrames(path string) int {
 	}
 	defer file.Close()
 
-	header := make([]byte, 16)
+	header := make([]byte, 20)
 	if _, err := io.ReadFull(file, header); err != nil {
 		return 0
+	}
+	if count := int(binary.LittleEndian.Uint32(header[8:12])); count > 0 {
+		return count
 	}
 	return int(binary.LittleEndian.Uint32(header[12:16]))
 }
@@ -346,9 +350,10 @@ func PackBIF(frames [][]byte, intervalMs uint32) []byte {
 	buf := make([]byte, total)
 	buf[0] = 0x89
 	copy(buf[1:4], "BIF")
-	// 4..7 版本号，8..11 保留，按规范留 0。
-	binary.LittleEndian.PutUint32(buf[12:16], uint32(len(frames)))
-	binary.LittleEndian.PutUint32(buf[16:20], intervalMs)
+	// 4..7 版本号，8..11 帧数，12..15 帧间隔(ms)，与 BIF/Emby 规范一致。
+	binary.LittleEndian.PutUint32(buf[4:8], 1)
+	binary.LittleEndian.PutUint32(buf[8:12], uint32(len(frames)))
+	binary.LittleEndian.PutUint32(buf[12:16], intervalMs)
 
 	offset := dataStart
 	for index, frame := range frames {

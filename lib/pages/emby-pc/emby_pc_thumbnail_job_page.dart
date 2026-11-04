@@ -427,9 +427,9 @@ class _EmbyPcThumbnailJobPageState extends State<EmbyPcThumbnailJobPage> {
                 style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
               )
             else ...[
-              // 时长是主口径，帧数是辅助口径，二者都由服务端在条目完成时累加。
+              // 时长是主口径，帧数是辅助口径；两者都包含当前条目已处理的部分。
               _ProgressLine(
-                label: '已完成时长',
+                label: '已处理时长',
                 value: _durationRange(
                   job.doneDurationSeconds,
                   job.totalDurationSeconds,
