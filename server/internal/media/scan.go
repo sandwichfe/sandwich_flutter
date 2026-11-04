@@ -8,7 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"embyx/internal/dto"
 	"embyx/internal/store"
@@ -31,10 +34,37 @@ type Scanner struct {
 	store  *store.Store
 	prober *Prober
 	images *ImageStore
+
+	// workers 是并发探测/入库的 worker 数量，同时也是 ffprobe 的并发上限。
+	workers int
+	// scanMu 保证同一时刻只有一个扫描在跑，避免重复点击并发遍历同一目录。
+	scanMu sync.Mutex
+	// artLocks 按图片目标 ID 加锁：演员头像被多个条目共用，并发写同一文件会重复转码。
+	artMu    sync.Mutex
+	artLocks map[string]*sync.Mutex
 }
 
 func NewScanner(s *store.Store, prober *Prober, images *ImageStore) *Scanner {
-	return &Scanner{store: s, prober: prober, images: images}
+	return &Scanner{
+		store:    s,
+		prober:   prober,
+		images:   images,
+		workers:  scanWorkers(),
+		artLocks: make(map[string]*sync.Mutex),
+	}
+}
+
+// scanWorkers 决定扫描并发度。耗时几乎全在 ffprobe 子进程和图片转码上，
+// 但两者都要抢同一块磁盘，worker 过多反而因随机读变慢，所以上限压到 4。
+func scanWorkers() int {
+	count := runtime.GOMAXPROCS(0)
+	if count > 4 {
+		count = 4
+	}
+	if count < 1 {
+		count = 1
+	}
+	return count
 }
 
 // ScanAll 扫描数据库中配置的全部媒体库。
@@ -42,6 +72,10 @@ func (s *Scanner) ScanAll(ctx context.Context, logf func(string, ...any)) (int, 
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
+	if !s.beginScan(logf) {
+		return 0, nil
+	}
+	defer s.scanMu.Unlock()
 
 	libraries, err := s.store.Libraries(ctx)
 	if err != nil {
@@ -54,7 +88,7 @@ func (s *Scanner) ScanAll(ctx context.Context, logf func(string, ...any)) (int, 
 
 	total := 0
 	for _, lib := range libraries {
-		imported, scanErr := s.ScanLibrary(ctx, lib, logf)
+		imported, scanErr := s.scanLibrary(ctx, lib, logf)
 		total += imported
 		if scanErr != nil {
 			logf("扫描媒体库 %s 失败: %v", lib.Name, scanErr)
@@ -69,6 +103,25 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib store.Library, logf func(
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
+	if !s.beginScan(logf) {
+		return 0, nil
+	}
+	defer s.scanMu.Unlock()
+	return s.scanLibrary(ctx, lib, logf)
+}
+
+// beginScan 抢扫描令牌；已有扫描在跑时返回 false。
+func (s *Scanner) beginScan(logf func(string, ...any)) bool {
+	if s.scanMu.TryLock() {
+		return true
+	}
+	logf("已有扫描正在进行中，跳过本次扫描")
+	return false
+}
+
+// scanLibrary 是扫描的实际实现，调用方必须已持有 scanMu。
+// 目录遍历保持串行（本身很快），ffprobe 与图片转码交给 worker 并发处理。
+func (s *Scanner) scanLibrary(ctx context.Context, lib store.Library, logf func(string, ...any)) (int, error) {
 	if len(lib.Paths) == 0 {
 		logf("媒体库 %s 没有配置目录，跳过", lib.Name)
 		return 0, nil
@@ -82,41 +135,97 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib store.Library, logf func(
 		}
 		logf("扫描媒体库 %s (%s)", lib.Name, root)
 
-		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return nil
-			}
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			if entry.IsDir() {
-				if skipDirs[strings.ToLower(entry.Name())] {
-					return fs.SkipDir
-				}
-				return nil
-			}
-			if !videoExtensions[strings.ToLower(filepath.Ext(path))] {
-				return nil
-			}
-
-			item, probeErr := s.buildItem(ctx, lib.ID, path, logf)
-			if probeErr != nil {
-				logf("跳过 %s: %v", path, probeErr)
-				return nil
-			}
-			if err := s.store.UpsertItem(ctx, item); err != nil {
-				logf("入库失败 %s: %v", path, err)
-				return nil
-			}
-			imported++
-			return nil
-		})
+		paths, err := collectVideoFiles(ctx, root)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			return imported, err
+		}
+		imported += s.processFiles(ctx, lib.ID, paths, logf)
+		if ctx.Err() != nil {
+			break
 		}
 	}
 	logf("媒体库 %s 扫描完成，共处理 %d 个条目", lib.Name, imported)
 	return imported, nil
+}
+
+// collectVideoFiles 串行遍历目录，只收集候选视频文件的路径。
+func collectVideoFiles(ctx context.Context, root string) ([]string, error) {
+	paths := make([]string, 0, 256)
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if entry.IsDir() {
+			if skipDirs[strings.ToLower(entry.Name())] {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !videoExtensions[strings.ToLower(filepath.Ext(path))] {
+			return nil
+		}
+		paths = append(paths, path)
+		return nil
+	})
+	return paths, err
+}
+
+// processFiles 用固定数量的 worker 并发探测并入库，返回成功导入的条目数。
+// 每个文件只会进入一个 worker，buildItem 对 item 的原地修改不存在竞争。
+func (s *Scanner) processFiles(ctx context.Context, libraryID string, paths []string, logf func(string, ...any)) int {
+	if len(paths) == 0 {
+		return 0
+	}
+	workerCount := s.workers
+	if workerCount < 1 {
+		workerCount = scanWorkers()
+	}
+	if workerCount > len(paths) {
+		workerCount = len(paths)
+	}
+
+	var imported atomic.Int64
+	jobs := make(chan string)
+	var wg sync.WaitGroup
+	wg.Add(workerCount)
+	for i := 0; i < workerCount; i++ {
+		go func() {
+			defer wg.Done()
+			for path := range jobs {
+				// 取消后继续排空 channel，避免发送方阻塞。
+				if ctx.Err() != nil {
+					continue
+				}
+				item, probeErr := s.buildItem(ctx, libraryID, path, logf)
+				if probeErr != nil {
+					if ctx.Err() == nil {
+						logf("跳过 %s: %v", path, probeErr)
+					}
+					continue
+				}
+				if err := s.store.UpsertItem(ctx, item); err != nil {
+					if ctx.Err() == nil {
+						logf("入库失败 %s: %v", path, err)
+					}
+					continue
+				}
+				imported.Add(1)
+			}
+		}()
+	}
+
+	for _, path := range paths {
+		if ctx.Err() != nil {
+			break
+		}
+		jobs <- path
+	}
+	close(jobs)
+	wg.Wait()
+	return int(imported.Load())
 }
 
 func (s *Scanner) buildItem(ctx context.Context, libraryID, path string, logf func(string, ...any)) (*store.Item, error) {

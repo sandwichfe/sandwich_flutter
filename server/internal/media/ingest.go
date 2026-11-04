@@ -3,6 +3,7 @@ package media
 import (
 	"os"
 	"strings"
+	"sync"
 
 	"embyx/internal/dto"
 	"embyx/internal/store"
@@ -196,6 +197,9 @@ func (s *Scanner) importArtwork(item *store.Item, videoPath string, logf func(st
 // saveArtwork 幂等导入：目标文件比源文件新时直接复用，避免每次扫描重复转码。
 func (s *Scanner) saveArtwork(itemID, imageType string, index int, sourcePath string) (string, error) {
 	target := s.images.ItemPath(itemID, imageType, index)
+	unlock := s.lockArtworkTarget(target)
+	defer unlock()
+
 	if isUpToDate(target, sourcePath) {
 		if raw, err := os.ReadFile(target); err == nil {
 			return hashTag(raw), nil
@@ -207,6 +211,25 @@ func (s *Scanner) saveArtwork(itemID, imageType string, index int, sourcePath st
 		return "", err
 	}
 	return s.images.SaveItemImage(itemID, imageType, index, raw)
+}
+
+// lockArtworkTarget 按目标文件加锁。演员头像由多个条目共用同一路径
+// （images/<personID>/primary/0.jpg），并发扫描时不加锁会重复转码，
+// 非原子写还可能让 HTTP 读到半截文件。锁表按图片数量增长，单条目开销很小。
+func (s *Scanner) lockArtworkTarget(target string) func() {
+	s.artMu.Lock()
+	if s.artLocks == nil {
+		s.artLocks = make(map[string]*sync.Mutex)
+	}
+	lock, ok := s.artLocks[target]
+	if !ok {
+		lock = &sync.Mutex{}
+		s.artLocks[target] = lock
+	}
+	s.artMu.Unlock()
+
+	lock.Lock()
+	return lock.Unlock
 }
 
 func isUpToDate(target, source string) bool {

@@ -346,9 +346,10 @@ func (c *BifCache) lockItem(itemID string) func() {
 	return lock.Unlock
 }
 
-// writeFileAtomic 先写临时文件再改名，避免播放请求读到写了一半的 BIF。
+// writeFileAtomic 先写临时文件再改名，避免并发读取方拿到写了一半的文件
+// （BIF 缓存、扫描导入的图片都用它）。
 func writeFileAtomic(target string, data []byte) error {
-	temp, err := os.CreateTemp(filepath.Dir(target), "bif-*.tmp")
+	temp, err := os.CreateTemp(filepath.Dir(target), "atomic-*.tmp")
 	if err != nil {
 		return fmt.Errorf("创建临时文件失败: %w", err)
 	}
@@ -357,17 +358,21 @@ func writeFileAtomic(target string, data []byte) error {
 
 	if _, err := temp.Write(data); err != nil {
 		temp.Close()
-		return fmt.Errorf("写入 BIF 失败: %w", err)
+		return fmt.Errorf("写入文件失败: %w", err)
 	}
 	if err := temp.Sync(); err != nil {
 		temp.Close()
-		return fmt.Errorf("写入 BIF 失败: %w", err)
+		return fmt.Errorf("写入文件失败: %w", err)
 	}
 	if err := temp.Close(); err != nil {
-		return fmt.Errorf("写入 BIF 失败: %w", err)
+		return fmt.Errorf("写入文件失败: %w", err)
+	}
+	// CreateTemp 默认 0600，图片需要保持原来的 0644。
+	if err := os.Chmod(tempPath, 0o644); err != nil {
+		return fmt.Errorf("设置文件权限失败: %w", err)
 	}
 	if err := os.Rename(tempPath, target); err != nil {
-		return fmt.Errorf("写入 BIF 失败: %w", err)
+		return fmt.Errorf("重命名临时文件失败: %w", err)
 	}
 	return nil
 }

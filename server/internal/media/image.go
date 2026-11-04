@@ -55,7 +55,7 @@ func (s *ImageStore) SaveGeneratedImage(itemID, imageType string, index int, raw
 	if normalized, err := transcodeToJPEG(raw, 92); err == nil {
 		raw = normalized
 	}
-	if err := os.WriteFile(path, raw, 0o644); err != nil {
+	if err := writeFileAtomic(path, raw); err != nil {
 		return "", fmt.Errorf("写入生成图片失败: %w", err)
 	}
 	return hashTag(raw), nil
@@ -105,7 +105,7 @@ func (s *ImageStore) SaveItemImage(itemID, imageType string, index int, raw []by
 	if normalized, err := transcodeToJPEG(raw, 92); err == nil {
 		raw = normalized
 	}
-	if err := os.WriteFile(path, raw, 0o644); err != nil {
+	if err := writeFileAtomic(path, raw); err != nil {
 		return "", fmt.Errorf("写入图片失败: %w", err)
 	}
 	return hashTag(raw), nil
@@ -131,7 +131,7 @@ func (s *ImageStore) SaveUserAvatar(userID string, raw []byte) (string, error) {
 	if normalized, err := transcodeToJPEG(raw, 92); err == nil {
 		raw = normalized
 	}
-	if err := os.WriteFile(path, raw, 0o644); err != nil {
+	if err := writeFileAtomic(path, raw); err != nil {
 		return "", fmt.Errorf("写入头像失败: %w", err)
 	}
 	return hashTag(raw), nil
