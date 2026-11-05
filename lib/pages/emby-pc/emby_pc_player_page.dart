@@ -385,9 +385,9 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
       final hasKnownDuration = widget.item.duration > Duration.zero;
       final startPosition =
           start > Duration.zero &&
-                  (!hasKnownDuration || start < widget.item.duration)
-              ? start
-              : null;
+              (!hasKnownDuration || start < widget.item.duration)
+          ? start
+          : null;
       final media = Media(
         EmbyPcService.instance.streamUrl(
           widget.item.id,
@@ -455,7 +455,8 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
     // seek 后播放器状态里的位置可能尚未同步，允许直接使用目标位置上报。
     Duration? positionOverride,
   }) {
-    final ticks = (positionOverride ?? _player.state.position).inMicroseconds * 10;
+    final ticks =
+        (positionOverride ?? _player.state.position).inMicroseconds * 10;
     final paused = !_player.state.playing;
     final muted = _muted;
     final volumeLevel = _volume.round().clamp(0, 100).toInt();
@@ -578,7 +579,9 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
     final navigator = mounted ? Navigator.of(context) : null;
     if (navigator != null && navigator.canPop()) {
       // 先排入停止和最终进度上报，路由立即返回，网络或原生资源释放不阻塞界面。
-      final reports = _finishPlaybackReports().timeout(_windowCloseReportTimeout);
+      final reports = _finishPlaybackReports().timeout(
+        _windowCloseReportTimeout,
+      );
       unawaited(
         reports.catchError((error, stackTrace) {
           debugPrint('Emby 播放停止上报异常，继续返回上一页：$error');
@@ -705,107 +708,112 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
         // 鼠标在窗口内移动即唤回标题栏，静止 2 秒后自动隐藏。
         onHover: (_) => _revealChrome(),
         child: Scaffold(
-        backgroundColor: Colors.black,
-        // 标题栏浮在画面之上：隐藏时视频不会因为少了一行而重新布局。
-        extendBodyBehindAppBar: true,
-        appBar: PreferredSize(
-          preferredSize: const Size.fromHeight(kToolbarHeight),
-          child: IgnorePointer(
-            ignoring: !_chromeVisible,
-            child: AnimatedOpacity(
-              opacity: _chromeVisible ? 1 : 0,
-              duration: const Duration(milliseconds: 180),
-              child: AppBar(
-                backgroundColor: Colors.black.withValues(alpha: 0.55),
-                foregroundColor: Colors.white,
-                leading: BackButton(
-                  onPressed: _closing ? null : () => unawaited(_closePlayer()),
-                ),
-                title: Text(widget.item.name, overflow: TextOverflow.ellipsis),
-                // 退出上报期间提供明确状态，并禁用重复返回操作。
-                actions: [
-                  if (_closing)
-                    const Padding(
-                      padding: EdgeInsets.only(right: 16),
-                      child: Center(
-                        child: SizedBox.square(
-                          dimension: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
+          backgroundColor: Colors.black,
+          // 标题栏浮在画面之上：隐藏时视频不会因为少了一行而重新布局。
+          extendBodyBehindAppBar: true,
+          appBar: PreferredSize(
+            preferredSize: const Size.fromHeight(kToolbarHeight),
+            child: IgnorePointer(
+              ignoring: !_chromeVisible,
+              child: AnimatedOpacity(
+                opacity: _chromeVisible ? 1 : 0,
+                duration: const Duration(milliseconds: 180),
+                child: AppBar(
+                  backgroundColor: Colors.black.withValues(alpha: 0.55),
+                  foregroundColor: Colors.white,
+                  leading: BackButton(
+                    onPressed: _closing
+                        ? null
+                        : () => unawaited(_closePlayer()),
+                  ),
+                  title: Text(
+                    widget.item.name,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  // 退出上报期间提供明确状态，并禁用重复返回操作。
+                  actions: [
+                    if (_closing)
+                      const Padding(
+                        padding: EdgeInsets.only(right: 16),
+                        child: Center(
+                          child: SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
-        ),
-        body:
-          _loading
+          body: _loading
               ? Center(
-                child: _PlayerLoadingIndicator(
-                  statusText: '正在加载',
-                  networkSpeed: _networkSpeed,
-                ),
-              )
+                  child: _PlayerLoadingIndicator(
+                    statusText: '正在加载',
+                    networkSpeed: _networkSpeed,
+                  ),
+                )
               : _error.isNotEmpty
               ? Center(
-                child: _PlayerMessage(icon: Icons.error_outline, text: _error),
-              )
+                  child: _PlayerMessage(
+                    icon: Icons.error_outline,
+                    text: _error,
+                  ),
+                )
               : !_playerReady
               ? const Center(
-                child: _PlayerMessage(
-                  icon: Icons.videocam_off_outlined,
-                  text: '播放器不可用',
-                ),
-              )
-              : SizedBox.expand(
-                // 播放器视口铺满页面，画面按用户选择的模式布局，控制层始终吸附视口底部。
-                child: Video(
-                  controller: _videoController,
-                  aspectRatio: _aspectRatio,
-                  fit: _videoFit,
-                  // 存在剩余黑边时仅将画面轻微上移，控制栏仍固定在播放器底部。
-                  alignment: const Alignment(0, -0.22),
-                  // Flutter 字幕上移到控制区上方，避免与进度条和操作按钮重叠。
-                  subtitleViewConfiguration: const SubtitleViewConfiguration(
-                    padding: EdgeInsets.fromLTRB(24, 0, 24, 104),
+                  child: _PlayerMessage(
+                    icon: Icons.videocam_off_outlined,
+                    text: '播放器不可用',
                   ),
-                  // Render the custom controls inside Video as its only
-                  // control layer instead of stacking a second outer bar.
-                  // 控制层自身占满播放器，再在内部固定到底部，避免 Align 的松约束
-                  // 让进度条、预览框在不同窗口比例下出现错位。
-                  controls:
-                      (videoState) => _PlayerControls(
-                        player: _player,
-                        position: _position,
-                        duration: _duration,
-                        isPlaying: _isPlaying,
-                        buffering: _buffering,
-                        networkSpeed: _networkSpeed,
-                        thumbnailPreviewController: _thumbnailPreviewController,
-                        muted: _muted,
-                        volume: _volume,
-                        videoFit: _videoFit,
-                        speed: _playbackRate,
-                        // media_kit 全屏时会保留原页面并新建 Video，两个控制层必须使用不同 Key。
-                        volumeControlKey: isFullscreen(videoState.context)
-                            ? _fullscreenVolumeControlKey
-                            : _volumeControlKey,
-                        onTogglePlay: _togglePlay,
-                        onToggleMute: _toggleMute,
-                        onVideoFitChanged: _setVideoFit,
-                        onVolumeChanged:
-                            (value) => unawaited(_setVolume(value)),
-                        onSpeedChanged:
-                            (rate) => unawaited(_setPlaybackRate(rate)),
-                        // 控制层所有 seek 都经过页面，跳转后立即补一次上报。
-                        onSeek: (value) => unawaited(_seekTo(value)),
-                      ),
+                )
+              : SizedBox.expand(
+                  // 播放器视口铺满页面，画面按用户选择的模式布局，控制层始终吸附视口底部。
+                  child: Video(
+                    controller: _videoController,
+                    aspectRatio: _aspectRatio,
+                    fit: _videoFit,
+                    // 存在剩余黑边时仅将画面轻微上移，控制栏仍固定在播放器底部。
+                    alignment: const Alignment(0, -0.22),
+                    // Flutter 字幕上移到控制区上方，避免与进度条和操作按钮重叠。
+                    subtitleViewConfiguration: const SubtitleViewConfiguration(
+                      padding: EdgeInsets.fromLTRB(24, 0, 24, 104),
+                    ),
+                    // Render the custom controls inside Video as its only
+                    // control layer instead of stacking a second outer bar.
+                    // 控制层自身占满播放器，再在内部固定到底部，避免 Align 的松约束
+                    // 让进度条、预览框在不同窗口比例下出现错位。
+                    controls: (videoState) => _PlayerControls(
+                      player: _player,
+                      position: _position,
+                      duration: _duration,
+                      isPlaying: _isPlaying,
+                      buffering: _buffering,
+                      networkSpeed: _networkSpeed,
+                      thumbnailPreviewController: _thumbnailPreviewController,
+                      muted: _muted,
+                      volume: _volume,
+                      videoFit: _videoFit,
+                      speed: _playbackRate,
+                      // media_kit 全屏时会保留原页面并新建 Video，两个控制层必须使用不同 Key。
+                      volumeControlKey: isFullscreen(videoState.context)
+                          ? _fullscreenVolumeControlKey
+                          : _volumeControlKey,
+                      onTogglePlay: _togglePlay,
+                      onToggleMute: _toggleMute,
+                      onVideoFitChanged: _setVideoFit,
+                      onVolumeChanged: (value) => unawaited(_setVolume(value)),
+                      onSpeedChanged: (rate) =>
+                          unawaited(_setPlaybackRate(rate)),
+                      // 控制层所有 seek 都经过页面，跳转后立即补一次上报。
+                      onSeek: (value) => unawaited(_seekTo(value)),
+                    ),
+                  ),
                 ),
-              ),
         ),
       ),
     );
@@ -1187,6 +1195,30 @@ class _PlayerControlsState extends State<_PlayerControls> {
     );
   }
 
+  // 播放器菜单固定使用深色底 (0xFF202020)，不能沿用全局主题的 onSurface 文字色，
+  // 否则在亮色主题下文字与勾选图标是深色，落在深色菜单上几乎看不见。
+  PopupMenuItem<T> _playerMenuItem<T>({
+    required T value,
+    required String label,
+    bool selected = false,
+  }) {
+    return PopupMenuItem<T>(
+      value: value,
+      child: Row(
+        children: [
+          SizedBox(
+            width: 24,
+            child: selected
+                ? const Icon(Icons.check_rounded, color: Colors.white, size: 20)
+                : null,
+          ),
+          const SizedBox(width: 10),
+          Text(label, style: const TextStyle(color: Colors.white)),
+        ],
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _controlsHideTimer?.cancel();
@@ -1221,9 +1253,7 @@ class _PlayerControlsState extends State<_PlayerControls> {
 
   void _adjustVolume(double delta) {
     // 通过页面回调修改音量，确保键盘、滑块和静音状态使用同一份状态。
-    final targetVolume = (volume + delta)
-        .clamp(0.0, 100.0)
-        .toDouble();
+    final targetVolume = (volume + delta).clamp(0.0, 100.0).toDouble();
     onVolumeChanged(targetVolume);
     // 键盘调节后显示现有音量条，连续按键时由音量控件重新计算隐藏时间。
     volumeControlKey.currentState?.showForKeyboardAdjustment();
@@ -1233,7 +1263,8 @@ class _PlayerControlsState extends State<_PlayerControls> {
   Widget build(BuildContext context) {
     final usesAndroidFullscreenControls = _usesAndroidFullscreenControls;
     // 桌面端播放中同样按自动隐藏状态决定控制层可见性。
-    final controlsVisible = !_autoHideControls || _controlsVisible || !isPlaying;
+    final controlsVisible =
+        !_autoHideControls || _controlsVisible || !isPlaying;
     final pausedIndicator = Container(
       width: 72,
       height: 72,
@@ -1284,19 +1315,19 @@ class _PlayerControlsState extends State<_PlayerControls> {
     return CallbackShortcuts(
       bindings: {
         // 桌面端播放快捷键仅响应首次按下，避免长按造成播放状态或全屏状态反复切换。
-        const SingleActivator(
-          LogicalKeyboardKey.space,
-          includeRepeats: false,
-        ): onTogglePlay,
+        const SingleActivator(LogicalKeyboardKey.space, includeRepeats: false):
+            onTogglePlay,
         const SingleActivator(
           LogicalKeyboardKey.enter,
           includeRepeats: false,
-        ): () => unawaited(_toggleFullscreen(context)),
+        ): () =>
+            unawaited(_toggleFullscreen(context)),
         // 同时支持桌面键盘的数字键盘回车键切换全屏。
         const SingleActivator(
           LogicalKeyboardKey.numpadEnter,
           includeRepeats: false,
-        ): () => unawaited(_toggleFullscreen(context)),
+        ): () =>
+            unawaited(_toggleFullscreen(context)),
         // 自定义控制层接管默认控制层的方向键交互。
         const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
             _seekBy(_keyboardRewindStep),
@@ -1318,231 +1349,236 @@ class _PlayerControlsState extends State<_PlayerControls> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-            // 安卓全屏单击画面只切换工具栏；其他平台继续沿用单击播放或暂停。
-            Positioned.fill(
-              child: Semantics(
-                button: true,
-                label: usesAndroidFullscreenControls
-                    ? (controlsVisible ? '隐藏播放控制' : '显示播放控制')
-                    : (isPlaying ? '暂停' : '播放'),
-                child: _usesAndroidTouchGestures
-                    ? _AndroidPlayerGestureLayer(
-                        player: player,
-                        volume: volume,
-                        onTap: _handleSurfaceTap,
-                        onVolumeChanged: onVolumeChanged,
-                        child: playbackStateIndicator,
-                      )
-                    : MouseRegion(
-                        // 控制层隐藏时连同光标一起隐藏，避免画面上残留箭头。
-                        cursor: controlsVisible
-                            ? SystemMouseCursors.click
-                            : SystemMouseCursors.none,
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: onTogglePlay,
+              // 安卓全屏单击画面只切换工具栏；其他平台继续沿用单击播放或暂停。
+              Positioned.fill(
+                child: Semantics(
+                  button: true,
+                  label: usesAndroidFullscreenControls
+                      ? (controlsVisible ? '隐藏播放控制' : '显示播放控制')
+                      : (isPlaying ? '暂停' : '播放'),
+                  child: _usesAndroidTouchGestures
+                      ? _AndroidPlayerGestureLayer(
+                          player: player,
+                          volume: volume,
+                          onTap: _handleSurfaceTap,
+                          onVolumeChanged: onVolumeChanged,
                           child: playbackStateIndicator,
+                        )
+                      : MouseRegion(
+                          // 控制层隐藏时连同光标一起隐藏，避免画面上残留箭头。
+                          cursor: controlsVisible
+                              ? SystemMouseCursors.click
+                              : SystemMouseCursors.none,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: onTogglePlay,
+                            child: playbackStateIndicator,
+                          ),
+                        ),
+                ),
+              ),
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 180),
+                    switchInCurve: Curves.easeOut,
+                    switchOutCurve: Curves.easeIn,
+                    // 两种状态的组件类型已经不同；不使用固定 Key，避免缓冲状态快速反复时
+                    // 新旧动画子项在 AnimatedSwitcher 的 Stack 中产生重复 Key。
+                    child: buffering
+                        ? Center(
+                            child: _PlayerLoadingIndicator(
+                              statusText: '正在缓冲',
+                              networkSpeed: networkSpeed,
+                            ),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                ),
+              ),
+              // 渐变跟随工具栏淡入淡出，但始终不拦截视频区域的鼠标与触摸事件。
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                height: 160,
+                child: IgnorePointer(
+                  child: AnimatedOpacity(
+                    opacity: controlsVisible ? 1 : 0,
+                    duration: const Duration(milliseconds: 180),
+                    child: const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Colors.transparent, Color(0xD9000000)],
                         ),
                       ),
-              ),
-            ),
-            Positioned.fill(
-              child: IgnorePointer(
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 180),
-                  switchInCurve: Curves.easeOut,
-                  switchOutCurve: Curves.easeIn,
-                  // 两种状态的组件类型已经不同；不使用固定 Key，避免缓冲状态快速反复时
-                  // 新旧动画子项在 AnimatedSwitcher 的 Stack 中产生重复 Key。
-                  child: buffering
-                      ? Center(
-                          child: _PlayerLoadingIndicator(
-                            statusText: '正在缓冲',
-                            networkSpeed: networkSpeed,
-                          ),
-                        )
-                      : const SizedBox.shrink(),
-                ),
-              ),
-            ),
-            // 渐变跟随工具栏淡入淡出，但始终不拦截视频区域的鼠标与触摸事件。
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              height: 160,
-              child: IgnorePointer(
-                child: AnimatedOpacity(
-                  opacity: controlsVisible ? 1 : 0,
-                  duration: const Duration(milliseconds: 180),
-                  child: const DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [Colors.transparent, Color(0xD9000000)],
-                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: IgnorePointer(
-                ignoring: !controlsVisible,
-                child: AnimatedOpacity(
-                  opacity: controlsVisible ? 1 : 0,
-                  duration: const Duration(milliseconds: 180),
-                  child: Listener(
-                    // 整个控制栏矩形都拦截点击，避免透明间距将事件透传给视频播放区域。
-                    behavior: HitTestBehavior.opaque,
-                    // 操作按钮或拖动进度条期间暂停倒计时，松手后重新计时。
-                    onPointerDown: _handleControlsPointerDown,
-                    onPointerUp: _handleControlsPointerEnd,
-                    onPointerCancel: _handleControlsPointerEnd,
-                    child: SafeArea(
-                      top: false,
-                      minimum: const EdgeInsets.only(bottom: 8),
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          final compact = constraints.maxWidth < 520;
-                          final horizontalPadding = compact ? 4.0 : 8.0;
-                          final timeText = constraints.maxWidth < 380
-                              ? _formatDuration(position)
-                              : '${_formatDuration(position)} / '
-                                    '${_formatDuration(duration)}';
-                          return Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              // 向进度条上方扩展透明命中范围，不改变现有控件的屏幕位置。
-                              const SizedBox(height: 8),
-                              // 时间轴只保留极窄的窗口边距，下方按钮继续使用舒适的操作间距。
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 6,
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: IgnorePointer(
+                  ignoring: !controlsVisible,
+                  child: AnimatedOpacity(
+                    opacity: controlsVisible ? 1 : 0,
+                    duration: const Duration(milliseconds: 180),
+                    child: Listener(
+                      // 整个控制栏矩形都拦截点击，避免透明间距将事件透传给视频播放区域。
+                      behavior: HitTestBehavior.opaque,
+                      // 操作按钮或拖动进度条期间暂停倒计时，松手后重新计时。
+                      onPointerDown: _handleControlsPointerDown,
+                      onPointerUp: _handleControlsPointerEnd,
+                      onPointerCancel: _handleControlsPointerEnd,
+                      child: SafeArea(
+                        top: false,
+                        minimum: const EdgeInsets.only(bottom: 8),
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            final compact = constraints.maxWidth < 520;
+                            final horizontalPadding = compact ? 4.0 : 8.0;
+                            final timeText = constraints.maxWidth < 380
+                                ? _formatDuration(position)
+                                : '${_formatDuration(position)} / '
+                                      '${_formatDuration(duration)}';
+                            return Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                // 向进度条上方扩展透明命中范围，不改变现有控件的屏幕位置。
+                                const SizedBox(height: 8),
+                                // 时间轴只保留极窄的窗口边距，下方按钮继续使用舒适的操作间距。
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                  ),
+                                  child: _PreviewTimelineBar(
+                                    position: position,
+                                    duration: duration,
+                                    thumbnailController:
+                                        thumbnailPreviewController,
+                                    onSeek: onSeek,
+                                  ),
                                 ),
-                                child: _PreviewTimelineBar(
-                                  position: position,
-                                  duration: duration,
-                                  thumbnailController:
-                                      thumbnailPreviewController,
-                                  onSeek: onSeek,
-                                ),
-                              ),
-                              Padding(
-                                padding: EdgeInsets.symmetric(
-                                  horizontal: horizontalPadding,
-                                ),
-                                child: Row(
-                                  children: [
-                                    IconButton(
-                                      tooltip: isPlaying ? '暂停' : '播放',
-                                      color: Colors.white,
-                                      visualDensity: VisualDensity.compact,
-                                      onPressed: onTogglePlay,
-                                      icon: Icon(
-                                        isPlaying
-                                            ? Icons.pause_rounded
-                                            : Icons.play_arrow_rounded,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    // 时间区域独占剩余空间，右侧操作区因此始终贴住窗口右边。
-                                    Expanded(
-                                      child: Text(
-                                        timeText,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          color: Colors.white70,
+                                Padding(
+                                  padding: EdgeInsets.symmetric(
+                                    horizontal: horizontalPadding,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      IconButton(
+                                        tooltip: isPlaying ? '暂停' : '播放',
+                                        color: Colors.white,
+                                        visualDensity: VisualDensity.compact,
+                                        onPressed: onTogglePlay,
+                                        icon: Icon(
+                                          isPlaying
+                                              ? Icons.pause_rounded
+                                              : Icons.play_arrow_rounded,
                                         ),
                                       ),
-                                    ),
-                                    // 右侧操作区保持贴右；竖向音量层不参与控制栏宽度分配。
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        // 音轨/字幕轨按容器实际提供的轨道动态出现。
-                                        if ((_tracks?.audio.length ?? 0) > 1)
-                                          _buildAudioMenu(_tracks!.audio),
-                                        if ((_tracks?.subtitle.length ?? 0) > 0)
-                                          _buildSubtitleMenu(_tracks!.subtitle),
-                                        _buildSpeedMenu(),
-                                        // 使用简洁的调节图标区分画面模式菜单与旁边的全屏按钮。
-                                        PopupMenuButton<BoxFit>(
-                                          tooltip:
-                                              '画面模式：${_videoFitLabel(videoFit)}',
-                                          color: const Color(0xFF202020),
-                                          icon: const Icon(
-                                            Icons.tune_rounded,
+                                      const SizedBox(width: 4),
+                                      // 时间区域独占剩余空间，右侧操作区因此始终贴住窗口右边。
+                                      Expanded(
+                                        child: Text(
+                                          timeText,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            color: Colors.white70,
+                                          ),
+                                        ),
+                                      ),
+                                      // 右侧操作区保持贴右；竖向音量层不参与控制栏宽度分配。
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          // 音轨/字幕轨按容器实际提供的轨道动态出现。
+                                          if ((_tracks?.audio.length ?? 0) > 1)
+                                            _buildAudioMenu(_tracks!.audio),
+                                          if ((_tracks?.subtitle.length ?? 0) >
+                                              0)
+                                            _buildSubtitleMenu(
+                                              _tracks!.subtitle,
+                                            ),
+                                          _buildSpeedMenu(),
+                                          // 使用简洁的调节图标区分画面模式菜单与旁边的全屏按钮。
+                                          PopupMenuButton<BoxFit>(
+                                            tooltip:
+                                                '画面模式：${_videoFitLabel(videoFit)}',
+                                            color: const Color(0xFF202020),
+                                            icon: const Icon(
+                                              Icons.tune_rounded,
+                                              color: Colors.white,
+                                            ),
+                                            onOpened: _handleVideoFitMenuOpened,
+                                            onCanceled:
+                                                _handleVideoFitMenuCanceled,
+                                            onSelected: _handleVideoFitSelected,
+                                            itemBuilder: (context) => [
+                                              _videoFitMenuItem(
+                                                fit: BoxFit.contain,
+                                                label: '适应屏幕',
+                                                description: '完整显示，不裁剪',
+                                              ),
+                                              _videoFitMenuItem(
+                                                fit: BoxFit.cover,
+                                                label: '铺满屏幕',
+                                                description: '等比铺满，可能裁剪',
+                                              ),
+                                              _videoFitMenuItem(
+                                                fit: BoxFit.fill,
+                                                label: '拉伸铺满',
+                                                description: '填满画面，可能变形',
+                                              ),
+                                            ],
+                                          ),
+                                          _VolumeControl(
+                                            key: volumeControlKey,
+                                            volume: volume,
+                                            muted: muted,
+                                            compact: compact,
+                                            onToggleMute: onToggleMute,
+                                            onVolumeChanged: onVolumeChanged,
+                                          ),
+                                          // 使用播放器自带的全屏路由，并同步桌面端的原生窗口状态。
+                                          IconButton(
+                                            tooltip: isFullscreen(context)
+                                                ? '退出全屏'
+                                                : '全屏',
                                             color: Colors.white,
-                                          ),
-                                          onOpened: _handleVideoFitMenuOpened,
-                                          onCanceled:
-                                              _handleVideoFitMenuCanceled,
-                                          onSelected: _handleVideoFitSelected,
-                                          itemBuilder: (context) => [
-                                            _videoFitMenuItem(
-                                              fit: BoxFit.contain,
-                                              label: '适应屏幕',
-                                              description: '完整显示，不裁剪',
+                                            visualDensity:
+                                                VisualDensity.compact,
+                                            onPressed: () => unawaited(
+                                              _toggleFullscreen(context),
                                             ),
-                                            _videoFitMenuItem(
-                                              fit: BoxFit.cover,
-                                              label: '铺满屏幕',
-                                              description: '等比铺满，可能裁剪',
+                                            icon: Icon(
+                                              isFullscreen(context)
+                                                  ? Icons
+                                                        .fullscreen_exit_rounded
+                                                  : Icons.fullscreen_rounded,
                                             ),
-                                            _videoFitMenuItem(
-                                              fit: BoxFit.fill,
-                                              label: '拉伸铺满',
-                                              description: '填满画面，可能变形',
-                                            ),
-                                          ],
-                                        ),
-                                        _VolumeControl(
-                                          key: volumeControlKey,
-                                          volume: volume,
-                                          muted: muted,
-                                          compact: compact,
-                                          onToggleMute: onToggleMute,
-                                          onVolumeChanged: onVolumeChanged,
-                                        ),
-                                        // 使用播放器自带的全屏路由，并同步桌面端的原生窗口状态。
-                                        IconButton(
-                                          tooltip: isFullscreen(context)
-                                              ? '退出全屏'
-                                              : '全屏',
-                                          color: Colors.white,
-                                          visualDensity: VisualDensity.compact,
-                                          onPressed: () => unawaited(
-                                            _toggleFullscreen(context),
                                           ),
-                                          icon: Icon(
-                                            isFullscreen(context)
-                                                ? Icons.fullscreen_exit_rounded
-                                                : Icons.fullscreen_rounded,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
+                                        ],
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                            ],
-                          );
-                        },
+                              ],
+                            );
+                          },
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
-            ),
-          ],
-            ),
+            ],
           ),
+        ),
       ),
     );
   }
@@ -1582,15 +1618,14 @@ class _PlayerControlsState extends State<_PlayerControls> {
       color: const Color(0xFF202020),
       icon: const Icon(Icons.speed_rounded, color: Colors.white),
       onSelected: (rate) => widget.onSpeedChanged(rate),
-      itemBuilder:
-          (context) => [
-            for (final rate in rates)
-              CheckedPopupMenuItem<double>(
-                value: rate,
-                checked: (speed - rate).abs() < 0.01,
-                child: Text(_formatRate(rate)),
-              ),
-          ],
+      itemBuilder: (context) => [
+        for (final rate in rates)
+          _playerMenuItem<double>(
+            value: rate,
+            label: _formatRate(rate),
+            selected: (speed - rate).abs() < 0.01,
+          ),
+      ],
     );
   }
 
@@ -1607,15 +1642,14 @@ class _PlayerControlsState extends State<_PlayerControls> {
           }
         }
       },
-      itemBuilder:
-          (context) => [
-            for (final track in tracks)
-              CheckedPopupMenuItem<String>(
-                value: track.id,
-                checked: track.id == _currentTrack?.audio.id,
-                child: Text(_trackLabel(track.id, track.title, track.language)),
-              ),
-          ],
+      itemBuilder: (context) => [
+        for (final track in tracks)
+          _playerMenuItem<String>(
+            value: track.id,
+            label: _trackLabel(track.id, track.title, track.language),
+            selected: track.id == _currentTrack?.audio.id,
+          ),
+      ],
     );
   }
 
@@ -1640,30 +1674,24 @@ class _PlayerControlsState extends State<_PlayerControls> {
           }
         }
       },
-      itemBuilder:
-          (context) => [
-            CheckedPopupMenuItem<String>(
-              value: 'no',
-              checked: subtitlesOff,
-              child: const Text('关闭字幕'),
-            ),
-            for (final track in tracks)
-              CheckedPopupMenuItem<String>(
-                value: track.id,
-                checked: track.id == _currentTrack?.subtitle.id,
-                child: Text(_trackLabel(track.id, track.title, track.language)),
-              ),
-          ],
+      itemBuilder: (context) => [
+        _playerMenuItem<String>(
+          value: 'no',
+          label: '关闭字幕',
+          selected: subtitlesOff,
+        ),
+        for (final track in tracks)
+          _playerMenuItem<String>(
+            value: track.id,
+            label: _trackLabel(track.id, track.title, track.language),
+            selected: track.id == _currentTrack?.subtitle.id,
+          ),
+      ],
     );
   }
 }
 
-enum _AndroidPlayerGestureMode {
-  pending,
-  seek,
-  brightness,
-  volume,
-}
+enum _AndroidPlayerGestureMode { pending, seek, brightness, volume }
 
 class _AndroidPlayerGestureLayer extends StatefulWidget {
   final Player player;
@@ -1769,12 +1797,11 @@ class _AndroidPlayerGestureLayerState
     final seekRange = duration < _maximumSeekRange
         ? duration
         : _maximumSeekRange;
-    final deltaMilliseconds =
-        seekRange.inMilliseconds * _dragOffset.dx / width;
-    final targetMilliseconds = (_startPosition.inMilliseconds +
-            deltaMilliseconds.round())
-        .clamp(0, duration.inMilliseconds)
-        .toInt();
+    final deltaMilliseconds = seekRange.inMilliseconds * _dragOffset.dx / width;
+    final targetMilliseconds =
+        (_startPosition.inMilliseconds + deltaMilliseconds.round())
+            .clamp(0, duration.inMilliseconds)
+            .toInt();
     setState(() {
       _seekPosition = Duration(milliseconds: targetMilliseconds);
       _feedbackVisible = true;
@@ -1864,7 +1891,8 @@ class _AndroidPlayerGestureLayerState
         icon = _seekPosition >= _startPosition
             ? Icons.fast_forward_rounded
             : Icons.fast_rewind_rounded;
-        text = '${_formatDuration(_seekPosition)} / '
+        text =
+            '${_formatDuration(_seekPosition)} / '
             '${_formatDuration(widget.player.state.duration)}';
         break;
       case _AndroidPlayerGestureMode.brightness:
@@ -2100,8 +2128,9 @@ class _VolumeControlState extends State<_VolumeControl> {
 
   Widget _buildVolumeOverlay(BuildContext context) {
     final popupHeight = widget.compact ? 116.0 : 132.0;
-    final volumeValue =
-        (widget.muted ? 0.0 : widget.volume).clamp(0.0, 100.0).toDouble();
+    final volumeValue = (widget.muted ? 0.0 : widget.volume)
+        .clamp(0.0, 100.0)
+        .toDouble();
     return UnconstrainedBox(
       alignment: Alignment.topLeft,
       // 解除 Overlay 的全屏紧约束，让音量浮层保持自身尺寸。
@@ -2262,15 +2291,17 @@ class _PreviewTimelineBarState extends State<_PreviewTimelineBar> {
   }
 
   double _pointerRatio(double localX, double width) {
-    final inset =
-        width > _sliderHorizontalInset * 2 ? _sliderHorizontalInset : 0.0;
+    final inset = width > _sliderHorizontalInset * 2
+        ? _sliderHorizontalInset
+        : 0.0;
     final trackWidth = math.max(1.0, width - inset * 2);
     return ((localX - inset) / trackWidth).clamp(0.0, 1.0).toDouble();
   }
 
   double _previewLeft(double width, double previewWidth) {
-    final inset =
-        width > _sliderHorizontalInset * 2 ? _sliderHorizontalInset : 0.0;
+    final inset = width > _sliderHorizontalInset * 2
+        ? _sliderHorizontalInset
+        : 0.0;
     final trackWidth = math.max(0.0, width - inset * 2);
     final center = inset + trackWidth * _previewRatio;
     return (center - previewWidth / 2)
@@ -2280,13 +2311,14 @@ class _PreviewTimelineBarState extends State<_PreviewTimelineBar> {
 
   @override
   Widget build(BuildContext context) {
-    final max =
-        widget.duration.inMilliseconds
-            .toDouble()
-            .clamp(1, double.infinity)
-            .toDouble();
-    final current =
-        widget.position.inMilliseconds.toDouble().clamp(0, max).toDouble();
+    final max = widget.duration.inMilliseconds
+        .toDouble()
+        .clamp(1, double.infinity)
+        .toDouble();
+    final current = widget.position.inMilliseconds
+        .toDouble()
+        .clamp(0, max)
+        .toDouble();
     return SizedBox(
       height: 34,
       child: LayoutBuilder(
@@ -2294,16 +2326,14 @@ class _PreviewTimelineBarState extends State<_PreviewTimelineBar> {
           final width = constraints.maxWidth;
           final previewWidth = math.min(220.0, width);
           final previewPosition = Duration(
-            milliseconds:
-                (widget.duration.inMilliseconds * _previewRatio).round(),
+            milliseconds: (widget.duration.inMilliseconds * _previewRatio)
+                .round(),
           );
           return MouseRegion(
-            onHover:
-                _supportsHoverPreview
-                    ? (event) => _showPreview(
-                      _pointerRatio(event.localPosition.dx, width),
-                    )
-                    : null,
+            onHover: _supportsHoverPreview
+                ? (event) =>
+                      _showPreview(_pointerRatio(event.localPosition.dx, width))
+                : null,
             onExit: _supportsHoverPreview ? (_) => _hidePreview() : null,
             child: Stack(
               clipBehavior: Clip.none,
@@ -2329,23 +2359,20 @@ class _PreviewTimelineBarState extends State<_PreviewTimelineBar> {
                   child: Slider(
                     value: current,
                     max: max,
-                    onChangeStart:
-                        widget.duration > Duration.zero
-                            ? (value) => _showPreview(value / max)
-                            : null,
-                    onChanged:
-                        widget.duration > Duration.zero
-                            ? (value) {
-                              _showPreview(value / max);
-                              widget.onSeek(
-                                Duration(milliseconds: value.round()),
-                              );
-                            }
-                            : null,
-                    onChangeEnd:
-                        widget.duration > Duration.zero
-                            ? (_) => _hidePreview()
-                            : null,
+                    onChangeStart: widget.duration > Duration.zero
+                        ? (value) => _showPreview(value / max)
+                        : null,
+                    onChanged: widget.duration > Duration.zero
+                        ? (value) {
+                            _showPreview(value / max);
+                            widget.onSeek(
+                              Duration(milliseconds: value.round()),
+                            );
+                          }
+                        : null,
+                    onChangeEnd: widget.duration > Duration.zero
+                        ? (_) => _hidePreview()
+                        : null,
                   ),
                 ),
                 if (_previewVisible &&
@@ -2415,16 +2442,15 @@ class _ProgressPreview extends StatelessWidget {
               key: ValueKey(frameIndex),
               fit: BoxFit.cover,
               gaplessPlayback: true,
-              errorBuilder:
-                  (_, _, _) => const ColoredBox(
-                    color: Color(0xFF111111),
-                    child: Center(
-                      child: Icon(
-                        Icons.broken_image_outlined,
-                        color: Colors.white38,
-                      ),
-                    ),
+              errorBuilder: (_, _, _) => const ColoredBox(
+                color: Color(0xFF111111),
+                child: Center(
+                  child: Icon(
+                    Icons.broken_image_outlined,
+                    color: Colors.white38,
                   ),
+                ),
+              ),
             ),
           ),
           Positioned(
