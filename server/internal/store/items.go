@@ -48,6 +48,11 @@ type Item struct {
 	ImageTags      map[string]string
 	BackdropTags   []string
 	ScreenshotTags []string
+
+	// Fingerprint 是片源 "size:mtime" 的组合，重复扫描时命中即可跳过 ffprobe。
+	Fingerprint string
+	// NFOMtime 是 NFO 文件的修改时间（纳秒），单独比对，改了 NFO 也要重新入库。
+	NFOMtime int64
 }
 
 type UserData struct {
@@ -86,7 +91,8 @@ const itemColumns = `i.id, i.library_id, i.parent_id, i.type, i.name, i.sort_nam
 	i.production_year, i.premiere_date, i.date_created, i.community_rating, i.official_rating,
 	i.run_time_ticks, i.width, i.height, i.path, i.container, i.size, i.bitrate,
 	i.media_streams, i.genres, i.tags, i.studios, i.people, i.chapters,
-	i.provider_ids, i.external_urls, i.image_tags, i.backdrop_tags, i.screenshot_tags`
+	i.provider_ids, i.external_urls, i.image_tags, i.backdrop_tags, i.screenshot_tags,
+	i.fingerprint, i.nfo_mtime`
 
 const userDataColumns = `COALESCE(ud.is_favorite, 0), COALESCE(ud.played, 0),
 	COALESCE(ud.playback_position_ticks, 0), COALESCE(ud.play_count, 0),
@@ -282,6 +288,32 @@ func (s *Store) getRawItem(ctx context.Context, itemID string) (*Item, error) {
 	return item, err
 }
 
+// ItemFingerprint 读取已入库条目的扫描指纹与 NFO 修改时间。
+// 未入库时返回 ErrNotFound，调用方据此走完整的探测流程。
+func (s *Store) ItemFingerprint(ctx context.Context, itemID string) (string, int64, error) {
+	var (
+		fingerprint string
+		nfoMtime    int64
+	)
+	err := s.db.QueryRowContext(ctx,
+		`SELECT fingerprint, nfo_mtime FROM items WHERE id = ?`, itemID).Scan(&fingerprint, &nfoMtime)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", 0, ErrNotFound
+	}
+	return fingerprint, nfoMtime, err
+}
+
+// UpdateItemLocation 只更新路径与库归属。
+// 片源被移动但内容没变时用它纠正路径，播放进度与收藏都保留在原条目上。
+func (s *Store) UpdateItemLocation(ctx context.Context, itemID, libraryID, path string) error {
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE items SET library_id = ?, parent_id = ?, path = ? WHERE id = ?`,
+		libraryID, libraryID, path, itemID); err != nil {
+		return fmt.Errorf("更新条目路径失败: %w", err)
+	}
+	return nil
+}
+
 // 插入列顺序与 UpsertItem 的参数顺序严格一致；占位符动态生成，避免手数出错。
 var itemInsertColumns = []string{
 	"id", "library_id", "parent_id", "type", "name", "sort_name", "overview",
@@ -289,6 +321,7 @@ var itemInsertColumns = []string{
 	"run_time_ticks", "width", "height", "path", "container", "size", "bitrate",
 	"media_streams", "genres", "tags", "studios", "people", "chapters",
 	"provider_ids", "external_urls", "image_tags", "backdrop_tags", "screenshot_tags",
+	"fingerprint", "nfo_mtime",
 }
 
 var upsertItemSQL = "INSERT INTO items (" + strings.Join(itemInsertColumns, ", ") +
@@ -308,7 +341,8 @@ ON CONFLICT(id) DO UPDATE SET
 	people = excluded.people, chapters = excluded.chapters,
 	provider_ids = excluded.provider_ids, external_urls = excluded.external_urls,
 	image_tags = excluded.image_tags, backdrop_tags = excluded.backdrop_tags,
-	screenshot_tags = excluded.screenshot_tags`
+	screenshot_tags = excluded.screenshot_tags,
+	fingerprint = excluded.fingerprint, nfo_mtime = excluded.nfo_mtime`
 
 func (s *Store) UpsertItem(ctx context.Context, item *Item) error {
 	if item.ImageTags == nil {
@@ -325,6 +359,7 @@ func (s *Store) UpsertItem(ctx context.Context, item *Item) error {
 		marshalJSON(item.Studios), marshalJSON(item.People), marshalJSON(item.Chapters),
 		marshalJSON(item.ProviderIDs), marshalJSON(item.ExternalURLs), marshalJSON(item.ImageTags),
 		marshalJSON(item.BackdropTags), marshalJSON(item.ScreenshotTags),
+		item.Fingerprint, item.NFOMtime,
 	)
 	if err != nil {
 		return fmt.Errorf("写入条目失败: %w", err)
@@ -502,6 +537,7 @@ func scanItemRow(scanner rowScanner) (*Item, *UserData, error) {
 		&item.RunTimeTicks, &item.Width, &item.Height, &item.Path, &item.Container, &item.Size, &item.Bitrate,
 		&mediaStreams, &genres, &tags, &studios, &people, &chapters,
 		&providerIDs, &externalURLs, &imageTags, &backdropTags, &screenshotTags,
+		&item.Fingerprint, &item.NFOMtime,
 		&isFavorite, &played, &data.PlaybackPositionTicks, &data.PlayCount, &data.LastPlayedDate,
 	)
 	if err != nil {

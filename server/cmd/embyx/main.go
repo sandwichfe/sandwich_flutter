@@ -22,6 +22,11 @@ import (
 func main() {
 	setupLogging()
 
+	// rootCtx 是后台任务（媒体扫描、海报生成、BIF 预生成）的父 context。
+	// 收到 Ctrl+C 后先取消它让 ffmpeg 子进程结束，再关闭 HTTP 服务。
+	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	configPath := flag.String("config", "", "配置文件路径（默认 ./config.yaml，也可用 EMBYX_CONFIG 指定）")
 	flag.Parse()
 
@@ -49,10 +54,11 @@ func main() {
 	images := media.NewImageStore(filepath.Join(cfg.DataDir, "images"))
 	bifCache := media.NewBifCache(filepath.Join(cfg.DataDir, "cache", "bif"), cfg.FFmpegPath)
 	prober := media.NewProber(cfg.FFprobePath)
-	scanner := media.NewScanner(st, prober, images)
+	scanner := media.NewScanner(st, prober, images, bifCache)
 	thumbs := media.NewThumbnailJobManager(bifCache)
 
 	api := httpapi.New(cfg, st, images, bifCache, scanner, thumbs)
+	api.SetBaseContext(rootCtx)
 
 	server := &http.Server{
 		Addr:              cfg.Addr,
@@ -76,9 +82,7 @@ func main() {
 		log.Printf("已配置媒体库 %d 个（扫描需手动触发）", len(libraries))
 	}
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-	<-stop
+	<-rootCtx.Done()
 
 	log.Println("正在关闭服务...")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

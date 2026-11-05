@@ -103,6 +103,8 @@ type ArtworkJobManager struct {
 	jobs   map[string]*artworkJob
 	order  []string
 	active *artworkJob
+	// parentCtx 是任务的父 context，进程退出时取消，正在跑的 ffmpeg 一起结束。
+	parentCtx context.Context
 }
 
 func NewArtworkJobManager(gen *ArtworkGenerator, onGenerated func(itemID string, tags map[string]string)) *ArtworkJobManager {
@@ -111,6 +113,21 @@ func NewArtworkJobManager(gen *ArtworkGenerator, onGenerated func(itemID string,
 		onGenerated: onGenerated,
 		jobs:        make(map[string]*artworkJob),
 	}
+}
+
+// SetParentContext 设置任务父 context，取消时正在运行的任务会被中断。
+func (m *ArtworkJobManager) SetParentContext(ctx context.Context) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.parentCtx = ctx
+}
+
+// parentContextLocked 必须在持有 m.mu 时调用。
+func (m *ArtworkJobManager) parentContextLocked() context.Context {
+	if m.parentCtx != nil {
+		return m.parentCtx
+	}
+	return context.Background()
 }
 
 // Start 启动批量任务，返回初始快照。任务在后台 goroutine 中执行。
@@ -129,7 +146,7 @@ func (m *ArtworkJobManager) Start(libraryID, libraryName string, targets []Artwo
 		return ArtworkJobSnapshot{}, ErrArtworkJobRunning
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(m.parentContextLocked())
 	job := &artworkJob{cancel: cancel}
 	job.snapshot = ArtworkJobSnapshot{
 		ID:            newArtworkJobID(),

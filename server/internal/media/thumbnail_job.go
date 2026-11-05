@@ -123,10 +123,27 @@ type ThumbnailJobManager struct {
 	jobs   map[string]*thumbnailJob
 	order  []string
 	active *thumbnailJob
+	// parentCtx 是任务的父 context，进程退出时取消，正在跑的 ffmpeg 一起结束。
+	parentCtx context.Context
 }
 
 func NewThumbnailJobManager(bif *BifCache) *ThumbnailJobManager {
 	return &ThumbnailJobManager{bif: bif, jobs: make(map[string]*thumbnailJob)}
+}
+
+// SetParentContext 设置任务父 context，取消时正在运行的任务会被中断。
+func (m *ThumbnailJobManager) SetParentContext(ctx context.Context) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.parentCtx = ctx
+}
+
+// parentContextLocked 必须在持有 m.mu 时调用。
+func (m *ThumbnailJobManager) parentContextLocked() context.Context {
+	if m.parentCtx != nil {
+		return m.parentCtx
+	}
+	return context.Background()
 }
 
 // Start 启动一个预生成任务，返回初始快照。任务在后台 goroutine 中执行。
@@ -170,7 +187,7 @@ func (m *ThumbnailJobManager) Start(libraryID, libraryName string, targets []Thu
 		estimatedFrames += int((target.DurationSeconds + intervalSeconds - 1) / intervalSeconds)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(m.parentContextLocked())
 	job := &thumbnailJob{cancel: cancel}
 	job.snapshot = ThumbnailJobSnapshot{
 		ID:                   newThumbnailJobID(),

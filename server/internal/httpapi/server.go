@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 
 	"embyx/internal/config"
@@ -19,6 +20,9 @@ type Server struct {
 	// artwork 按需从视频画面生成海报与封面；artworkJobs 负责整库批量生成。
 	artwork     *media.ArtworkGenerator
 	artworkJobs *media.ArtworkJobManager
+
+	// baseCtx 是后台任务（扫描、图片生成）的父 context，进程退出时取消。
+	baseCtx context.Context
 
 	mux *http.ServeMux
 }
@@ -41,7 +45,29 @@ func New(cfg config.Config, st *store.Store, images *media.ImageStore, bif *medi
 }
 
 func (s *Server) Handler() http.Handler {
-	return s.withRecover(s.withCORS(s.withAuth(s.mux)))
+	// 访问日志放在鉴权外层，才能记录到被拒绝（401/403）的请求；
+	// 用户名由 withAuth 通过 statusRecorder 回填。
+	return s.withRecover(s.withCORS(s.withAccessLog(s.withAuth(s.mux))))
+}
+
+// SetBaseContext 设置后台任务使用的父 context。
+// 进程退出时取消它，正在跑的扫描与 ffmpeg 生成任务会一起结束。
+func (s *Server) SetBaseContext(ctx context.Context) {
+	s.baseCtx = ctx
+	if s.artworkJobs != nil {
+		s.artworkJobs.SetParentContext(ctx)
+	}
+	if s.thumbs != nil {
+		s.thumbs.SetParentContext(ctx)
+	}
+}
+
+// baseContext 返回后台任务的父 context，未设置时退回 Background。
+func (s *Server) baseContext() context.Context {
+	if s.baseCtx != nil {
+		return s.baseCtx
+	}
+	return context.Background()
 }
 
 func (s *Server) routes() {

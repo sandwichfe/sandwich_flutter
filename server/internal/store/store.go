@@ -20,6 +20,11 @@ type Store struct {
 	db *sql.DB
 }
 
+// schemaVersion 对应 schema.sql 的表结构版本号。
+// 改表结构时递增：本项目不提供数据迁移，启动时发现版本不一致会拒绝运行，
+// 由使用者删掉数据库文件重新扫描（当前数据都可随时重建）。
+const schemaVersion = 2
+
 func Open(dbPath string) (*Store, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -35,83 +40,47 @@ func Open(dbPath string) (*Store, error) {
 	if _, err := db.Exec(`PRAGMA foreign_keys = ON;`); err != nil {
 		return nil, fmt.Errorf("启用外键失败: %w", err)
 	}
-	if _, err := db.Exec(schemaSQL); err != nil {
-		return nil, fmt.Errorf("初始化表结构失败: %w", err)
-	}
+
 	store := &Store{db: db}
-	if err := store.migrate(); err != nil {
+	if err := store.prepareSchema(); err != nil {
+		_ = db.Close()
 		return nil, err
 	}
 	return store, nil
 }
 
-// migrate 处理建表语句覆盖不到的增量变更（CREATE TABLE IF NOT EXISTS 不会补列）。
-func (s *Store) migrate() error {
-	columns, err := s.tableColumns("libraries")
-	if err != nil {
-		return err
-	}
-	if !columns["paths"] {
-		if _, err := s.db.Exec(`ALTER TABLE libraries ADD COLUMN paths TEXT NOT NULL DEFAULT '[]'`); err != nil {
-			return fmt.Errorf("为 libraries 增加 paths 列失败: %w", err)
-		}
-	}
-	// 老库没有这个列，默认按"读取目录内海报"处理，保持原行为。
-	if !columns["prefer_local_artwork"] {
-		if _, err := s.db.Exec(`ALTER TABLE libraries ADD COLUMN prefer_local_artwork INTEGER NOT NULL DEFAULT 1`); err != nil {
-			return fmt.Errorf("为 libraries 增加 prefer_local_artwork 列失败: %w", err)
-		}
+// prepareSchema 建表或校验已有表结构的版本。
+// 全新数据库按 schema.sql 一次性建到最新版本；已有数据库版本不匹配时直接报错，
+// 避免用旧表结构跑新代码导致字段缺失这类难排查的问题。
+func (s *Store) prepareSchema() error {
+	var version int
+	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return fmt.Errorf("读取数据库版本失败: %w", err)
 	}
 
-	// 把旧的单目录 path 回填到 paths。
-	rows, err := s.db.Query(`SELECT id, path FROM libraries WHERE paths = '[]' AND path <> ''`)
-	if err != nil {
-		return err
-	}
-	type pendingRow struct{ id, path string }
-	pending := make([]pendingRow, 0, 4)
-	for rows.Next() {
-		var row pendingRow
-		if err := rows.Scan(&row.id, &row.path); err != nil {
-			rows.Close()
-			return err
+	if version == 0 && !s.tableExists("items") {
+		if _, err := s.db.Exec(schemaSQL); err != nil {
+			return fmt.Errorf("初始化表结构失败: %w", err)
 		}
-		pending = append(pending, row)
+		if _, err := s.db.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, schemaVersion)); err != nil {
+			return fmt.Errorf("写入数据库版本失败: %w", err)
+		}
+		return nil
 	}
-	rows.Close()
 
-	for _, row := range pending {
-		if _, err := s.db.Exec(`UPDATE libraries SET paths = ? WHERE id = ?`,
-			marshalJSON([]string{row.path}), row.id); err != nil {
-			return err
-		}
+	if version != schemaVersion {
+		return fmt.Errorf(
+			"数据库表结构版本为 %d，当前程序需要版本 %d；请删除数据库文件后重启并重新扫描媒体库",
+			version, schemaVersion,
+		)
 	}
 	return nil
 }
 
-func (s *Store) tableColumns(table string) (map[string]bool, error) {
-	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
-	if err != nil {
-		return nil, fmt.Errorf("读取表结构失败: %w", err)
-	}
-	defer rows.Close()
-
-	columns := map[string]bool{}
-	for rows.Next() {
-		var (
-			cid        int
-			name       string
-			columnType string
-			notNull    int
-			defaultVal sql.NullString
-			primaryKey int
-		)
-		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultVal, &primaryKey); err != nil {
-			return nil, err
-		}
-		columns[name] = true
-	}
-	return columns, rows.Err()
+func (s *Store) tableExists(table string) bool {
+	var name string
+	err := s.db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name)
+	return err == nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }

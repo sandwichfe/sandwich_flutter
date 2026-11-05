@@ -249,9 +249,7 @@ class EmbyPcService {
     }
     // 其它失败（找不到 ffmpeg、库里都已有图等）由服务端返回中文原因。
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      final message = response.bodyBytes.isEmpty
-          ? ''
-          : utf8.decode(response.bodyBytes).trim();
+      final message = _responseError(response);
       throw EmbyPcException(
         message.isEmpty ? '启动生成任务失败：HTTP ${response.statusCode}' : message,
       );
@@ -302,7 +300,7 @@ class EmbyPcService {
     }
     // 其他失败（如找不到 ffmpeg）服务端会返回中文原因，直接透出便于定位。
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      final message = utf8.decode(response.bodyBytes).trim();
+      final message = _responseError(response);
       throw EmbyPcException(
         message.isEmpty ? '启动缩略图预生成失败：HTTP ${response.statusCode}' : message,
       );
@@ -729,9 +727,7 @@ class EmbyPcService {
     );
     if (response.statusCode < 200 || response.statusCode >= 300) {
       // 抽帧失败原因（缺少 ffmpeg、时间点超界等）由服务端用中文返回，直接透出。
-      final message = response.bodyBytes.isEmpty
-          ? ''
-          : utf8.decode(response.bodyBytes).trim();
+      final message = _responseError(response);
       if (response.statusCode == 401 || response.statusCode == 403) {
         throw const EmbyPcException('登录已失效或当前账号没有管理权限');
       }
@@ -878,6 +874,22 @@ class EmbyPcService {
 
   Map<String, String> get _tokenHeader => {'X-Emby-Token': accessToken};
 
+  // 服务端错误体统一为 {"message": "..."}；取不到时退回原始文本，
+  // 兼容旧版本返回的纯文本错误。
+  String _responseError(http.Response response) {
+    if (response.bodyBytes.isEmpty) return '';
+    final text = utf8.decode(response.bodyBytes).trim();
+    try {
+      final data = jsonDecode(text);
+      if (data is Map && data['message'] is String) {
+        return (data['message'] as String).trim();
+      }
+    } catch (_) {
+      // 不是 JSON，按纯文本处理。
+    }
+    return text;
+  }
+
   String _responseText(http.Response response, String action) {
     _ensureSuccess(response, action);
     return response.bodyBytes.isEmpty
@@ -890,7 +902,10 @@ class EmbyPcService {
     if (response.statusCode == 401 || response.statusCode == 403) {
       throw const EmbyPcException('登录已失效或当前账号没有管理权限');
     }
-    throw EmbyPcException('$action：HTTP ${response.statusCode}');
+    final message = _responseError(response);
+    throw EmbyPcException(
+      message.isEmpty ? '$action：HTTP ${response.statusCode}' : message,
+    );
   }
 
   Map<String, dynamic> _decodeResponse(http.Response response, String action) {

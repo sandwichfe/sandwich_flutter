@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -265,7 +264,7 @@ func (s *Server) handleLibraryRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	go func() {
-		if _, err := s.scanner.ScanAll(context.Background(), log.Printf); err != nil {
+		if _, err := s.scanner.ScanAll(s.baseContext(), log.Printf); err != nil {
 			log.Printf("媒体库扫描失败: %v", err)
 		}
 	}()
@@ -275,7 +274,7 @@ func (s *Server) handleLibraryRefresh(w http.ResponseWriter, r *http.Request) {
 func (s *Server) scanLibraryAsync(lib *store.Library) {
 	target := *lib
 	go func() {
-		if _, err := s.scanner.ScanLibrary(context.Background(), target, log.Printf); err != nil {
+		if _, err := s.scanner.ScanLibrary(s.baseContext(), target, log.Printf); err != nil {
 			log.Printf("媒体库 %s 扫描失败: %v", target.Name, err)
 		}
 	}()

@@ -34,6 +34,8 @@ type Scanner struct {
 	store  *store.Store
 	prober *Prober
 	images *ImageStore
+	// bif 用于在条目删除时回收进度条缩略图缓存，可为 nil。
+	bif *BifCache
 
 	// workers 是并发探测/入库的 worker 数量，同时也是 ffprobe 的并发上限。
 	workers int
@@ -44,11 +46,12 @@ type Scanner struct {
 	artLocks map[string]*sync.Mutex
 }
 
-func NewScanner(s *store.Store, prober *Prober, images *ImageStore) *Scanner {
+func NewScanner(s *store.Store, prober *Prober, images *ImageStore, bif *BifCache) *Scanner {
 	return &Scanner{
 		store:    s,
 		prober:   prober,
 		images:   images,
+		bif:      bif,
 		workers:  scanWorkers(),
 		artLocks: make(map[string]*sync.Mutex),
 	}
@@ -139,7 +142,7 @@ func (s *Scanner) scanLibrary(ctx context.Context, lib store.Library, logf func(
 		if err != nil && !errors.Is(err, context.Canceled) {
 			return imported, err
 		}
-		imported += s.processFiles(ctx, lib.ID, paths, logf)
+		imported += s.processFiles(ctx, lib.ID, root, paths, logf)
 		// 遍历成功才清理陈旧条目：源端删片后重新扫描即可同步，避免条目长期残留。
 		if err == nil {
 			s.purgeMissingItems(ctx, lib, root, paths, logf)
@@ -215,6 +218,7 @@ func (s *Scanner) purgeMissingItems(ctx context.Context, lib store.Library, root
 	}
 	for _, itemID := range stale {
 		_ = s.images.RemoveItem(itemID)
+		s.removeCachedBif(itemID)
 	}
 	logf("媒体库 %s 清理了 %d 个源文件已不存在的条目", lib.Name, len(stale))
 }
@@ -230,7 +234,7 @@ func pathWithinRoot(path, root string) bool {
 
 // processFiles 用固定数量的 worker 并发探测并入库，返回成功导入的条目数。
 // 每个文件只会进入一个 worker，buildItem 对 item 的原地修改不存在竞争。
-func (s *Scanner) processFiles(ctx context.Context, libraryID string, paths []string, logf func(string, ...any)) int {
+func (s *Scanner) processFiles(ctx context.Context, libraryID, root string, paths []string, logf func(string, ...any)) int {
 	if len(paths) == 0 {
 		return 0
 	}
@@ -254,11 +258,16 @@ func (s *Scanner) processFiles(ctx context.Context, libraryID string, paths []st
 				if ctx.Err() != nil {
 					continue
 				}
-				item, probeErr := s.buildItem(ctx, libraryID, path, logf)
-				if probeErr != nil {
+				item, needWrite, buildErr := s.buildItem(ctx, libraryID, root, path, logf)
+				if buildErr != nil {
 					if ctx.Err() == nil {
-						logf("跳过 %s: %v", path, probeErr)
+						logf("跳过 %s: %v", path, buildErr)
 					}
+					continue
+				}
+				if !needWrite {
+					// 指纹命中：片源与 NFO 都没变，路径已在 buildItem 里纠正，无需再写库。
+					imported.Add(1)
 					continue
 				}
 				if err := s.store.UpsertItem(ctx, item); err != nil {
@@ -283,15 +292,53 @@ func (s *Scanner) processFiles(ctx context.Context, libraryID string, paths []st
 	return int(imported.Load())
 }
 
-func (s *Scanner) buildItem(ctx context.Context, libraryID, path string, logf func(string, ...any)) (*store.Item, error) {
+// buildItem 探测单个文件并构造条目。
+// needWrite 为 false 表示片源与 NFO 都没有变化，条目内容无需改写，只就地纠正了路径。
+func (s *Scanner) buildItem(ctx context.Context, libraryID, root, path string, logf func(string, ...any)) (*store.Item, bool, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, false, err
+	}
+	fingerprint := fileFingerprint(info)
+
+	// NFO 只是一个很小的文件，解析很便宜，但它决定条目 ID，
+	// 所以必须在探测前完成；解析失败时退回按路径派生 ID。
+	var (
+		nfo      *NFOData
+		nfoMtime int64
+	)
+	if nfoPath := FindNFO(path); nfoPath != "" {
+		if nfoInfo, statErr := os.Stat(nfoPath); statErr == nil {
+			nfoMtime = nfoInfo.ModTime().UnixNano()
+		}
+		parsed, parseErr := ParseNFO(nfoPath)
+		if parseErr != nil {
+			logf("NFO 解析失败 %s: %v", nfoPath, parseErr)
+		} else {
+			nfo = parsed
+		}
+	}
+
+	itemID := deriveItemID(nfo, libraryID, root, path)
+
+	// 指纹一致说明片源没换过、NFO 也没改过：
+	// 只纠正路径与库归属，跳过 ffprobe 与图片导入——大库重复扫描的耗时几乎都在这里。
+	storedFingerprint, storedNFOMtime, err := s.store.ItemFingerprint(ctx, itemID)
+	if err == nil && storedFingerprint == fingerprint && storedNFOMtime == nfoMtime {
+		if err := s.store.UpdateItemLocation(ctx, itemID, libraryID, path); err != nil {
+			return nil, false, err
+		}
+		return nil, false, nil
+	}
+
 	probe, err := s.prober.Probe(ctx, path)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	fileTitle, fileYear := parseFileName(filepath.Base(path))
 	item := &store.Item{
-		ID: store.StableID("item:" + path),
+		ID: itemID,
 		// Emby 语义里媒体库是条目的父节点，客户端浏览库内内容时传 ParentId=<库ID>。
 		LibraryID:      libraryID,
 		ParentID:       libraryID,
@@ -316,6 +363,8 @@ func (s *Scanner) buildItem(ctx context.Context, libraryID, path string, logf fu
 		ImageTags:      map[string]string{},
 		BackdropTags:   []string{},
 		ScreenshotTags: []string{},
+		Fingerprint:    fingerprint,
+		NFOMtime:       nfoMtime,
 	}
 	if fileYear != 0 {
 		year := fileYear
@@ -323,13 +372,8 @@ func (s *Scanner) buildItem(ctx context.Context, libraryID, path string, logf fu
 	}
 
 	// NFO 优先于文件名推断；解析失败时保留文件名结果。
-	if nfoPath := FindNFO(path); nfoPath != "" {
-		nfo, err := ParseNFO(nfoPath)
-		if err != nil {
-			logf("NFO 解析失败 %s: %v", nfoPath, err)
-		} else {
-			applyNFO(item, nfo)
-		}
+	if nfo != nil {
+		applyNFO(item, nfo)
 	}
 	if item.Name == "" {
 		item.Name = fileTitle
@@ -345,7 +389,42 @@ func (s *Scanner) buildItem(ctx context.Context, libraryID, path string, logf fu
 	// 本地图片按 Kodi 命名规则导入，演员头像取 .actors 目录。
 	s.importArtwork(item, path, logf)
 	logf("入库 %s", item.Name)
-	return item, nil
+	return item, true, nil
+}
+
+// deriveItemID 让条目 ID 尽量与文件名解耦：
+// 有 TMDB/IMDb 编号时用编号派生，改名、换目录都不会丢播放进度与收藏；
+// 没有 NFO 时才退回「媒体库 ID + 相对库根的路径」，这样整个库换盘符也保持不变。
+func deriveItemID(nfo *NFOData, libraryID, root, path string) string {
+	if nfo != nil {
+		if tmdb := strings.TrimSpace(nfo.UniqueIDs["tmdb"]); tmdb != "" {
+			return store.StableID("tmdb:" + tmdb)
+		}
+		if imdb := strings.TrimSpace(nfo.UniqueIDs["imdb"]); imdb != "" {
+			return store.StableID("imdb:" + imdb)
+		}
+	}
+	relative := path
+	if root != "" {
+		if rel, err := filepath.Rel(root, path); err == nil {
+			relative = rel
+		}
+	}
+	// 统一分隔符并转小写：Windows 路径大小写不敏感，同一文件不应派生出两个 ID。
+	return store.StableID("item:" + libraryID + ":" + strings.ToLower(filepath.ToSlash(relative)))
+}
+
+// fileFingerprint 用体积与修改时间组合指纹：两者都没变就认为文件内容没变。
+func fileFingerprint(info os.FileInfo) string {
+	return fmt.Sprintf("%d:%d", info.Size(), info.ModTime().UnixNano())
+}
+
+// removeCachedBif 回收条目的进度条缩略图缓存，缓存未启用时直接跳过。
+func (s *Scanner) removeCachedBif(itemID string) {
+	if s.bif == nil {
+		return
+	}
+	s.bif.RemoveItem(itemID)
 }
 
 // parseFileName 从文件名推断标题与年份，覆盖常见的 "标题 (2023)" 与 "标题.2023.1080p" 写法。

@@ -56,6 +56,27 @@ func (c *BifCache) legacyPath(itemID string) string {
 	return filepath.Join(c.dir, sanitizeID(itemID)+".bif")
 }
 
+// RemoveItem 删除某个条目的全部 BIF 缓存。
+// 缓存文件名带宽度与抽帧间隔，同一部片可能同时存在多个变体，统一按前缀清理；
+// 条目被删除或改名后如果不清，这些文件会永久留在缓存目录里。
+func (c *BifCache) RemoveItem(itemID string) {
+	prefix := sanitizeID(itemID)
+	entries, err := os.ReadDir(c.dir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if name != prefix+".bif" && !strings.HasPrefix(name, prefix+"-") {
+			continue
+		}
+		_ = os.Remove(filepath.Join(c.dir, name))
+	}
+}
+
 // cacheHit 判断缓存文件是否可复用：内容非空，且不比源文件旧（片源换过就要重抽）。
 func cacheHit(path, sourcePath string) bool {
 	info, err := os.Stat(path)

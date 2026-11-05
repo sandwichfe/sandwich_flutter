@@ -19,10 +19,15 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	}
 }
 
+// writeError 用 JSON 返回错误信息，客户端可以取出 message 直接展示给用户。
+// 早期版本返回纯文本，前端已同步改为兼容两种格式。
 func writeError(w http.ResponseWriter, status int, message string) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	_, _ = w.Write([]byte(message))
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"message": message,
+		"status":  status,
+	})
 }
 
 func writeNoContent(w http.ResponseWriter) {

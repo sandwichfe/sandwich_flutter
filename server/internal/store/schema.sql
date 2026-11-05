@@ -57,7 +57,11 @@ CREATE TABLE IF NOT EXISTS items (
     external_urls   TEXT NOT NULL DEFAULT '[]',
     image_tags      TEXT NOT NULL DEFAULT '{}',
     backdrop_tags   TEXT NOT NULL DEFAULT '[]',
-    screenshot_tags TEXT NOT NULL DEFAULT '[]'
+    screenshot_tags TEXT NOT NULL DEFAULT '[]',
+    -- fingerprint 是 "size:mtime" 的组合，重复扫描时和库里比对，相同就跳过 ffprobe
+    fingerprint     TEXT NOT NULL DEFAULT '',
+    -- nfo_mtime 单独记录 NFO 的修改时间：视频没动但 NFO 改了，也要重新入库
+    nfo_mtime       INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_items_library ON items(library_id);
