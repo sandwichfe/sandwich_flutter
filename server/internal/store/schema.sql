@@ -91,3 +91,24 @@ CREATE TABLE IF NOT EXISTS play_sessions (
     position_ticks INTEGER NOT NULL DEFAULT 0,
     updated_at     TEXT NOT NULL
 );
+
+-- 人物关联表：把 items.people 的 JSON 拆成可索引的行，供人物筛选与作品聚合。
+-- items.people 仍是展示用的权威数据，这里只是查询副本，入库时同步写入。
+CREATE TABLE IF NOT EXISTS item_people (
+    item_id    TEXT NOT NULL,
+    person_id  TEXT NOT NULL,
+    role       TEXT NOT NULL DEFAULT '',
+    type       TEXT NOT NULL DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_item_people_item ON item_people(item_id);
+CREATE INDEX IF NOT EXISTS idx_item_people_person ON item_people(person_id);
+
+-- 人物汇总表：/Persons 直接分页查它，不再读全表 people JSON 再在内存里排序。
+CREATE TABLE IF NOT EXISTS person_view (
+    person_id  TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    image_tag  TEXT NOT NULL DEFAULT '',
+    item_count INTEGER NOT NULL DEFAULT 0
+);

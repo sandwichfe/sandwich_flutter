@@ -25,7 +25,7 @@ type Store struct {
 // schemaVersion 对应 schema.sql 的表结构版本号。
 // 改表结构时递增：本项目不提供数据迁移，启动时发现版本不一致会拒绝运行，
 // 由使用者删掉数据库文件重新扫描（当前数据都可随时重建）。
-const schemaVersion = 2
+const schemaVersion = 3
 
 func Open(dbPath string) (*Store, error) {
 	// busy_timeout / synchronous / foreign_keys 都是「每连接」的 PRAGMA，

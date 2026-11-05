@@ -166,7 +166,9 @@ SQLite，单文件 `data/embyx.db`，WAL 模式，`SetMaxOpenConns(1)`。
 | `users` | 用户 | 账号、sha256 加盐密码哈希、是否管理员、头像 tag |
 | `tokens` | 登录令牌 | `token → user_id`，当前**没有过期机制** |
 | `libraries` | 媒体库 | 界面创建的库，一行可挂多个目录（`paths` JSON 列） |
-| `items` | 媒体条目 | 一部视频一行，29 个字段，复杂结构用 JSON 列 |
+| `items` | 媒体条目 | 一部视频一行，复杂结构用 JSON 列 |
+| `item_people` | 条目×人物 | `items.people` 拆出来的查询副本，供按人物筛选与聚合 |
+| `person_view` | 人物汇总 | 姓名、头像 tag、作品数，`/Persons` 直接分页查它 |
 | `user_data` | 用户×条目 | 收藏、已看、播放进度、播放次数、最后播放时间 |
 | `play_sessions` | 播放会话 | 目前只写不读，为后续"正在播放"看板预留 |
 
@@ -250,7 +252,7 @@ store.Open → 建表（IF NOT EXISTS）
       ↓
 store.EnsureAdmin → 账号不存在才创建
       ↓
-httpapi.New → 注册 32 条路由
+httpapi.New → 注册认证 / 媒体库 / 条目 / 分类浏览 / 图片 / 播放路由
       ↓
 ListenAndServe :8096
 ```
@@ -321,7 +323,9 @@ GET /emby/Users/{userId}/Items?ParentId=…&IncludeItemTypes=Movie&SortBy=…&Li
 
 `ParentId` 过滤写成 `parent_id = ? OR library_id = ?`，是为了兼容早期数据——老条目只有 `library_id`，`parent_id` 是空的。
 
-**人物是特例**：`IncludeItemTypes=Person` 时不查 items 表，而是遍历所有 `items.people` JSON 聚合去重。`Filters=IsFavorite` 会先查 `user_data` 里的收藏集合再过滤。
+**人物不再读 JSON**：`IncludeItemTypes=Person` 与 `/Persons` 都走 `person_view`（SQL 分页 + `name LIKE`），`PersonIds` 过滤走 `item_people` 的 `EXISTS` 子查询。`items.people` 的 JSON 只作为详情页展示与扫描写入的权威数据保留。`Filters=IsFavorite` 仍是先在 `user_data` 里取收藏集合再过滤。
+
+`GenreIds` / `TagIds` 用 `json_each` 匹配名称，`StudioIds` 匹配 JSON 里的 `Id`；`Filters` 另外支持 `IsPlayed` / `IsUnplayed` / `IsResumable`，`MinCommunityRating` 为可选浮点阈值。
 
 ### 4.5 详情
 
@@ -367,6 +371,31 @@ GET /Videos/{id}/index.bif?Width=320
    ↓ 都没有 → ffmpeg 每 10 秒抽一帧 → 打包成 BIF
 ```
 
+### 4.7 分类浏览与最新条目
+
+```
+GET /emby/Genres | /emby/Tags | /emby/Studios?ParentId=…
+   ↓ items, json_each(i.genres|i.tags|i.studios)
+   ↓ GROUP BY 值/名称 → {Id, Name, Type, ChildCount}
+      ↓ 前端筛选栏把 Id 原样回传到 GenreIds / TagIds / StudioIds
+
+GET /emby/Users/{id}/Items/Latest?Limit=&ParentId=
+   ↓ 复用 QueryItems（date_created DESC + id 兜底排序）
+   ↓ 直接返回数组（Emby 语义），Limit 默认 20 / 上限 100
+```
+
+流派与标签的 `Id` 就是名称本身（库里没有独立主键），工作室沿用 `StableID("studio:"+名称)`。
+
+### 4.8 扫描进度
+
+```
+GET /emby/Library/ScanStatus（管理员）
+   ↓ media.Scanner 内部 scanProgress（互斥锁保护）
+   ↓ running / libraryId / libraryName / scanned / total / currentPath
+   ↓ failures（buildItem 与 UpsertItem 的失败，最多 200 条）
+   ↓ startedAt / finishedAt（UTC RFC3339，未开始/未结束为空串）
+```
+
 ---
 
 ## 5. ID 规则
@@ -398,4 +427,4 @@ GET /Videos/{id}/index.bif?Width=320
 | token 过期 | 未实现 | `token_ttl` 配置项目前不生效 |
 | 改名清理 | 未实现 | 文件改名后旧条目残留在库里 |
 | 转码 | 未实现 | 只支持 DirectPlay，编码不被 mpv 支持时播不了 |
-| 人物表 | 从 JSON 聚合 | 条目多了以后 `/Persons` 会变慢，需要拆表 |
+| 人物表 | `item_people` + `person_view` | 人物页与按演员筛选都是索引查询 |

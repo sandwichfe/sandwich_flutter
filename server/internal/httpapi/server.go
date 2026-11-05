@@ -90,6 +90,8 @@ func (s *Server) routes() {
 	// 媒体库
 	s.mux.HandleFunc("GET /emby/Users/{userId}/Views", s.handleViews)
 	s.mux.HandleFunc("POST /emby/Library/Refresh", s.handleLibraryRefresh)
+	// 扫描进度查询（管理员）
+	s.mux.HandleFunc("GET /emby/Library/ScanStatus", s.handleScanStatus)
 	s.mux.HandleFunc("GET /emby/Library/VirtualFolders", s.handleListVirtualFolders)
 	s.mux.HandleFunc("POST /emby/Library/VirtualFolders", s.handleCreateVirtualFolder)
 	s.mux.HandleFunc("DELETE /emby/Library/VirtualFolders", s.handleDeleteVirtualFolder)
@@ -99,8 +101,15 @@ func (s *Server) routes() {
 	// 条目查询
 	s.mux.HandleFunc("GET /emby/Users/{userId}/Items", s.handleItems)
 	s.mux.HandleFunc("GET /emby/Users/{userId}/Items/Resume", s.handleResume)
+	// Latest 是字面量路由，优先级高于下面的 {itemId}，不会互相抢。
+	s.mux.HandleFunc("GET /emby/Users/{userId}/Items/Latest", s.handleLatestItems)
 	s.mux.HandleFunc("GET /emby/Users/{userId}/Items/{itemId}", s.handleItemDetail)
 	s.mux.HandleFunc("GET /emby/Persons", s.handlePersons)
+
+	// 分类浏览（流派 / 工作室 / 标签），供筛选栏取候选值
+	s.mux.HandleFunc("GET /emby/Genres", s.handleGenres)
+	s.mux.HandleFunc("GET /emby/Studios", s.handleStudios)
+	s.mux.HandleFunc("GET /emby/Tags", s.handleTags)
 	s.mux.HandleFunc("GET /emby/Items/{itemId}/Similar", s.handleSimilar)
 	s.mux.HandleFunc("POST /emby/Items/{itemId}", s.handleUpdateItem)
 	s.mux.HandleFunc("POST /emby/Items/{itemId}/Refresh", s.handleRefreshItem)

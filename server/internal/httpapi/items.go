@@ -23,6 +23,9 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 
 	filters := splitCSV(params.Get("Filters"))
 	favoriteOnly := contains(filters, "IsFavorite")
+	isPlayed := contains(filters, "IsPlayed")
+	isUnplayed := contains(filters, "IsUnplayed")
+	isResumable := contains(filters, "IsResumable")
 
 	// 人物不是 items 表的行，由演职人员字段聚合而来。
 	// 注意 Filters 必须一并传下去，否则"收藏 - 演员"会返回全部人物。
@@ -46,17 +49,24 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := store.ItemQuery{
-		UserID:       userID,
-		ParentID:     params.Get("ParentId"),
-		IncludeTypes: includeTypes,
-		SearchTerm:   searchTerm,
-		Years:        parseIntList(splitCSV(params.Get("Years"))),
-		PersonIDs:    splitCSV(params.Get("PersonIds")),
-		FavoriteOnly: favoriteOnly,
-		SortBy:       sortBy,
-		SortOrder:    sortOrder,
-		StartIndex:   startIndex,
-		Limit:        limit,
+		UserID:             userID,
+		ParentID:           params.Get("ParentId"),
+		IncludeTypes:       includeTypes,
+		SearchTerm:         searchTerm,
+		Years:              parseIntList(splitCSV(params.Get("Years"))),
+		PersonIDs:          splitCSV(params.Get("PersonIds")),
+		GenreIDs:           splitCSV(params.Get("GenreIds")),
+		TagIDs:             splitCSV(params.Get("TagIds")),
+		StudioIDs:          splitCSV(params.Get("StudioIds")),
+		FavoriteOnly:       favoriteOnly,
+		IsPlayed:           isPlayed,
+		IsUnplayed:         isUnplayed,
+		IsResumable:        isResumable,
+		MinCommunityRating: queryFloatPtr(r, "MinCommunityRating"),
+		SortBy:             sortBy,
+		SortOrder:          sortOrder,
+		StartIndex:         startIndex,
+		Limit:              limit,
 	}
 	// TODO: VideoTypes 暂未实现（需要按 MediaStreams 中的编码/分辨率过滤）。
 
@@ -66,6 +76,39 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, dto.QueryResult{Items: items, TotalRecordCount: total, StartIndex: startIndex})
+}
+
+// handleLatestItems 对应 GET /Users/{id}/Items/Latest。
+// Emby 语义是"最新入库"：按首次入库时间倒序，直接返回数组（不带 TotalRecordCount）。
+// 首页用它替代"每个媒体库各拉 10 条"。
+func (s *Server) handleLatestItems(w http.ResponseWriter, r *http.Request) {
+	params := r.URL.Query()
+	limit := atoi(params.Get("Limit"))
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	query := store.ItemQuery{
+		UserID:       r.PathValue("userId"),
+		ParentID:     params.Get("ParentId"),
+		IncludeTypes: splitCSV(params.Get("IncludeItemTypes")),
+		SortBy:       []string{"DateCreated"},
+		SortOrder:    "Descending",
+		Limit:        limit,
+	}
+	if len(query.IncludeTypes) == 0 {
+		query.IncludeTypes = []string{"Movie", "Series", "Video", "Episode"}
+	}
+
+	items, _, err := s.store.QueryItems(r.Context(), query)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "查询最新条目失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
 }
 
 func (s *Server) handleResume(w http.ResponseWriter, r *http.Request) {

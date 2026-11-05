@@ -41,6 +41,8 @@ type Scanner struct {
 	workers int
 	// scanMu 保证同一时刻只有一个扫描在跑，避免重复点击并发遍历同一目录。
 	scanMu sync.Mutex
+	// progress 是供 /Library/ScanStatus 读取的实时进度，不参与扫描逻辑。
+	progress scanProgress
 	// artLocks 按图片目标 ID 加锁：演员头像被多个条目共用，并发写同一文件会重复转码。
 	artMu    sync.Mutex
 	artLocks map[string]*sync.Mutex
@@ -79,6 +81,7 @@ func (s *Scanner) ScanAll(ctx context.Context, logf func(string, ...any)) (int, 
 		return 0, nil
 	}
 	defer s.scanMu.Unlock()
+	defer s.progress.finish()
 
 	libraries, err := s.store.Libraries(ctx)
 	if err != nil {
@@ -110,12 +113,14 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib store.Library, logf func(
 		return 0, nil
 	}
 	defer s.scanMu.Unlock()
+	defer s.progress.finish()
 	return s.scanLibrary(ctx, lib, logf)
 }
 
 // beginScan 抢扫描令牌；已有扫描在跑时返回 false。
 func (s *Scanner) beginScan(logf func(string, ...any)) bool {
 	if s.scanMu.TryLock() {
+		s.progress.begin()
 		return true
 	}
 	logf("已有扫描正在进行中，跳过本次扫描")
@@ -137,8 +142,11 @@ func (s *Scanner) scanLibrary(ctx context.Context, lib store.Library, logf func(
 			continue
 		}
 		logf("扫描媒体库 %s (%s)", lib.Name, root)
+		s.progress.setLibrary(lib.ID, lib.Name)
 
 		paths, err := collectVideoFiles(ctx, root)
+		// 先登记本目录的待处理数，进度条才能从一开始就有分母。
+		s.progress.addFiles(len(paths))
 		if err != nil && !errors.Is(err, context.Canceled) {
 			return imported, err
 		}
@@ -262,21 +270,25 @@ func (s *Scanner) processFiles(ctx context.Context, libraryID, root string, path
 				if buildErr != nil {
 					if ctx.Err() == nil {
 						logf("跳过 %s: %v", path, buildErr)
+						s.progress.addFailure(path, buildErr)
 					}
 					continue
 				}
 				if !needWrite {
 					// 指纹命中：片源与 NFO 都没变，路径已在 buildItem 里纠正，无需再写库。
 					imported.Add(1)
+					s.progress.markScanned(path)
 					continue
 				}
 				if err := s.store.UpsertItem(ctx, item); err != nil {
 					if ctx.Err() == nil {
 						logf("入库失败 %s: %v", path, err)
+						s.progress.addFailure(path, err)
 					}
 					continue
 				}
 				imported.Add(1)
+				s.progress.markScanned(path)
 			}
 		}()
 	}

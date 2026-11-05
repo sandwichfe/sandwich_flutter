@@ -64,6 +64,8 @@ type UserData struct {
 }
 
 // ItemQuery 对应客户端 /Users/{id}/Items 的一批查询参数。
+// GenreIDs / TagIDs 里放的是名称，StudioIDs 放的是 studio 的稳定 ID：
+// 流派与标签在库里本来就是字符串，没有独立主键，用名称当下标最省事。
 type ItemQuery struct {
 	UserID string
 
@@ -74,8 +76,16 @@ type ItemQuery struct {
 	SearchTerm   string
 	Years        []int
 	PersonIDs    []string
+	GenreIDs     []string
+	TagIDs       []string
+	StudioIDs    []string
 	FavoriteOnly bool
 	OnlyResume   bool
+	IsPlayed     bool
+	IsUnplayed   bool
+	IsResumable  bool
+	// MinCommunityRating 为 nil 表示不按评分过滤。
+	MinCommunityRating *float64
 
 	SortBy     []string
 	SortOrder  string
@@ -128,15 +138,40 @@ func (s *Store) QueryItems(ctx context.Context, q ItemQuery) ([]dto.BaseItemDto,
 		where = append(where, "i.production_year IN ("+placeholders(len(q.Years))+")")
 		args = append(args, toAny(q.Years)...)
 	}
-	// 人物关联暂时用 JSON 子串匹配，量级上去后再拆 item_people 关联表。
+	// 人物走 item_people 关联表；同一个人的多条关联（导演 + 编剧）由 EXISTS 天然去重。
 	for _, personID := range q.PersonIDs {
-		where = append(where, `i.people LIKE ?`)
-		args = append(args, `%"Id":"`+personID+`"%`)
+		where = append(where, "EXISTS (SELECT 1 FROM item_people ip WHERE ip.item_id = i.id AND ip.person_id = ?)")
+		args = append(args, personID)
+	}
+	if len(q.GenreIDs) > 0 {
+		where = append(where, "EXISTS (SELECT 1 FROM json_each(i.genres) je WHERE je.value IN ("+placeholders(len(q.GenreIDs))+"))")
+		args = append(args, toAny(q.GenreIDs)...)
+	}
+	if len(q.TagIDs) > 0 {
+		where = append(where, "EXISTS (SELECT 1 FROM json_each(i.tags) je WHERE je.value IN ("+placeholders(len(q.TagIDs))+"))")
+		args = append(args, toAny(q.TagIDs)...)
+	}
+	if len(q.StudioIDs) > 0 {
+		where = append(where, "EXISTS (SELECT 1 FROM json_each(i.studios) je WHERE json_extract(je.value, '$.Id') IN ("+placeholders(len(q.StudioIDs))+"))")
+		args = append(args, toAny(q.StudioIDs)...)
+	}
+	if q.MinCommunityRating != nil {
+		where = append(where, "COALESCE(i.community_rating, 0) >= ?")
+		args = append(args, *q.MinCommunityRating)
 	}
 	if q.FavoriteOnly {
 		where = append(where, "COALESCE(ud.is_favorite, 0) = 1")
 	}
 	if q.OnlyResume {
+		where = append(where, "COALESCE(ud.playback_position_ticks, 0) > 0 AND COALESCE(ud.played, 0) = 0")
+	}
+	if q.IsPlayed {
+		where = append(where, "COALESCE(ud.played, 0) = 1")
+	}
+	if q.IsUnplayed {
+		where = append(where, "COALESCE(ud.played, 0) = 0")
+	}
+	if q.IsResumable {
 		where = append(where, "COALESCE(ud.playback_position_ticks, 0) > 0 AND COALESCE(ud.played, 0) = 0")
 	}
 
@@ -351,7 +386,16 @@ func (s *Store) UpsertItem(ctx context.Context, item *Item) error {
 	if item.ProviderIDs == nil {
 		item.ProviderIDs = map[string]string{}
 	}
-	_, err := s.db.ExecContext(ctx, upsertItemSQL,
+
+	// 条目与人物关联必须同进同出：中途失败时留下孤立的 item_people 行，
+	// 人物列表的条目数就会和实际不一致。
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, upsertItemSQL,
 		item.ID, item.LibraryID, item.ParentID, item.Type, item.Name, item.SortName, item.Overview,
 		item.ProductionYear, item.PremiereDate, item.DateCreated, item.CommunityRating, item.OfficialRating,
 		item.RunTimeTicks, item.Width, item.Height, item.Path, item.Container, item.Size, item.Bitrate,
@@ -360,11 +404,15 @@ func (s *Store) UpsertItem(ctx context.Context, item *Item) error {
 		marshalJSON(item.ProviderIDs), marshalJSON(item.ExternalURLs), marshalJSON(item.ImageTags),
 		marshalJSON(item.BackdropTags), marshalJSON(item.ScreenshotTags),
 		item.Fingerprint, item.NFOMtime,
-	)
-	if err != nil {
+	); err != nil {
 		return fmt.Errorf("写入条目失败: %w", err)
 	}
-	return nil
+
+	// 人物拆表：people JSON 是权威展示数据，item_people/person_view 是查询索引。
+	if err := syncItemPeople(ctx, tx, item.ID, item.People); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // UpdateItemMetadata 只覆盖编辑弹窗会修改的字段，其余保持原值。

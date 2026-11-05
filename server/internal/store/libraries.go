@@ -181,6 +181,10 @@ func (s *Store) DeleteLibrary(ctx context.Context, id string) ([]string, error) 
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// 先清人物关联再删条目：关系表没有外键，顺序反了就会留下孤立行。
+	if err := deleteItemPeople(ctx, tx, itemIDs); err != nil {
+		return nil, err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM items WHERE library_id = ? OR parent_id = ?`, id, id); err != nil {
 		return nil, fmt.Errorf("删除库内条目失败: %w", err)
 	}
@@ -230,6 +234,10 @@ func (s *Store) DeleteItems(ctx context.Context, ids []string) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	if err := deleteItemPeople(ctx, tx, ids); err != nil {
+		return err
+	}
 
 	for _, id := range ids {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM user_data WHERE item_id = ?`, id); err != nil {

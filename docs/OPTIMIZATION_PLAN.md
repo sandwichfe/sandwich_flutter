@@ -6,7 +6,7 @@
 
 - **不写数据迁移**：当前库里没有需要保留的数据。表结构变更直接改 `server/internal/store/schema.sql`，改完删除 `data/embyx.db` 重新扫描即可。
 - 后端用一个 `schemaVersion` 常量做结构版本守卫：数据库版本与代码不一致时直接拒绝启动并提示删库，避免半旧半新的表结构跑出诡异结果。
-- 当前 `schemaVersion = 2`（S1 为 `items` 增加了 `fingerprint` / `nfo_mtime`）。**每次改表后递增版本号**。
+- 当前 `schemaVersion = 3`（S1 增加 `fingerprint` / `nfo_mtime`，S3 增加 `item_people` / `person_view`）。**每次改表后递增版本号**。
 - **不做电视剧**（Series / Season / Episode），也不做转码 / HLS。
 
 > 已有的 `server/data/embyx.db` 是旧的 v0 结构，S0 加入版本守卫后会拒绝启动。
@@ -35,7 +35,7 @@
 | S0 | 地基 | 已完成 |
 | S1 | 条目身份与扫描增量 | 已完成 |
 | S2 | 性能热点 | 已完成 |
-| S3 | 查询能力与功能接口 | 未开始 |
+| S3 | 查询能力与功能接口 | 已完成 |
 | S4 | 运维与测试 | 未开始 |
 | S5 | 前端 | 未开始 |
 
@@ -180,78 +180,92 @@ file:<path>?_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=forei
 
 ---
 
-## S3 查询能力与功能接口
+## S3 查询能力与功能接口（已完成）
 
 ### 3.1 ~~FTS5 搜索~~（已取消，见实测结论）
 
-### 3.2 人物拆表
+### 3.2 人物拆表（已完成）
 
-```sql
-CREATE TABLE item_people(
-    item_id TEXT NOT NULL,
-    person_id TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT '',
-    type TEXT NOT NULL DEFAULT '',
-    sort_order INTEGER NOT NULL DEFAULT 0
-);
-CREATE INDEX idx_item_people_item   ON item_people(item_id);
-CREATE INDEX idx_item_people_person ON item_people(person_id);
+新增 `item_people` / `person_view` 两张表（`schemaVersion` 升到 3）。`items.people` 的 JSON 保留为展示用的权威数据，新表只是查询副本：
 
-CREATE TABLE person_view(
-    person_id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    image_tag TEXT NOT NULL DEFAULT '',
-    item_count INTEGER NOT NULL DEFAULT 0
-);
-```
-
-替换点：
-
-| 现状 | 新实现 |
+| 落点 | 实现 |
 |---|---|
-| `/Persons` 全表读 `people` JSON + Go 内存排序分页（`persons.go:43-98`） | SQL 分页查 `person_view` |
-| `PersonByID` 用 `LIKE '%"Id":"x"%'`（`persons.go:101`） | 主键查 |
-| `PersonIds` 过滤用 JSON 子串（`items.go:125-129`） | `JOIN item_people` |
+| 写入口 | `UpsertItem` 改为「条目 + 人物关联」同一事务，避免半写 |
+| 关联行 | 同一人物可因 role/type 不同产生多行（导演 + 编剧），按 `person_id+type+role` 去重 |
+| 作品数 | `person_view.item_count` 用 `COUNT(DISTINCT item_id)` 现算，不维护加减计数 |
+| 头像 | `person_view.image_tag` 取 `People[].PrimaryImageTag`，空值不覆盖已有值 |
+| 删除 | `DeleteItems` / `DeleteLibrary` 先删关联再删条目，作品数归零的人物一并回收 |
+| `/Persons` | `person_view` 上 SQL 分页 + `name LIKE`，不再读全表 JSON、不再 Go 侧排序 |
+| `PersonByID` | 主键查询，`ChildCount` 返回作品数 |
+| `PersonIds` 过滤 | `EXISTS (SELECT 1 FROM item_people …)`，多个条件是 AND |
 
-写入口：扫描入库时同步写 `item_people` 与 `person_view`。
+2000 部片子 / 700 位演职员的基准（`BenchmarkPersonsFromView`）：单页查询 **0.40ms**（旧实现要读 2000 行 JSON 再内存去重排序）。
 
-验证：造 2000 条数据，`/Persons` < 100ms；按演员筛作品结果与原实现一致。
-
-### 3.3 流派 / 工作室 / 标签浏览与过滤
+### 3.3 流派 / 工作室 / 标签（已完成）
 
 JSON1 可用，聚合直接用 `json_each`，不拆表：
 
 ```sql
-SELECT je.value, COUNT(*) FROM items, json_each(items.genres) je GROUP BY je.value;
+SELECT je.value, COUNT(*) FROM items i, json_each(i.genres) je GROUP BY je.value;
 ```
 
-新增路由 + `ItemQuery` 参数：
-
-| 路由 | 说明 |
+| 路由 | 输出 |
 |---|---|
-| `GET /emby/Genres` | 名称 + 条目数 |
-| `GET /emby/Studios` | 同上 |
-| `GET /emby/Tags` | 同上 |
+| `GET /emby/Genres` | `{Id, Name, Type:"Genre", ChildCount}`，`Id` 就是名称 |
+| `GET /emby/Tags` | 同上，`Type:"Tag"` |
+| `GET /emby/Studios` | 按名称分组，`Id` 取条目里已有的 `StableID("studio:…")` |
+| 公共参数 | `ParentId` 限定到某个媒体库 |
 
-`ItemQuery` 补 `GenreIds`、`TagIds`、`StudioIds`、`MinCommunityRating`、`IsPlayed`、`IsUnplayed`、`IsResumable`。
+`ItemQuery` 新增：
 
-### 3.4 Items/Latest
+| 参数 | SQL |
+|---|---|
+| `GenreIds` / `TagIds` | `EXISTS (SELECT 1 FROM json_each(i.genres|i.tags) je WHERE je.value IN (…))` |
+| `StudioIds` | `json_extract(je.value,'$.Id') IN (…)` |
+| `MinCommunityRating` | `COALESCE(i.community_rating,0) >= ?` |
+| `Filters=IsPlayed/IsUnplayed/IsResumable` | 对应的 `user_data` 条件（`IsFavorite` 保持不变） |
 
-`GET /emby/Users/{id}/Items/Latest?Limit=&ParentId=` → `ORDER BY date_created DESC` + UserData 关联。前端首页改用它替代「每库拉 10 条」。
+流派与标签以**名称**为标识：库里本来就是字符串，没有独立主键。前端把浏览接口返回的 `Id` 原样回传即可；同一类目内多值为 OR，类目之间为 AND。
 
-### 3.5 扫描进度接口
+### 3.4 Items/Latest（已完成）
+
+`GET /emby/Users/{id}/Items/Latest?Limit=&ParentId=&IncludeItemTypes=`
+
+- 复用 `QueryItems`（`DateCreated DESC` + `i.id` 兜底稳定排序），`Limit` 默认 20、上限 100
+- 返回**数组**（Emby 语义，不带 `TotalRecordCount`），`IncludeItemTypes` 缺省为 Movie/Series/Video/Episode
+
+前端首页替换留在 S5.5（请求层会一起重做，避免同一块改两次），接口已可用。
+
+### 3.5 扫描进度接口（已完成）
 
 `GET /emby/Library/ScanStatus`（管理员）：
 
 ```json
-{ "running": true, "libraryId": "...", "scanned": 120, "total": 500,
+{ "running": true, "libraryId": "...", "libraryName": "电影", "scanned": 120, "total": 500,
   "currentPath": "...", "failures": [{"path": "...", "reason": "..."}],
-  "startedAt": "...", "finishedAt": null }
+  "startedAt": "...", "finishedAt": "" }
 ```
 
-scanner 内部维护原子计数 + 互斥的 failures 列表；`scan.go:258-262` 的「只 logf」改为同时进 failures。
+| 项 | 实现 |
+|---|---|
+| 计数 | `media/scan_status.go` 一把互斥锁保护状态，worker 每处理完一个文件 `scanned++` |
+| total | 目录遍历完先登记文件数，进度条一开始就有分母 |
+| 多库 | `ScanAll` 累计计数，`libraryName` / `currentPath` 指向当前库与当前文件 |
+| 失败 | `buildItem` / `UpsertItem` 的失败在 logf 之外同时进 `failures`，最多保留 200 条 |
+| 结束 | `beginScan` 的 defer 写 `finishedAt`，`running` 转 false；未跑过扫描时全为默认值 |
 
-前端 `library_admin.dart:286-332` 的「条目数稳定轮猜测」删除，换此接口。
+前端 `library_admin.dart` 的「条目数稳定轮猜测」仍留在 S5.3 一起换。
+
+### S3 落地结果
+
+| 项 | 结果 |
+|---|---|
+| `go build ./...` / `go vet ./...` | OK |
+| `go test ./...` | ok store / media / httpapi |
+| 新增测试 | `store/persons_test.go`（人物分页/搜索/收藏、关联清理、分类聚合、新过滤条件）、`media/scan_status_test.go`（快照隔离与结束态）、`httpapi/s3_test.go`（Genres/Studios/Tags、GenreIds + Filters、Items/Latest、ScanStatus、匿名 401） |
+| 基准 | `BenchmarkPersonsFromView`：0.40ms/页（2000 条目） |
+
+改表后必须删 `data/embyx.db` 重扫，版本守卫会拦下旧库。
 
 ---
 
@@ -270,12 +284,15 @@ scanner 内部维护原子计数 + 互斥的 failures 列表；`scan.go:258-262`
 
 | 文件 | 测点 | 状态 |
 |---|---|---|
-| `store/items_test.go` | 内存 SQLite，测 ItemQuery 参数组合、排序白名单、分页边界 | 待补 |
+| `store/items_test.go` | 内存 SQLite，测 ItemQuery 参数组合、排序白名单、分页边界 | 待补（过滤条件已被 `persons_test.go` 覆盖一部分） |
 | `store/store_test.go` | DSN PRAGMA 生效、版本守卫、并发读 | 已完成 |
+| `store/persons_test.go` | 人物分页/搜索/收藏、关联清理、分类聚合、新增过滤条件 | 已完成（S3） |
 | `media/scan_test.go` | ID 派生、指纹命中/变化 | 已完成 |
 | `media/imagecache_test.go` | 缓存命中、标签随源图变化、缩放数值 | 已完成 |
+| `media/scan_status_test.go` | 扫描进度快照与结束态 | 已完成（S3） |
 | `media/bif_test.go` | 打包→解析回环、跨参数复用、陈旧判定 | 待补 |
 | `media/probe_test.go` | 用 `testdata/*.json` 样本测流信息映射（不依赖真 ffprobe） | 待补 |
+| `httpapi/s3_test.go` | Genres/Studios/Tags、GenreIds + Filters、Items/Latest、ScanStatus 路由 | 已完成（S3） |
 | `httpapi/auth_test.go` | httptest 跑鉴权矩阵：未登录 / 普通用户 / 管理员 × 各路由 | 待补 |
 
 ### 4.3 日志轮转

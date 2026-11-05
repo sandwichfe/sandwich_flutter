@@ -79,3 +79,16 @@ func parseIntList(values []string) []int {
 func queryBool(r *http.Request, key string) bool {
 	return strings.EqualFold(r.URL.Query().Get(key), "true")
 }
+
+// queryFloatPtr 读取可选的浮点参数；缺省或非法时返回 nil，表示不按该条件过滤。
+func queryFloatPtr(r *http.Request, key string) *float64 {
+	value := strings.TrimSpace(r.URL.Query().Get(key))
+	if value == "" {
+		return nil
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return nil
+	}
+	return &parsed
+}
