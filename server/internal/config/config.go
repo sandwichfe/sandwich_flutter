@@ -58,6 +58,9 @@ type fileConfig struct {
 	} `yaml:"cache"`
 }
 
+// DefaultAdminPassword 是内置的初始管理员密码，仅用于提示"还没改密码"。
+const DefaultAdminPassword = "admin"
+
 func Default() Config {
 	return Config{
 		Addr:               ":8096",
@@ -65,7 +68,7 @@ func Default() Config {
 		FFprobePath:        "ffprobe",
 		FFmpegPath:         "ffmpeg",
 		AdminUser:          "admin",
-		AdminPassword:      "admin",
+		AdminPassword:      DefaultAdminPassword,
 		TokenTTL:           30 * 24 * time.Hour,
 		CacheImageLimitMB:  2048,
 		CacheBifLimitMB:    1024,

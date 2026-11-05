@@ -42,8 +42,9 @@ func newTestEnv(t *testing.T) *testEnv {
 
 	images := media.NewImageStore(filepath.Join(cfg.DataDir, "images"))
 	bif := media.NewBifCache(filepath.Join(cfg.DataDir, "cache", "bif"), cfg.FFmpegPath)
-	scanner := media.NewScanner(st, media.NewProber(cfg.FFprobePath), images, bif)
-	server := New(cfg, st, images, bif, scanner, media.NewThumbnailJobManager(bif))
+	prober := media.NewProber(cfg.FFprobePath)
+	scanner := media.NewScanner(st, prober, images, bif)
+	server := New(cfg, st, images, bif, scanner, media.NewThumbnailJobManager(bif), prober)
 
 	recorder := doRequest(server, http.MethodPost, "/emby/Users/AuthenticateByName", "",
 		`{"Username":"admin","Pw":"admin"}`)

@@ -197,6 +197,9 @@ func (j *CacheJanitor) sweepBif(ctx context.Context, owners map[string]string, r
 			return
 		}
 		if entry.IsDir() {
+			// Generate 用 bif-* 临时目录放抽帧结果，靠 defer 删除；
+			// 进程被强杀时会留下一个，这里按 mtime 兜底清理。
+			j.sweepTempBifDir(entry, result)
 			continue
 		}
 		info, err := entry.Info()
@@ -245,6 +248,24 @@ func (j *CacheJanitor) sweepBif(ctx context.Context, owners map[string]string, r
 			result.RemovedFiles++
 			result.FreedBytes += entry.size
 		}
+	}
+}
+
+// staleBifTempAge 是判定残留临时目录的时限：正常抽帧远到不了这个时长，
+// 超过即认为对应进程已经异常退出。
+const staleBifTempAge = 6 * time.Hour
+
+// sweepTempBifDir 删除超时的 bif-* 临时目录；正在抽帧的目录 mtime 很新，不会被误删。
+func (j *CacheJanitor) sweepTempBifDir(entry os.DirEntry, result *CacheSweepResult) {
+	if !strings.HasPrefix(entry.Name(), "bif-") {
+		return
+	}
+	info, err := entry.Info()
+	if err != nil || time.Since(info.ModTime()) < staleBifTempAge {
+		return
+	}
+	if os.RemoveAll(filepath.Join(j.bifDir, entry.Name())) == nil {
+		result.RemovedDirs++
 	}
 }
 

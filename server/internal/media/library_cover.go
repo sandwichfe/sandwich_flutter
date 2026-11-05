@@ -228,15 +228,22 @@ func coverLayout(count int) []image.Rectangle {
 }
 
 // applyVignette 把画面四角压暗、中心保持原样，用于单图铺满的场景。
+// 衰减只用到归一化距离的平方，因此完全不需要 sqrt：
+// 1280×720 的画布上这一项原本要做 92 万次开方。
 func applyVignette(canvas *image.RGBA) {
 	bounds := canvas.Bounds()
 	centerX := float64(bounds.Dx()) / 2
 	centerY := float64(bounds.Dy()) / 2
-	maxDistance := math.Hypot(centerX, centerY)
+	maxDistanceSquared := centerX*centerX + centerY*centerY
+	if maxDistanceSquared == 0 {
+		return
+	}
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		deltaY := float64(y) - centerY
 		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			distance := math.Hypot(float64(x)-centerX, float64(y)-centerY) / maxDistance
-			factor := 1 - 0.35*distance*distance
+			deltaX := float64(x) - centerX
+			distanceSquared := (deltaX*deltaX + deltaY*deltaY) / maxDistanceSquared
+			factor := 1 - 0.35*distanceSquared
 			offset := canvas.PixOffset(x, y)
 			for channel := 0; channel < 3; channel++ {
 				canvas.Pix[offset+channel] = uint8(float64(canvas.Pix[offset+channel]) * factor)

@@ -30,24 +30,56 @@ type BifCache struct {
 	ffmpegPath string
 
 	// 同一条目只允许一个抽帧进程，预生成任务与播放请求不会重复消耗 ffmpeg。
+	itemLocks keyedMutex
 	mu        sync.Mutex
-	itemLocks map[string]*sync.Mutex
 	// inflight 记录正在后台生成的条目，播放侧重复请求不会反复排任务。
 	inflight map[string]bool
 	// sem 限制同时运行的 ffmpeg 数量，批量预生成时不会把机器跑满。
 	sem chan struct{}
 	// baseCtx 是后台生成任务的父 context，进程退出时取消。
 	baseCtx context.Context
+
+	// listing 是缓存目录文件列表的短 TTL 快照：播放侧每次请求都要查
+	// "有没有其它参数的现成变体"，几千个文件的目录逐次 ReadDir 太浪费。
+	listMu    sync.Mutex
+	listing   []os.DirEntry
+	listingAt time.Time
 }
 
 func NewBifCache(dir, ffmpegPath string) *BifCache {
 	return &BifCache{
 		dir:        dir,
 		ffmpegPath: ffmpegPath,
-		itemLocks:  make(map[string]*sync.Mutex),
 		inflight:   make(map[string]bool),
 		sem:        make(chan struct{}, 2),
 	}
+}
+
+// bifListingTTL 是目录快照的有效期：写入/删除时会主动失效，
+// 这里的 TTL 只用于兜住"外部进程改了缓存目录"的情况。
+const bifListingTTL = 30 * time.Second
+
+// dirEntries 返回缓存目录的文件列表，命中快照时不落盘。
+func (c *BifCache) dirEntries() []os.DirEntry {
+	c.listMu.Lock()
+	defer c.listMu.Unlock()
+	if !c.listingAt.IsZero() && time.Since(c.listingAt) < bifListingTTL {
+		return c.listing
+	}
+	entries, err := os.ReadDir(c.dir)
+	if err != nil {
+		// 目录不可用时不要缓存失败结果，下次照常重试。
+		return nil
+	}
+	c.listing, c.listingAt = entries, time.Now()
+	return entries
+}
+
+// invalidateListing 在写入或删除缓存后丢弃目录快照。
+func (c *BifCache) invalidateListing() {
+	c.listMu.Lock()
+	c.listing, c.listingAt = nil, time.Time{}
+	c.listMu.Unlock()
 }
 
 // SetBaseContext 设置后台生成任务的父 context。
@@ -88,6 +120,40 @@ func (c *BifCache) RemoveItem(itemID string) {
 		}
 		_ = os.Remove(filepath.Join(c.dir, name))
 	}
+	c.invalidateListing()
+}
+
+// RemoveItems 批量删除多个条目的 BIF 缓存。
+// 删库时条目成千上万，逐条调用 RemoveItem 会把同一个目录枚举上千次，
+// 这里只列一次目录，按缓存文件名反推归属后统一删除。
+func (c *BifCache) RemoveItems(itemIDs []string) {
+	if len(itemIDs) == 0 {
+		return
+	}
+	prefixes := make(map[string]bool, len(itemIDs))
+	for _, itemID := range itemIDs {
+		prefixes[sanitizeID(itemID)] = true
+	}
+	entries, err := os.ReadDir(c.dir)
+	if err != nil {
+		return
+	}
+	removed := false
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		// 命名只有 "<id>.bif" 与 "<id>-w<宽>-i<间隔>.bif"，ID 是十六进制、不含连字符。
+		if !prefixes[bifOwnerID(entry.Name())] {
+			continue
+		}
+		if os.Remove(filepath.Join(c.dir, entry.Name())) == nil {
+			removed = true
+		}
+	}
+	if removed {
+		c.invalidateListing()
+	}
 }
 
 // freshFile 判断文件是否可复用：内容非空，且不比源文件旧（片源换过就要重做）。
@@ -123,6 +189,7 @@ func (c *BifCache) reuse(itemID, sourcePath, target string) string {
 		return ""
 	}
 	if err := os.Rename(legacy, target); err == nil {
+		c.invalidateListing()
 		return target
 	}
 	return legacy
@@ -130,8 +197,8 @@ func (c *BifCache) reuse(itemID, sourcePath, target string) string {
 
 // anyVariant 返回同一条目其它参数的可用缓存，供播放侧避免为宽度差异重新解码整部影片。
 func (c *BifCache) anyVariant(itemID, sourcePath string) string {
-	entries, err := os.ReadDir(c.dir)
-	if err != nil {
+	entries := c.dirEntries()
+	if len(entries) == 0 {
 		return ""
 	}
 	prefix := sanitizeID(itemID)
@@ -216,7 +283,7 @@ func (c *BifCache) EnsureAsync(itemID, sourcePath string, intervalMs uint32, wid
 	baseCtx := c.baseCtx
 	c.mu.Unlock()
 
-	go func() {
+	RunSafe("后台生成 BIF", func() {
 		defer func() {
 			c.mu.Lock()
 			delete(c.inflight, key)
@@ -228,7 +295,7 @@ func (c *BifCache) EnsureAsync(itemID, sourcePath string, intervalMs uint32, wid
 		if _, err := c.Ensure(baseCtx, itemID, sourcePath, intervalMs, width); err != nil {
 			log.Printf("后台生成 BIF 失败 item=%s: %v", itemID, err)
 		}
-	}()
+	})
 	return "", false
 }
 
@@ -242,7 +309,14 @@ type BifOptions struct {
 	ReuseAnyVariant bool
 	// OnProgress 以已解码的媒体时间（毫秒）回调，调用方据此换算条目内进度。
 	OnProgress func(elapsedMs int64)
+	// Timeout 是单次抽帧的超时上限，0 表示用 defaultBifTimeout。
+	// 抽帧要解码整部影片，播放侧与整库预生成的合理上限完全不同，
+	// 所以由调用方显式指定，不能从 Force 之类的字段推断。
+	Timeout time.Duration
 }
+
+// defaultBifTimeout 是播放侧现场生成的上限：超过这个时间客户端早就不等了。
+const defaultBifTimeout = 10 * time.Minute
 
 // Generate 生成 BIF 缓存，返回文件路径、帧数以及是否复用了已有文件（未执行抽帧）。
 func (c *BifCache) Generate(ctx context.Context, itemID, sourcePath string, opts BifOptions) (string, int, bool, error) {
@@ -308,10 +382,10 @@ func (c *BifCache) Generate(ctx context.Context, itemID, sourcePath string, opts
 	defer os.RemoveAll(tempDir)
 
 	// 抽帧需要解码整部影片：预生成遇到 4K/网络盘长片往往超过 10 分钟，
-	// 所以只在播放侧保留短超时，预生成放宽到 60 分钟。
-	timeout := 10 * time.Minute
-	if force {
-		timeout = 60 * time.Minute
+	// 所以播放侧用短超时（默认 10 分钟），整库预生成由调用方给到 60 分钟。
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = defaultBifTimeout
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -353,6 +427,7 @@ func (c *BifCache) Generate(ctx context.Context, itemID, sourcePath string, opts
 	if err := writeFileAtomic(target, packed); err != nil {
 		return "", 0, false, err
 	}
+	c.invalidateListing()
 	return target, len(frames), false, nil
 }
 
@@ -431,16 +506,7 @@ func countBIFrames(path string) int {
 
 // lockItem 为单个条目加进程内互斥锁，避免并发请求重复抽同一个视频。
 func (c *BifCache) lockItem(itemID string) func() {
-	c.mu.Lock()
-	lock, ok := c.itemLocks[itemID]
-	if !ok {
-		lock = &sync.Mutex{}
-		c.itemLocks[itemID] = lock
-	}
-	c.mu.Unlock()
-
-	lock.Lock()
-	return lock.Unlock
+	return c.itemLocks.Lock(itemID)
 }
 
 // writeFileAtomic 先写临时文件再改名，避免并发读取方拿到写了一半的文件
@@ -685,6 +751,7 @@ func (c *BifCache) importLocalBIF(itemID string, width int, local string) (strin
 	if err := writeFileAtomic(target, PackBIF(frames, interval)); err != nil {
 		return "", 0, err
 	}
+	c.invalidateListing()
 	return target, len(frames), nil
 }
 

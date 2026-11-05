@@ -51,18 +51,16 @@ func (s *Server) handlePlaybackInfo(w http.ResponseWriter, r *http.Request) {
 // 这是 mpv 能正常 seek 的前提。
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	itemID := r.PathValue("itemId")
-	userID := ""
-	if user := currentUser(r); user != nil {
-		userID = user.ID
-	}
 
-	item, err := s.store.GetItem(r.Context(), userID, itemID)
-	if err != nil || item.Path == "" {
+	// 只取路径：拖动进度条会产生密集的 Range 请求，
+	// 没必要每次都扫 32 列并反序列化 11 个 JSON 字段。
+	source, err := s.store.ItemSource(r.Context(), itemID)
+	if err != nil || source.Path == "" {
 		writeError(w, http.StatusNotFound, "媒体文件不存在")
 		return
 	}
 
-	file, err := os.Open(item.Path)
+	file, err := os.Open(source.Path)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "媒体文件不可读")
 		return
@@ -75,29 +73,24 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if mime, ok := streamMimeTypes[strings.ToLower(filepath.Ext(item.Path))]; ok {
+	if mime, ok := streamMimeTypes[strings.ToLower(filepath.Ext(source.Path))]; ok {
 		w.Header().Set("Content-Type", mime)
 	}
 	w.Header().Set("Accept-Ranges", "bytes")
 
-	http.ServeContent(w, r, filepath.Base(item.Path), stat.ModTime(), file)
+	http.ServeContent(w, r, filepath.Base(source.Path), stat.ModTime(), file)
 }
 
 func (s *Server) handleBif(w http.ResponseWriter, r *http.Request) {
 	itemID := r.PathValue("itemId")
-	userID := ""
-	if user := currentUser(r); user != nil {
-		userID = user.ID
-	}
-
-	item, err := s.store.GetItem(r.Context(), userID, itemID)
-	if err != nil || item.Path == "" {
+	source, err := s.store.ItemSource(r.Context(), itemID)
+	if err != nil || source.Path == "" {
 		writeError(w, http.StatusNotFound, "条目不存在")
 		return
 	}
 
 	width := atoi(r.URL.Query().Get("Width"))
-	bifPath, ready := s.bif.EnsureAsync(itemID, item.Path, 10000, width)
+	bifPath, ready := s.bif.EnsureAsync(itemID, source.Path, bifIntervalParam(r), width)
 	if !ready {
 		// 首次播放不阻塞：后台抽帧，本次让播放器降级成普通进度条。
 		// 前端拿到非 200 会直接不显示预览，不会报错。
@@ -162,6 +155,20 @@ func (s *Server) recordPlayback(w http.ResponseWriter, r *http.Request, stopped 
 		_ = s.store.SavePlaySession(r.Context(), payload.PlaySessionID, userID, payload.ItemID, payload.PositionTicks)
 	}
 	writeNoContent(w)
+}
+
+// bifIntervalDefault 是播放侧使用的默认抽帧间隔（毫秒），与客户端的约定一致。
+const bifIntervalDefault = 10000
+
+// bifIntervalParam 读取 IntervalMs 参数：预生成用了别的间隔时，
+// 播放侧传同样的值就能命中参数完全一致的文件，而不是退到任意变体。
+func bifIntervalParam(r *http.Request) uint32 {
+	query := r.URL.Query()
+	value := atoi(firstNonEmpty(query.Get("IntervalMs"), query.Get("intervalMs")))
+	if value <= 0 {
+		return bifIntervalDefault
+	}
+	return uint32(value)
 }
 
 var streamMimeTypes = map[string]string{

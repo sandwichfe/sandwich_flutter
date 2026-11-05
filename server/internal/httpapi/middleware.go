@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"io"
 	"log"
 	"net/http"
 	"runtime/debug"
@@ -77,6 +78,24 @@ func (r *statusRecorder) Flush() {
 	}
 }
 
+// ReadFrom 透传零拷贝路径：包装 ResponseWriter 后 io.ReaderFrom 不再可见，
+// http.ServeContent 的 io.Copy 会从 sendfile 退化为 32KB 缓冲区循环，
+// 对专做 4K 直连的媒体服务是实打实的 CPU 与内存带宽开销。
+func (r *statusRecorder) ReadFrom(src io.Reader) (int64, error) {
+	if r.status == 0 {
+		r.status = http.StatusOK
+	}
+	// 注意这里调的是底层 writer，不能回退到自己，否则会无限递归。
+	if rf, ok := r.ResponseWriter.(io.ReaderFrom); ok {
+		n, err := rf.ReadFrom(src)
+		r.bytes += n
+		return n, err
+	}
+	n, err := io.Copy(r.ResponseWriter, src)
+	r.bytes += n
+	return n, err
+}
+
 // slowThreshold 超过该耗时的请求单独打标，用于定位列表/图片这类慢接口。
 const slowThreshold = 500 * time.Millisecond
 
@@ -131,7 +150,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "缺少访问令牌")
 			return
 		}
-		user, err := s.store.UserByToken(token)
+		user, err := s.store.UserByToken(token, s.tokenCutoff())
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, "登录已失效，请重新登录")
 			return
@@ -145,6 +164,14 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), userContextKey, user)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// tokenCutoff 返回令牌可接受的签发时间下限；token_ttl <= 0 表示永不过期。
+func (s *Server) tokenCutoff() time.Time {
+	if s.cfg.TokenTTL <= 0 {
+		return time.Time{}
+	}
+	return time.Now().Add(-s.cfg.TokenTTL)
 }
 
 func currentUser(r *http.Request) *store.User {

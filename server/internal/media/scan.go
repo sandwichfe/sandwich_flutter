@@ -43,9 +43,14 @@ type Scanner struct {
 	scanMu sync.Mutex
 	// progress 是供 /Library/ScanStatus 读取的实时进度，不参与扫描逻辑。
 	progress scanProgress
-	// artLocks 按图片目标 ID 加锁：演员头像被多个条目共用，并发写同一文件会重复转码。
-	artMu    sync.Mutex
-	artLocks map[string]*sync.Mutex
+	// artLocks 按图片目标路径加锁：演员头像被多个条目共用，并发写同一文件会重复转码。
+	artLocks keyedMutex
+	// scanStates 是本次扫描开始时一次性读入的条目指纹。
+	// worker 只读这张表，不必为每个文件查一次库。
+	scanStates map[string]store.ItemScanState
+	// dirCache 缓存本次扫描内的目录枚举结果：一个目录 100 部片原本要 ReadDir 200 次。
+	dirMu    sync.Mutex
+	dirCache map[string]*dirSnapshot
 	// onItemRemoved 是条目删除后的清理回调（缓存回收注入），可为 nil。
 	onItemRemoved func(itemID string)
 	// onScanFinished 在扫描结束后回调本次涉及的媒体库 ID（派生数据重建注入），可为 nil。
@@ -54,12 +59,11 @@ type Scanner struct {
 
 func NewScanner(s *store.Store, prober *Prober, images *ImageStore, bif *BifCache) *Scanner {
 	return &Scanner{
-		store:    s,
-		prober:   prober,
-		images:   images,
-		bif:      bif,
-		workers:  scanWorkers(),
-		artLocks: make(map[string]*sync.Mutex),
+		store:   s,
+		prober:  prober,
+		images:  images,
+		bif:     bif,
+		workers: scanWorkers(),
 	}
 }
 
@@ -168,6 +172,10 @@ func (s *Scanner) scanLibrary(ctx context.Context, lib store.Library, logf func(
 		return 0, nil
 	}
 
+	// 本次扫描专用的一次性快照：条目指纹与目录枚举结果都只读一次，worker 共享。
+	s.prepareScanCache(ctx, logf)
+	defer s.clearScanCache()
+
 	imported := 0
 	for _, root := range lib.Paths {
 		if info, err := os.Stat(root); err != nil || !info.IsDir() {
@@ -194,6 +202,71 @@ func (s *Scanner) scanLibrary(ctx context.Context, lib store.Library, logf func(
 	}
 	logf("媒体库 %s 扫描完成，共处理 %d 个条目", lib.Name, imported)
 	return imported, nil
+}
+
+// dirSnapshot 是同一目录下图片与演员头像的一次性枚举结果。
+type dirSnapshot struct {
+	// images 是小写文件名（不含扩展名）→ 完整路径，只含图片扩展名。
+	images map[string]string
+	// actors 来自 .actors 子目录，演员名 → 头像路径。
+	actors map[string]string
+}
+
+// prepareScanCache 在扫描开始时准备两类快照，读完即固定，扫描期间不再变化。
+func (s *Scanner) prepareScanCache(ctx context.Context, logf func(string, ...any)) {
+	s.dirMu.Lock()
+	s.dirCache = make(map[string]*dirSnapshot)
+	s.dirMu.Unlock()
+
+	states, err := s.store.ScanStates(ctx)
+	if err != nil {
+		// 读不到就退回逐条查询，功能不变，只是慢一点。
+		logf("读取条目扫描状态失败，本次扫描逐条查询: %v", err)
+		return
+	}
+	s.scanStates = states
+}
+
+// clearScanCache 丢弃本次扫描的快照，避免长期持有大库的内存副本。
+// 必须在所有 worker 结束后调用。
+func (s *Scanner) clearScanCache() {
+	s.dirMu.Lock()
+	s.dirCache = nil
+	s.dirMu.Unlock()
+	s.scanStates = nil
+}
+
+// snapshotDir 返回目录快照，同一次扫描内复用。
+func (s *Scanner) snapshotDir(dir string) *dirSnapshot {
+	s.dirMu.Lock()
+	snapshot, ok := s.dirCache[dir]
+	s.dirMu.Unlock()
+	if ok {
+		return snapshot
+	}
+
+	snapshot = &dirSnapshot{images: readImageIndex(dir), actors: readActorIndex(dir)}
+
+	s.dirMu.Lock()
+	if s.dirCache == nil {
+		s.dirCache = make(map[string]*dirSnapshot)
+	}
+	s.dirCache[dir] = snapshot
+	s.dirMu.Unlock()
+	return snapshot
+}
+
+// storedState 优先用扫描开始时的内存快照，缺失时退回一次单行查询。
+func (s *Scanner) storedState(ctx context.Context, itemID string) (store.ItemScanState, bool) {
+	if s.scanStates != nil {
+		state, ok := s.scanStates[itemID]
+		return state, ok
+	}
+	fingerprint, nfoMtime, err := s.store.ItemFingerprint(ctx, itemID)
+	if err != nil {
+		return store.ItemScanState{}, false
+	}
+	return store.ItemScanState{Fingerprint: fingerprint, NFOMtime: nfoMtime}, true
 }
 
 // collectVideoFiles 串行遍历目录，只收集候选视频文件的路径。
@@ -238,17 +311,44 @@ func (s *Scanner) purgeMissingItems(ctx context.Context, lib store.Library, root
 		seen[path] = true
 	}
 
-	stale := make([]string, 0, 8)
+	// 逐个 os.Stat 在网络盘上是几千次串行 RTT，这里按扫描 worker 数并发探测。
+	candidates := make([]store.LibraryItemRef, 0, len(refs))
 	for _, ref := range refs {
 		if seen[ref.Path] || !pathWithinRoot(ref.Path, root) {
 			continue
 		}
-		// 只有"确实不存在"才删：权限不足、网络不可达等情况保守保留。
-		if _, statErr := os.Stat(ref.Path); !errors.Is(statErr, fs.ErrNotExist) {
-			continue
-		}
-		stale = append(stale, ref.ID)
+		candidates = append(candidates, ref)
 	}
+
+	stale := make([]string, 0, len(candidates))
+	var (
+		staleMu sync.Mutex
+		wg      sync.WaitGroup
+	)
+	workers := s.workers
+	if workers < 1 {
+		workers = scanWorkers()
+	}
+	sem := make(chan struct{}, workers)
+	for _, ref := range candidates {
+		if ctx.Err() != nil {
+			break
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(ref store.LibraryItemRef) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			// 只有"确实不存在"才删：权限不足、网络不可达等情况保守保留。
+			if _, statErr := os.Stat(ref.Path); !errors.Is(statErr, fs.ErrNotExist) {
+				return
+			}
+			staleMu.Lock()
+			stale = append(stale, ref.ID)
+			staleMu.Unlock()
+		}(ref)
+	}
+	wg.Wait()
 	if len(stale) == 0 {
 		return
 	}
@@ -371,10 +471,13 @@ func (s *Scanner) buildItem(ctx context.Context, libraryID, root, path string, l
 
 	// 指纹一致说明片源没换过、NFO 也没改过：
 	// 只纠正路径与库归属，跳过 ffprobe 与图片导入——大库重复扫描的耗时几乎都在这里。
-	storedFingerprint, storedNFOMtime, err := s.store.ItemFingerprint(ctx, itemID)
-	if err == nil && storedFingerprint == fingerprint && storedNFOMtime == nfoMtime {
-		if err := s.store.UpdateItemLocation(ctx, itemID, libraryID, path); err != nil {
-			return nil, false, err
+	if state, ok := s.storedState(ctx, itemID); ok &&
+		state.Fingerprint == fingerprint && state.NFOMtime == nfoMtime {
+		// 快照里已有路径时比对一下，没变就不写库：未变动的文件原本也要 UPDATE 一次。
+		if state.LibraryID != libraryID || state.Path != path {
+			if err := s.store.UpdateItemLocation(ctx, itemID, libraryID, path); err != nil {
+				return nil, false, err
+			}
 		}
 		return nil, false, nil
 	}

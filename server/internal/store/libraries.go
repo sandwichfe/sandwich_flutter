@@ -239,15 +239,20 @@ func (s *Store) DeleteItems(ctx context.Context, ids []string) error {
 		return err
 	}
 
-	for _, id := range ids {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM user_data WHERE item_id = ?`, id); err != nil {
-			return fmt.Errorf("清理条目用户数据失败: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM play_sessions WHERE item_id = ?`, id); err != nil {
-			return fmt.Errorf("清理条目播放会话失败: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM items WHERE id = ?`, id); err != nil {
-			return fmt.Errorf("删除条目失败: %w", err)
+	// 用 IN (...) 一次性删除：逐条执行时条目越多持有写锁越久，
+	// 会顶掉正在扫描的 4 个 worker 的 UpsertItem。
+	list := "(" + placeholders(len(ids)) + ")"
+	statements := []struct {
+		sql  string
+		desc string
+	}{
+		{"DELETE FROM user_data WHERE item_id IN " + list, "清理条目用户数据失败"},
+		{"DELETE FROM play_sessions WHERE item_id IN " + list, "清理条目播放会话失败"},
+		{"DELETE FROM items WHERE id IN " + list, "删除条目失败"},
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement.sql, toAny(ids)...); err != nil {
+			return fmt.Errorf("%s: %w", statement.desc, err)
 		}
 	}
 	return tx.Commit()

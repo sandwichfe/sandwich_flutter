@@ -91,6 +91,12 @@ type ItemQuery struct {
 	SortOrder  string
 	StartIndex int
 	Limit      int
+
+	// Detail 为 true 时输出完整条目（含 People / Chapters / MediaSources）。
+	// 列表默认走卡片形态：一屏 100 条 × 几十个演员和全部媒体流会让响应体膨胀几十倍。
+	Detail bool
+	// SkipTotal 为 true 时不执行 COUNT(*)，调用方会丢弃 total 的场景（如 Latest）可省一次全表统计。
+	SkipTotal bool
 }
 
 type rowScanner interface {
@@ -179,9 +185,11 @@ func (s *Store) QueryItems(ctx context.Context, q ItemQuery) ([]dto.BaseItemDto,
 	fromSQL := ` FROM items i LEFT JOIN user_data ud ON ud.item_id = i.id AND ud.user_id = ?`
 
 	var total int
-	countSQL := "SELECT COUNT(*)" + fromSQL + " WHERE " + whereSQL
-	if err := s.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("统计条目失败: %w", err)
+	if !q.SkipTotal {
+		countSQL := "SELECT COUNT(*)" + fromSQL + " WHERE " + whereSQL
+		if err := s.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
+			return nil, 0, fmt.Errorf("统计条目失败: %w", err)
+		}
 	}
 
 	limit := q.Limit
@@ -212,7 +220,7 @@ func (s *Store) QueryItems(ctx context.Context, q ItemQuery) ([]dto.BaseItemDto,
 		if err != nil {
 			return nil, 0, err
 		}
-		items = append(items, item.ToDto(data))
+		items = append(items, item.ToDto(data, q.Detail))
 	}
 	return items, total, rows.Err()
 }
@@ -264,7 +272,8 @@ func (s *Store) GetItem(ctx context.Context, userID, itemID string) (*dto.BaseIt
 	if err != nil {
 		return nil, err
 	}
-	result := item.ToDto(data)
+	// 详情接口是编辑弹窗与详情页的唯一数据源，必须带齐全部字段。
+	result := item.ToDto(data, true)
 	return &result, nil
 }
 
@@ -307,20 +316,60 @@ func (s *Store) SimilarItems(ctx context.Context, userID, itemID string, limit i
 		if err != nil {
 			return nil, err
 		}
-		items = append(items, item.ToDto(data))
+		// 相似推荐只用于卡片，不需要演员与章节。
+		items = append(items, item.ToDto(data, false))
 	}
 	return items, rows.Err()
 }
 
+// getRawItem 只读条目自身的列，不 JOIN user_data。
+// 相似推荐这类纯内容场景不需要用户数据，没必要为了凑列数去关联一个空用户。
 func (s *Store) getRawItem(ctx context.Context, itemID string) (*Item, error) {
-	query := "SELECT " + itemColumns + ", " + userDataColumns +
-		` FROM items i LEFT JOIN user_data ud ON ud.item_id = i.id AND ud.user_id = ''
-		 WHERE i.id = ?`
-	item, _, err := scanItemRow(s.db.QueryRowContext(ctx, query, itemID))
+	var item Item
+	var raws itemRaws
+	err := s.db.QueryRowContext(ctx,
+		"SELECT "+itemColumns+` FROM items i WHERE i.id = ?`, itemID,
+	).Scan(item.scanDest(&raws)...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
-	return item, err
+	if err != nil {
+		return nil, err
+	}
+	raws.decode(&item)
+	return &item, nil
+}
+
+// ItemScanState 是重复扫描时判断"能不能跳过 ffprobe"所需的最小信息。
+type ItemScanState struct {
+	LibraryID   string
+	Path        string
+	Fingerprint string
+	NFOMtime    int64
+}
+
+// ScanStates 一次性读出全部条目的指纹与路径，供扫描开始时建内存索引。
+// 逐个文件查 ItemFingerprint 的话，1 万条目就是 1 万次单行查询。
+func (s *Store) ScanStates(ctx context.Context) (map[string]ItemScanState, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, library_id, path, fingerprint, nfo_mtime FROM items`)
+	if err != nil {
+		return nil, fmt.Errorf("读取条目扫描状态失败: %w", err)
+	}
+	defer rows.Close()
+
+	states := make(map[string]ItemScanState, 1024)
+	for rows.Next() {
+		var (
+			id    string
+			state ItemScanState
+		)
+		if err := rows.Scan(&id, &state.LibraryID, &state.Path, &state.Fingerprint, &state.NFOMtime); err != nil {
+			return nil, err
+		}
+		states[id] = state
+	}
+	return states, rows.Err()
 }
 
 // ItemFingerprint 读取已入库条目的扫描指纹与 NFO 修改时间。
@@ -598,49 +647,72 @@ func (s *Store) SetImageTags(ctx context.Context, itemID, column string, value a
 	return err
 }
 
-func scanItemRow(scanner rowScanner) (*Item, *UserData, error) {
-	var item Item
-	var data UserData
+// itemRaws 承接 items 表的 JSON 列与可空数值列，扫描后再还原成结构体字段。
+type itemRaws struct {
+	productionYear  sql.NullInt64
+	communityRating sql.NullFloat64
+	mediaStreams    string
+	genres          string
+	tags            string
+	studios         string
+	people          string
+	chapters        string
+	providerIDs     string
+	externalURLs    string
+	imageTags       string
+	backdropTags    string
+	screenshotTags  string
+}
 
-	var productionYear sql.NullInt64
-	var communityRating sql.NullFloat64
-	var mediaStreams, genres, tags, studios, people, chapters string
-	var providerIDs, externalURLs, imageTags, backdropTags, screenshotTags string
-	var isFavorite, played int
-
-	err := scanner.Scan(
+// scanDest 返回 itemColumns 对应的扫描目标，顺序必须与 itemColumns 严格一致。
+// 拆出来是为了让"要不要带用户数据列"成为两个查询分支，而不是靠空用户 JOIN 凑列数。
+func (item *Item) scanDest(raws *itemRaws) []any {
+	return []any{
 		&item.ID, &item.LibraryID, &item.ParentID, &item.Type, &item.Name, &item.SortName, &item.Overview,
-		&productionYear, &item.PremiereDate, &item.DateCreated, &communityRating, &item.OfficialRating,
+		&raws.productionYear, &item.PremiereDate, &item.DateCreated, &raws.communityRating, &item.OfficialRating,
 		&item.RunTimeTicks, &item.Width, &item.Height, &item.Path, &item.Container, &item.Size, &item.Bitrate,
-		&mediaStreams, &genres, &tags, &studios, &people, &chapters,
-		&providerIDs, &externalURLs, &imageTags, &backdropTags, &screenshotTags,
+		&raws.mediaStreams, &raws.genres, &raws.tags, &raws.studios, &raws.people, &raws.chapters,
+		&raws.providerIDs, &raws.externalURLs, &raws.imageTags, &raws.backdropTags, &raws.screenshotTags,
 		&item.Fingerprint, &item.NFOMtime,
-		&isFavorite, &played, &data.PlaybackPositionTicks, &data.PlayCount, &data.LastPlayedDate,
-	)
-	if err != nil {
-		return nil, nil, err
 	}
+}
 
-	if productionYear.Valid {
-		year := int(productionYear.Int64)
+// decode 把 JSON 列与可空数值列还原成条目字段。
+func (raws *itemRaws) decode(item *Item) {
+	if raws.productionYear.Valid {
+		year := int(raws.productionYear.Int64)
 		item.ProductionYear = &year
 	}
-	if communityRating.Valid {
-		rating := communityRating.Float64
+	if raws.communityRating.Valid {
+		rating := raws.communityRating.Float64
 		item.CommunityRating = &rating
 	}
 
-	unmarshalJSON(mediaStreams, &item.MediaStreams)
-	unmarshalJSON(genres, &item.Genres)
-	unmarshalJSON(tags, &item.Tags)
-	unmarshalJSON(studios, &item.Studios)
-	unmarshalJSON(people, &item.People)
-	unmarshalJSON(chapters, &item.Chapters)
-	unmarshalJSON(providerIDs, &item.ProviderIDs)
-	unmarshalJSON(externalURLs, &item.ExternalURLs)
-	unmarshalJSON(imageTags, &item.ImageTags)
-	unmarshalJSON(backdropTags, &item.BackdropTags)
-	unmarshalJSON(screenshotTags, &item.ScreenshotTags)
+	unmarshalJSON(raws.mediaStreams, &item.MediaStreams)
+	unmarshalJSON(raws.genres, &item.Genres)
+	unmarshalJSON(raws.tags, &item.Tags)
+	unmarshalJSON(raws.studios, &item.Studios)
+	unmarshalJSON(raws.people, &item.People)
+	unmarshalJSON(raws.chapters, &item.Chapters)
+	unmarshalJSON(raws.providerIDs, &item.ProviderIDs)
+	unmarshalJSON(raws.externalURLs, &item.ExternalURLs)
+	unmarshalJSON(raws.imageTags, &item.ImageTags)
+	unmarshalJSON(raws.backdropTags, &item.BackdropTags)
+	unmarshalJSON(raws.screenshotTags, &item.ScreenshotTags)
+}
+
+func scanItemRow(scanner rowScanner) (*Item, *UserData, error) {
+	var item Item
+	var raws itemRaws
+	var data UserData
+	var isFavorite, played int
+
+	dest := append(item.scanDest(&raws),
+		&isFavorite, &played, &data.PlaybackPositionTicks, &data.PlayCount, &data.LastPlayedDate)
+	if err := scanner.Scan(dest...); err != nil {
+		return nil, nil, err
+	}
+	raws.decode(&item)
 
 	data.IsFavorite = isFavorite != 0
 	data.Played = played != 0
@@ -648,7 +720,11 @@ func scanItemRow(scanner rowScanner) (*Item, *UserData, error) {
 }
 
 // ToDto 把内部条目转成协议结构，字段名全部在 dto 包中定义。
-func (item *Item) ToDto(data *UserData) dto.BaseItemDto {
+//
+// detail 为 false 时只输出卡片需要的字段：People（几十个演员）、Chapters、
+// MediaSources（含全部 MediaStreams）只在详情接口有意义，
+// 一屏 100 条带上它们会让 JSON 涨几十倍，客户端也要全量解析。
+func (item *Item) ToDto(data *UserData, detail bool) dto.BaseItemDto {
 	result := dto.BaseItemDto{
 		ID:                  item.ID,
 		Name:                item.Name,
@@ -664,14 +740,16 @@ func (item *Item) ToDto(data *UserData) dto.BaseItemDto {
 		Genres:              item.Genres,
 		Tags:                item.Tags,
 		Studios:             item.Studios,
-		People:              item.People,
-		Chapters:            item.Chapters,
 		ProviderIDs:         item.ProviderIDs,
 		ExternalURLs:        item.ExternalURLs,
 		ImageTags:           item.ImageTags,
 		BackdropImageTags:   item.BackdropTags,
 		ScreenshotImageTags: item.ScreenshotTags,
 		MediaSources:        []dto.MediaSourceInfo{},
+	}
+	if detail {
+		result.People = item.People
+		result.Chapters = item.Chapters
 	}
 	if item.RunTimeTicks > 0 {
 		ticks := item.RunTimeTicks
@@ -688,7 +766,7 @@ func (item *Item) ToDto(data *UserData) dto.BaseItemDto {
 	if tag, ok := item.ImageTags["Primary"]; ok && tag != "" {
 		result.PrimaryImageTag = tag
 	}
-	if item.Path != "" {
+	if detail && item.Path != "" {
 		result.MediaSources = []dto.MediaSourceInfo{item.ToMediaSource()}
 	}
 	if data != nil {

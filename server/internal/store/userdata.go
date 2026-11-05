@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // SetFavorite 对应 POST/DELETE /Users/{userId}/FavoriteItems/{itemId}。
@@ -88,6 +89,21 @@ func (s *Store) SavePlaybackProgress(ctx context.Context, userID, itemID string,
 		return fmt.Errorf("保存播放进度失败: %w", err)
 	}
 	return nil
+}
+
+// PurgeStalePlaySessions 删除 before 之前就没再上报过进度的会话。
+// play_sessions 只在播放中写入，没有过期时间的话会随条目一直留在库里。
+func (s *Store) PurgeStalePlaySessions(ctx context.Context, before time.Time) (int64, error) {
+	result, err := s.db.ExecContext(ctx,
+		`DELETE FROM play_sessions WHERE updated_at < ?`, isoTime(before))
+	if err != nil {
+		return 0, fmt.Errorf("清理过期播放会话失败: %w", err)
+	}
+	removed, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return removed, nil
 }
 
 func (s *Store) SavePlaySession(ctx context.Context, sessionID, userID, itemID string, positionTicks int64) error {

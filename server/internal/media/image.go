@@ -34,13 +34,28 @@ func NewImageStore(root string) *ImageStore {
 const generatedDir = "generated"
 
 func (s *ImageStore) ItemPath(itemID, imageType string, index int) string {
-	return filepath.Join(s.root, sanitizeID(itemID), strings.ToLower(imageType), strconv.Itoa(index)+".jpg")
+	return filepath.Join(s.root, sanitizeID(itemID), sanitizeImageType(imageType), strconv.Itoa(index)+".jpg")
 }
 
 // GeneratedPath 返回生成图片的落盘位置。
 func (s *ImageStore) GeneratedPath(itemID, imageType string, index int) string {
 	return filepath.Join(s.root, sanitizeID(itemID), generatedDir,
-		strings.ToLower(imageType), strconv.Itoa(index)+".jpg")
+		sanitizeImageType(imageType), strconv.Itoa(index)+".jpg")
+}
+
+// sanitizeImageType 对图片类型做白名单清洗。
+// 上传接口会把请求体直接写到这个路径，仅靠 http.ServeMux 清理 ".." 属于防御缺失。
+func sanitizeImageType(value string) string {
+	cleaned := strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' {
+			return r
+		}
+		return -1
+	}, strings.ToLower(value))
+	if cleaned == "" {
+		return "unknown"
+	}
+	return cleaned
 }
 
 // GeneratedMetaPath 返回生成图旁边的元数据文件路径（缓存标记、重建签名等）。

@@ -27,14 +27,15 @@ var artworkExtensions = map[string]bool{
 // 高优先级在前：<视频名>-poster > poster > folder > cover > 视频同名 > movie。
 func FindArtwork(videoPath string) LocalArtwork {
 	dir := filepath.Dir(videoPath)
-	base := strings.ToLower(strings.TrimSuffix(filepath.Base(videoPath), filepath.Ext(videoPath)))
+	return findArtworkIn(dir, filepath.Base(videoPath), readImageIndex(dir))
+}
 
+// readImageIndex 枚举目录，返回「小写文件名（不含扩展名）→ 完整路径」。
+func readImageIndex(dir string) map[string]string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return LocalArtwork{}
+		return nil
 	}
-
-	// 小写文件名（不含扩展名）→ 完整路径，避免重复遍历目录。
 	images := make(map[string]string, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -46,6 +47,16 @@ func FindArtwork(videoPath string) LocalArtwork {
 		}
 		key := strings.ToLower(strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name())))
 		images[key] = filepath.Join(dir, entry.Name())
+	}
+	return images
+}
+
+// findArtworkIn 在一份目录图片索引上按优先级匹配，扫描时复用同目录的快照，
+// 避免一个目录 100 部片枚举 100 次目录。
+func findArtworkIn(dir, fileName string, images map[string]string) LocalArtwork {
+	base := strings.ToLower(strings.TrimSuffix(fileName, filepath.Ext(fileName)))
+	if len(images) == 0 {
+		return LocalArtwork{}
 	}
 
 	lookup := func(names ...string) string {
@@ -99,7 +110,12 @@ func FindArtwork(videoPath string) LocalArtwork {
 
 // FindActorImages 读取 tinyMediaManager 生成的 .actors 目录。
 func FindActorImages(videoPath string) map[string]string {
-	dir := filepath.Join(filepath.Dir(videoPath), ".actors")
+	return readActorIndex(filepath.Dir(videoPath))
+}
+
+// readActorIndex 枚举目录下的 .actors 子目录，返回「演员名 → 头像路径」。
+func readActorIndex(videoDir string) map[string]string {
+	dir := filepath.Join(videoDir, ".actors")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil

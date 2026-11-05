@@ -32,7 +32,10 @@ type Server struct {
 	mux *http.ServeMux
 }
 
-func New(cfg config.Config, st *store.Store, images *media.ImageStore, bif *media.BifCache, scanner *media.Scanner, thumbs *media.ThumbnailJobManager) *Server {
+// New 装配 HTTP 层。prober 由 main 注入，和扫描器共用同一个实例，
+// 避免同一个 ffprobe 可执行文件被构造两次、配置改了只生效一半。
+func New(cfg config.Config, st *store.Store, images *media.ImageStore, bif *media.BifCache,
+	scanner *media.Scanner, thumbs *media.ThumbnailJobManager, prober *media.Prober) *Server {
 	server := &Server{
 		cfg:     cfg,
 		store:   st,
@@ -40,7 +43,7 @@ func New(cfg config.Config, st *store.Store, images *media.ImageStore, bif *medi
 		bif:     bif,
 		scanner: scanner,
 		thumbs:  thumbs,
-		artwork: media.NewArtworkGenerator(images, media.NewProber(cfg.FFprobePath), cfg.FFmpegPath),
+		artwork: media.NewArtworkGenerator(images, prober, cfg.FFmpegPath),
 		// 缩放结果落在数据目录下，和 BIF 缓存同级。
 		imageRenderer: media.NewImageRenderer(filepath.Join(cfg.DataDir, "cache", "images")),
 		libraryCovers: media.NewLibraryCoverBuilder(images, st),
@@ -94,6 +97,7 @@ func (s *Server) baseContext() context.Context {
 func (s *Server) routes() {
 	// 认证与系统信息
 	s.mux.HandleFunc("POST /emby/Users/AuthenticateByName", s.handleAuthenticate)
+	s.mux.HandleFunc("POST /emby/Sessions/Logout", s.handleLogout)
 	s.mux.HandleFunc("GET /emby/System/Info/Public", s.handlePublicInfo)
 
 	// 用户与头像

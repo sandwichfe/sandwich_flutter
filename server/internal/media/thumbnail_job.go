@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"runtime/debug"
 	"sync"
 	"time"
 )
@@ -31,6 +32,10 @@ const thumbnailErrorLimit = 20
 
 // thumbnailJobHistory 只保留最近完成的任务，供设置页展示最近一次结果。
 const thumbnailJobHistory = 20
+
+// thumbnailJobTimeout 是单个条目的抽帧上限：整库预生成常遇到 4K/网络盘长片，
+// 解码全片很容易超过播放侧的 10 分钟默认值。
+const thumbnailJobTimeout = 60 * time.Minute
 
 // ThumbnailTarget 是预生成任务里的单个条目。
 type ThumbnailTarget struct {
@@ -209,7 +214,7 @@ func (m *ThumbnailJobManager) Start(libraryID, libraryName string, targets []Thu
 	snapshot := job.copy()
 	m.mu.Unlock()
 
-	go m.run(ctx, job, targets, force)
+	RunSafe("缩略图预生成任务", func() { m.run(ctx, job, targets, force) })
 	return snapshot, nil
 }
 
@@ -272,6 +277,18 @@ func (m *ThumbnailJobManager) Cancel(jobID string) (ThumbnailJobSnapshot, error)
 
 func (m *ThumbnailJobManager) run(ctx context.Context, job *thumbnailJob, targets []ThumbnailTarget, force bool) {
 	defer job.cancel()
+	// panic 时把任务收尾成"已取消"：否则 active 永远停在 running，之后再也起不了新任务。
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			log.Printf("[thumbnails] 任务 %s panic: %v\n%s", job.copy().ID, recovered, debug.Stack())
+			job.update(func(s *ThumbnailJobSnapshot) {
+				s.Status = ThumbnailJobCanceled
+				s.CurrentItem = ""
+				s.FinishedAt = time.Now().Format(time.RFC3339)
+				appendThumbnailError(s, fmt.Sprintf("内部错误: %v", recovered))
+			})
+		}
+	}()
 
 	initial := job.copy()
 	intervalMs := uint32(initial.IntervalMs)
@@ -362,6 +379,7 @@ func (m *ThumbnailJobManager) run(ctx context.Context, job *thumbnailJob, target
 			Width:      width,
 			Force:      force,
 			OnProgress: onProgress,
+			Timeout:    thumbnailJobTimeout,
 		})
 		if err != nil {
 			if ctx.Err() != nil {

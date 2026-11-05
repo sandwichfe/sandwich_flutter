@@ -63,8 +63,7 @@ type ArtworkGenerator struct {
 	ffmpegPath string
 
 	// 同一条目只允许一个生成进程，避免重复点击同时起多个 ffmpeg。
-	mu        sync.Mutex
-	itemLocks map[string]*sync.Mutex
+	itemLocks keyedMutex
 }
 
 func NewArtworkGenerator(images *ImageStore, prober *Prober, ffmpegPath string) *ArtworkGenerator {
@@ -72,7 +71,6 @@ func NewArtworkGenerator(images *ImageStore, prober *Prober, ffmpegPath string) 
 		images:     images,
 		prober:     prober,
 		ffmpegPath: ffmpegPath,
-		itemLocks:  make(map[string]*sync.Mutex),
 	}
 }
 
@@ -288,16 +286,7 @@ func (g *ArtworkGenerator) extractFrame(ctx context.Context, sourcePath string, 
 }
 
 func (g *ArtworkGenerator) lockItem(itemID string) func() {
-	g.mu.Lock()
-	lock, ok := g.itemLocks[itemID]
-	if !ok {
-		lock = &sync.Mutex{}
-		g.itemLocks[itemID] = lock
-	}
-	g.mu.Unlock()
-
-	lock.Lock()
-	return lock.Unlock
+	return g.itemLocks.Lock(itemID)
 }
 
 // normalizeArtworkTypes 去重并只保留支持的类型，顺序固定为海报 → 封面 → 缩略图。
@@ -307,7 +296,7 @@ func normalizeArtworkTypes(values []string) []string {
 	}
 	selected := map[string]bool{}
 	for _, value := range values {
-		switch normalizeImageTypeName(value) {
+		switch NormalizeImageType(value) {
 		case ArtworkPrimary:
 			selected[ArtworkPrimary] = true
 		case ArtworkBackdrop:
@@ -325,16 +314,27 @@ func normalizeArtworkTypes(values []string) []string {
 	return result
 }
 
-func normalizeImageTypeName(value string) string {
-	switch value {
-	case "primary", "Primary", "poster", "Poster":
-		return ArtworkPrimary
-	case "backdrop", "Backdrop", "cover", "Cover", "fanart":
-		return ArtworkBackdrop
-	case "thumb", "Thumb", "landscape":
-		return ArtworkThumb
-	}
-	return ""
+// imageTypeNames 是客户端传来的图片类型（大小写与别名都不统一）到 Emby 规范名的映射。
+// HTTP 层与生成器共用这一份，避免两处各自维护、改一处漏一处。
+var imageTypeNames = map[string]string{
+	"primary":    ArtworkPrimary,
+	"poster":     ArtworkPrimary,
+	"backdrop":   ArtworkBackdrop,
+	"cover":      ArtworkBackdrop,
+	"fanart":     ArtworkBackdrop,
+	"thumb":      ArtworkThumb,
+	"landscape":  ArtworkThumb,
+	"logo":       "Logo",
+	"banner":     "Banner",
+	"disc":       "Disc",
+	"art":        "Art",
+	"chapter":    "Chapter",
+	"screenshot": "Screenshot",
+}
+
+// NormalizeImageType 把图片类型归一成 Emby 规范名，不认识的返回空串。
+func NormalizeImageType(value string) string {
+	return imageTypeNames[strings.ToLower(strings.TrimSpace(value))]
 }
 
 func artworkSize(imageType string, width int) (int, int) {

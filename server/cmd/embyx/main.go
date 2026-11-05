@@ -58,7 +58,7 @@ func main() {
 	scanner := media.NewScanner(st, prober, images, bifCache)
 	thumbs := media.NewThumbnailJobManager(bifCache)
 
-	api := httpapi.New(cfg, st, images, bifCache, scanner, thumbs)
+	api := httpapi.New(cfg, st, images, bifCache, scanner, thumbs, prober)
 	api.SetBaseContext(rootCtx)
 
 	// 缓存回收（S4.1）：启动先跑一轮，之后按 cache.sweep_interval 巡检。
@@ -74,6 +74,12 @@ func main() {
 	scanner.SetItemRemovedHook(janitor.RemoveItem)
 	go janitor.Run(rootCtx, cfg.CacheSweepInterval)
 
+	// 播放会话只服务"正在播放"：超过 1 小时没有进度上报的记录没有价值，
+	// 定期清掉，避免 play_sessions 随条目一直增长。
+	media.RunSafe("清理过期播放会话", func() {
+		purgeStalePlaySessions(rootCtx, st, time.Hour)
+	})
+
 	server := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           api.Handler(),
@@ -84,7 +90,12 @@ func main() {
 
 	go func() {
 		log.Printf("Emby 兼容服务已启动: http://localhost%s/emby", cfg.Addr)
-		log.Printf("默认账号: %s / %s", cfg.AdminUser, cfg.AdminPassword)
+		// 密码不进日志：日志会长期留在 embyx.log 里，也可能被贴到 issue 中。
+		// 只提示账号，以及"密码还是内置默认值"这一件事。
+		log.Printf("默认账号: %s", cfg.AdminUser)
+		if cfg.AdminPassword == config.DefaultAdminPassword {
+			log.Printf("管理员密码仍是内置默认值，请尽快修改")
+		}
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("服务启动失败: %v", err)
 		}
@@ -103,6 +114,27 @@ func main() {
 	defer cancel()
 	if err := server.Shutdown(ctx); err != nil {
 		log.Printf("关闭服务异常: %v", err)
+	}
+}
+
+// purgeStalePlaySessions 先清一次，之后按小时清理超过 maxAge 没有上报的播放会话。
+func purgeStalePlaySessions(ctx context.Context, st *store.Store, maxAge time.Duration) {
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		if removed, err := st.PurgeStalePlaySessions(ctx, time.Now().Add(-maxAge)); err != nil {
+			if ctx.Err() == nil {
+				log.Printf("清理过期播放会话失败: %v", err)
+			}
+		} else if removed > 0 {
+			log.Printf("已清理 %d 条过期播放会话", removed)
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
 	}
 }
 

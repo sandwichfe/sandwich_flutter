@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"embyx/internal/dto"
+	"embyx/internal/media"
 	"embyx/internal/store"
 )
 
@@ -269,6 +270,11 @@ func (s *Server) handleDeleteVirtualFolder(w http.ResponseWriter, r *http.Reques
 		_ = s.images.RemoveItem(itemID)
 		s.imageRenderer.RemoveItem(itemID)
 	}
+	// BIF 缓存也要一起回收：只靠每 6 小时的巡检，几千条的库会白占磁盘很久。
+	// 批量方法只枚举一次目录，不会因为条目多而退化。
+	if s.bif != nil {
+		s.bif.RemoveItems(itemIDs)
+	}
 	// 库自身也有一份拼图封面（images/{libraryID}/generated），删除库时一并回收。
 	_ = s.images.RemoveItem(lib.ID)
 	s.imageRenderer.RemoveItem(lib.ID)
@@ -281,21 +287,21 @@ func (s *Server) handleLibraryRefresh(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdmin(w, r) {
 		return
 	}
-	go func() {
+	media.RunSafe("媒体库全量扫描", func() {
 		if _, err := s.scanner.ScanAll(s.baseContext(), log.Printf); err != nil {
 			log.Printf("媒体库扫描失败: %v", err)
 		}
-	}()
+	})
 	writeNoContent(w)
 }
 
 func (s *Server) scanLibraryAsync(lib *store.Library) {
 	target := *lib
-	go func() {
+	media.RunSafe("扫描媒体库 "+target.Name, func() {
 		if _, err := s.scanner.ScanLibrary(s.baseContext(), target, log.Printf); err != nil {
 			log.Printf("媒体库 %s 扫描失败: %v", target.Name, err)
 		}
-	}()
+	})
 }
 
 // rebuildLibraryCovers 在扫描结束后重建拼图封面。
@@ -305,7 +311,7 @@ func (s *Server) rebuildLibraryCovers(libraryIDs []string) {
 	if s.libraryCovers == nil || len(libraryIDs) == 0 {
 		return
 	}
-	go func() {
+	media.RunSafe("重建媒体库封面", func() {
 		ctx := s.baseContext()
 		for _, id := range libraryIDs {
 			lib, err := s.store.LibraryByID(ctx, id)
@@ -321,7 +327,7 @@ func (s *Server) rebuildLibraryCovers(libraryIDs []string) {
 				log.Printf("[library-cover] 已更新媒体库封面 library=%s (%s)", id, lib.Name)
 			}
 		}
-	}()
+	})
 }
 
 func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) bool {

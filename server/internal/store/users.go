@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 var ErrNotFound = errors.New("记录不存在")
@@ -123,19 +124,100 @@ func (s *Store) CreateToken(userID string) (string, error) {
 	return token, nil
 }
 
-func (s *Store) UserByToken(token string) (*User, error) {
+// tokenCacheTTL 是令牌解析结果的缓存时长。
+// 图片列表一屏就是几十个请求，每个请求都查一次 tokens JOIN users 是纯浪费；
+// 登出与清理过期令牌时都会主动失效，最长 1 分钟自动对齐。
+const tokenCacheTTL = time.Minute
+
+// tokenCacheEntry 缓存一个令牌解析出的用户，以及（可选的）令牌过期时刻。
+type tokenCacheEntry struct {
+	user      *User
+	expiresAt time.Time
+}
+
+// UserByToken 按令牌查用户。notBefore 非零时只接受签发时间不早于它的令牌，
+// 让配置里的 token_ttl 真正生效（否则令牌一旦签发就永久有效）。
+func (s *Store) UserByToken(token string, notBefore time.Time) (*User, error) {
 	if token == "" {
 		return nil, ErrNotFound
 	}
-	return s.scanUser(s.db.QueryRow(
-		`SELECT u.id, u.name, u.password_hash, u.is_admin, u.primary_image_tag, u.created_at
-		 FROM users u JOIN tokens t ON t.user_id = u.id WHERE t.token = ?`, token,
-	))
+
+	now := time.Now()
+	s.tokenMu.Lock()
+	entry, cached := s.tokenCache[token]
+	s.tokenMu.Unlock()
+	if cached && now.Before(entry.expiresAt) {
+		return entry.user, nil
+	}
+
+	// 多取一列 t.created_at：缓存的过期时刻必须早于令牌自身的过期时刻。
+	query := `SELECT u.id, u.name, u.password_hash, u.is_admin, u.primary_image_tag, u.created_at, t.created_at
+		 FROM users u JOIN tokens t ON t.user_id = u.id WHERE t.token = ?`
+	args := []any{token}
+	if !notBefore.IsZero() {
+		// created_at 是定宽的 UTC 时间串，字符串比较即时间先后比较。
+		query += ` AND t.created_at >= ?`
+		args = append(args, isoTime(notBefore))
+	}
+
+	var (
+		user           User
+		isAdmin        int
+		tokenCreatedAt string
+	)
+	err := s.db.QueryRow(query, args...).Scan(
+		&user.ID, &user.Name, &user.PasswordHash, &isAdmin,
+		&user.PrimaryImageTag, &user.CreatedAt, &tokenCreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	user.IsAdmin = isAdmin != 0
+
+	expiresAt := now.Add(tokenCacheTTL)
+	if !notBefore.IsZero() {
+		if createdAt, parseErr := time.Parse(isoLayout, tokenCreatedAt); parseErr == nil {
+			// 令牌在 created_at + ttl 之后失效，缓存不能活得比它更久。
+			if tokenExpiry := createdAt.Add(now.Sub(notBefore)); tokenExpiry.Before(expiresAt) {
+				expiresAt = tokenExpiry
+			}
+		}
+	}
+	if now.Before(expiresAt) {
+		s.tokenMu.Lock()
+		if s.tokenCache == nil {
+			s.tokenCache = make(map[string]tokenCacheEntry)
+		}
+		s.tokenCache[token] = tokenCacheEntry{user: &user, expiresAt: expiresAt}
+		s.tokenMu.Unlock()
+	}
+	return &user, nil
 }
 
 func (s *Store) DeleteToken(token string) error {
-	_, err := s.db.Exec(`DELETE FROM tokens WHERE token = ?`, token)
-	return err
+	if _, err := s.db.Exec(`DELETE FROM tokens WHERE token = ?`, token); err != nil {
+		return err
+	}
+	// 立即失效：登出后不能靠缓存继续放行。
+	s.tokenMu.Lock()
+	delete(s.tokenCache, token)
+	s.tokenMu.Unlock()
+	return nil
+}
+
+// DeleteTokensBefore 删除某用户签发时间早于 before 的令牌，登录时顺手清理过期记录。
+func (s *Store) DeleteTokensBefore(userID string, before time.Time) error {
+	if _, err := s.db.Exec(`DELETE FROM tokens WHERE user_id = ? AND created_at < ?`,
+		userID, isoTime(before)); err != nil {
+		return err
+	}
+	// 受影响令牌可能已被缓存：清空整表最省事，登录是低频操作。
+	s.tokenMu.Lock()
+	s.tokenCache = nil
+	s.tokenMu.Unlock()
+	return nil
 }
 
 func (s *Store) UpdateUserImageTag(userID, tag string) error {

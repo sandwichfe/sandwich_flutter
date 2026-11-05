@@ -251,7 +251,11 @@ func (s *Server) syncImageTags(r *http.Request, itemID, imageType string, index 
 		for key, value := range item.ImageTags {
 			imageTags[key] = value
 		}
-		normalized := normalizeImageType(imageType)
+		// 与生成器共用同一份类型映射；未知类型保留原值，避免写库时丢信息。
+		normalized := media.NormalizeImageType(imageType)
+		if normalized == "" {
+			normalized = imageType
+		}
 		if tag == "" {
 			delete(imageTags, normalized)
 		} else {
@@ -330,31 +334,6 @@ func (s *Server) markGeneratedImageTags(itemID string, tags map[string]string) {
 			log.Printf("回写图片标记失败 item=%s type=%s: %v", itemID, imageType, err)
 		}
 	}
-}
-
-// normalizeImageType 对齐 Emby 的 ImageType 命名。
-func normalizeImageType(value string) string {
-	switch strings.ToLower(value) {
-	case "primary":
-		return "Primary"
-	case "logo":
-		return "Logo"
-	case "thumb":
-		return "Thumb"
-	case "banner":
-		return "Banner"
-	case "disc":
-		return "Disc"
-	case "art":
-		return "Art"
-	case "chapter":
-		return "Chapter"
-	case "backdrop":
-		return "Backdrop"
-	case "screenshot":
-		return "Screenshot"
-	}
-	return value
 }
 
 func firstNonEmpty(values ...string) string {

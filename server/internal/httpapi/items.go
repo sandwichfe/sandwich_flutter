@@ -15,29 +15,37 @@ import (
 func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 	userID := r.PathValue("userId")
 	params := r.URL.Query()
-
-	includeTypes := splitCSV(params.Get("IncludeItemTypes"))
-	startIndex := atoi(params.Get("StartIndex"))
-	limit := atoi(params.Get("Limit"))
-	searchTerm := params.Get("SearchTerm")
-
-	filters := splitCSV(params.Get("Filters"))
-	favoriteOnly := contains(filters, "IsFavorite")
-	isPlayed := contains(filters, "IsPlayed")
-	isUnplayed := contains(filters, "IsUnplayed")
-	isResumable := contains(filters, "IsResumable")
+	query := parseItemQuery(r)
 
 	// 人物不是 items 表的行，由演职人员字段聚合而来。
 	// 注意 Filters 必须一并传下去，否则"收藏 - 演员"会返回全部人物。
-	if len(includeTypes) == 1 && strings.EqualFold(includeTypes[0], "Person") {
-		persons, total, err := s.store.Persons(r.Context(), userID, searchTerm, favoriteOnly, startIndex, limit)
+	if len(query.IncludeTypes) == 1 && strings.EqualFold(query.IncludeTypes[0], "Person") {
+		persons, total, err := s.store.Persons(
+			r.Context(), userID, query.SearchTerm, query.FavoriteOnly, query.StartIndex, query.Limit)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "查询人物失败")
 			return
 		}
-		writeJSON(w, http.StatusOK, dto.QueryResult{Items: persons, TotalRecordCount: total, StartIndex: startIndex})
+		writeJSON(w, http.StatusOK, dto.QueryResult{Items: persons, TotalRecordCount: total, StartIndex: query.StartIndex})
 		return
 	}
+	// 列表默认只返回卡片字段；客户端显式要详情字段时才输出完整形态。
+	query.Detail = fieldsNeedDetail(params.Get("Fields"))
+	// TODO: VideoTypes 暂未实现（需要按 MediaStreams 中的编码/分辨率过滤）。
+
+	items, total, err := s.store.QueryItems(r.Context(), query)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "查询条目失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, dto.QueryResult{Items: items, TotalRecordCount: total, StartIndex: query.StartIndex})
+}
+
+// parseItemQuery 把 /Users/{id}/Items 的查询参数映射成 store.ItemQuery。
+// 单独抽出来是为了能直接对参数映射做表驱动测试（最容易回归的一环）。
+func parseItemQuery(r *http.Request) store.ItemQuery {
+	params := r.URL.Query()
+	filters := splitCSV(params.Get("Filters"))
 
 	sortBy := splitCSV(params.Get("SortBy"))
 	if len(sortBy) == 0 {
@@ -48,34 +56,40 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 		sortOrder = "Ascending"
 	}
 
-	query := store.ItemQuery{
-		UserID:             userID,
+	return store.ItemQuery{
+		UserID:             r.PathValue("userId"),
 		ParentID:           params.Get("ParentId"),
-		IncludeTypes:       includeTypes,
-		SearchTerm:         searchTerm,
+		IncludeTypes:       splitCSV(params.Get("IncludeItemTypes")),
+		SearchTerm:         params.Get("SearchTerm"),
 		Years:              parseIntList(splitCSV(params.Get("Years"))),
 		PersonIDs:          splitCSV(params.Get("PersonIds")),
 		GenreIDs:           splitCSV(params.Get("GenreIds")),
 		TagIDs:             splitCSV(params.Get("TagIds")),
 		StudioIDs:          splitCSV(params.Get("StudioIds")),
-		FavoriteOnly:       favoriteOnly,
-		IsPlayed:           isPlayed,
-		IsUnplayed:         isUnplayed,
-		IsResumable:        isResumable,
+		FavoriteOnly:       contains(filters, "IsFavorite"),
+		IsPlayed:           contains(filters, "IsPlayed"),
+		IsUnplayed:         contains(filters, "IsUnplayed"),
+		IsResumable:        contains(filters, "IsResumable"),
 		MinCommunityRating: queryFloatPtr(r, "MinCommunityRating"),
 		SortBy:             sortBy,
 		SortOrder:          sortOrder,
-		StartIndex:         startIndex,
-		Limit:              limit,
+		StartIndex:         atoi(params.Get("StartIndex")),
+		Limit:              atoi(params.Get("Limit")),
 	}
-	// TODO: VideoTypes 暂未实现（需要按 MediaStreams 中的编码/分辨率过滤）。
+}
 
-	items, total, err := s.store.QueryItems(r.Context(), query)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "查询条目失败")
-		return
+// fieldsNeedDetail 判断 Fields 参数是否要求列表里带详情字段。
+// 详情页走的是 /Items/{itemId}，这里的判断只服务于少数按列表取详情的客户端。
+func fieldsNeedDetail(fields string) bool {
+	for _, field := range splitCSV(fields) {
+		switch {
+		case strings.EqualFold(field, "MediaSources"),
+			strings.EqualFold(field, "People"),
+			strings.EqualFold(field, "Chapters"):
+			return true
+		}
 	}
-	writeJSON(w, http.StatusOK, dto.QueryResult{Items: items, TotalRecordCount: total, StartIndex: startIndex})
+	return false
 }
 
 // handleLatestItems 对应 GET /Users/{id}/Items/Latest。
@@ -98,6 +112,8 @@ func (s *Server) handleLatestItems(w http.ResponseWriter, r *http.Request) {
 		SortBy:       []string{"DateCreated"},
 		SortOrder:    "Descending",
 		Limit:        limit,
+		// 这里丢弃 total，不必再跑一次 COUNT(*)。
+		SkipTotal: true,
 	}
 	if len(query.IncludeTypes) == 0 {
 		query.IncludeTypes = []string{"Movie", "Series", "Video", "Episode"}

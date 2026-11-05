@@ -5,9 +5,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"embyx/internal/dto"
 	"embyx/internal/media"
@@ -44,6 +47,12 @@ func (s *Server) handleAuthenticate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "签发令牌失败")
 		return
 	}
+	// 顺手清掉该用户已过期的令牌：tokens 表原本只增不减。
+	if ttl := s.cfg.TokenTTL; ttl > 0 {
+		if err := s.store.DeleteTokensBefore(user.ID, time.Now().Add(-ttl)); err != nil {
+			log.Printf("清理过期令牌失败 user=%s: %v", user.ID, err)
+		}
+	}
 
 	writeJSON(w, http.StatusOK, dto.AuthenticationResult{
 		User:        toUserDto(user),
@@ -64,6 +73,18 @@ func (s *Server) handlePublicInfo(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleLogout 让当前令牌立即失效。tokens 表没有过期标记字段，
+// 删除是唯一的失效手段；令牌泄露后也就靠这个接口止损。
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if token := tokenFromRequest(r); token != "" {
+		if err := s.store.DeleteToken(token); err != nil {
+			writeError(w, http.StatusInternalServerError, "退出登录失败")
+			return
+		}
+	}
+	writeNoContent(w)
+}
+
 func (s *Server) handleUserAvatar(w http.ResponseWriter, r *http.Request) {
 	userID := r.PathValue("userId")
 	raw, err := s.images.LoadUserAvatar(userID)
@@ -71,9 +92,21 @@ func (s *Server) handleUserAvatar(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "头像不存在")
 		return
 	}
-	rendered, err := media.Render(raw, atoi(r.URL.Query().Get("MaxWidth")), atoi(r.URL.Query().Get("Quality")))
+	// 走 ImageRenderer：人物详情页与演职员列表会反复请求同一张头像，
+	// 直连 media.Render 等于每次都解码缩放，既没有磁盘缓存也没有并发控制。
+	maxWidth := media.NormalizeRenderWidth(atoi(firstNonEmpty(
+		r.URL.Query().Get("maxWidth"), r.URL.Query().Get("MaxWidth"))))
+	quality := media.NormalizeRenderQuality(atoi(r.URL.Query().Get("Quality")))
+	rendered, tag, err := s.imageRenderer.Render(userID, "Primary", 0, raw, maxWidth, quality)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "渲染头像失败")
+		return
+	}
+
+	etag := fmt.Sprintf(`"%s-w%d-q%d"`, tag, maxWidth, quality)
+	w.Header().Set("ETag", etag)
+	if match := r.Header.Get("If-None-Match"); match != "" && match == etag {
+		w.WriteHeader(http.StatusNotModified)
 		return
 	}
 	w.Header().Set("Content-Type", "image/jpeg")
@@ -98,6 +131,8 @@ func (s *Server) handleUploadUserAvatar(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	_ = s.store.UpdateUserImageTag(userID, tag)
+	// 换头像后旧的缩放缓存不会再命中，直接清掉，别留到下次巡检。
+	s.imageRenderer.RemoveItem(userID)
 	// 回传新的主图标记，客户端据此刷新头像地址并解除“无头像”状态。
 	w.Header().Set("X-Primary-Image-Tag", tag)
 	writeNoContent(w)

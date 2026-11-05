@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"runtime/debug"
 	"sync"
 	"time"
 )
@@ -165,7 +166,7 @@ func (m *ArtworkJobManager) Start(libraryID, libraryName string, targets []Artwo
 	snapshot := job.copy()
 	m.mu.Unlock()
 
-	go m.run(ctx, job, targets)
+	RunSafe("海报生成任务", func() { m.run(ctx, job, targets) })
 	return snapshot, nil
 }
 
@@ -194,6 +195,18 @@ func (m *ArtworkJobManager) Cancel(jobID string) (ArtworkJobSnapshot, error) {
 
 func (m *ArtworkJobManager) run(ctx context.Context, job *artworkJob, targets []ArtworkTarget) {
 	defer job.cancel()
+	// panic 时把任务收尾成"已取消"：否则 active 永远停在 running，之后再也起不了新任务。
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			log.Printf("[artwork] 任务 %s panic: %v\n%s", job.copy().ID, recovered, debug.Stack())
+			job.update(func(s *ArtworkJobSnapshot) {
+				s.Status = ArtworkJobCanceled
+				s.CurrentItem = ""
+				s.FinishedAt = time.Now().Format(time.RFC3339)
+				appendArtworkError(s, fmt.Sprintf("内部错误: %v", recovered))
+			})
+		}
+	}()
 
 	initial := job.copy()
 	startedAt := time.Now()

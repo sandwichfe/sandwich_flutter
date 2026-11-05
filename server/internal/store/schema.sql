@@ -70,6 +70,8 @@ CREATE INDEX IF NOT EXISTS idx_items_type ON items(type);
 CREATE INDEX IF NOT EXISTS idx_items_name ON items(name);
 CREATE INDEX IF NOT EXISTS idx_items_sort_name ON items(sort_name);
 CREATE INDEX IF NOT EXISTS idx_items_premiere ON items(premiere_date);
+-- 「库内最新加入」走 (library_id, date_created) 复合索引，避免每次临时 B 树排序
+CREATE INDEX IF NOT EXISTS idx_items_library_created ON items(library_id, date_created);
 
 CREATE TABLE IF NOT EXISTS user_data (
     user_id                 TEXT NOT NULL,
@@ -83,6 +85,8 @@ CREATE TABLE IF NOT EXISTS user_data (
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_data_played ON user_data(user_id, last_played_date);
+-- 「继续观看」的播放位置过滤复用不到上面那条索引，单独补一条
+CREATE INDEX IF NOT EXISTS idx_user_data_resume ON user_data(user_id, played, last_played_date);
 
 CREATE TABLE IF NOT EXISTS play_sessions (
     id             TEXT PRIMARY KEY,

@@ -2,8 +2,8 @@ package media
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
-	"sync"
 
 	"embyx/internal/dto"
 	"embyx/internal/store"
@@ -130,7 +130,10 @@ func normalizeProviderIDs(ids map[string]string) map[string]string {
 
 // importArtwork 把目录里的本地图片拷进自管图片目录，并把 tag 回写到条目。
 func (s *Scanner) importArtwork(item *store.Item, videoPath string, logf func(string, ...any)) {
-	art := FindArtwork(videoPath)
+	// 同目录的图片与演员头像只枚举一次：网络盘上这两次 ReadDir 是扫描里最贵的一环。
+	dir := filepath.Dir(videoPath)
+	snapshot := s.snapshotDir(dir)
+	art := findArtworkIn(dir, filepath.Base(videoPath), snapshot.images)
 	// 目录图回退（poster/folder/cover/movie）会让同目录多个视频共用一张图，
 	// 这行日志能直接看出每个条目的海报究竟来自哪个文件。
 	primarySource := art.Primary
@@ -178,7 +181,7 @@ func (s *Scanner) importArtwork(item *store.Item, videoPath string, logf func(st
 	}
 
 	// .actors/<演员名>.jpg 由 tinyMediaManager 一类工具生成。
-	for name, path := range FindActorImages(videoPath) {
+	for name, path := range snapshot.actors {
 		personID := store.StableID("person:" + name)
 		tag, err := s.saveArtwork(personID, "Primary", 0, path)
 		if err != nil {
@@ -215,21 +218,9 @@ func (s *Scanner) saveArtwork(itemID, imageType string, index int, sourcePath st
 
 // lockArtworkTarget 按目标文件加锁。演员头像由多个条目共用同一路径
 // （images/<personID>/primary/0.jpg），并发扫描时不加锁会重复转码，
-// 非原子写还可能让 HTTP 读到半截文件。锁表按图片数量增长，单条目开销很小。
+// 非原子写还可能让 HTTP 读到半截文件。
 func (s *Scanner) lockArtworkTarget(target string) func() {
-	s.artMu.Lock()
-	if s.artLocks == nil {
-		s.artLocks = make(map[string]*sync.Mutex)
-	}
-	lock, ok := s.artLocks[target]
-	if !ok {
-		lock = &sync.Mutex{}
-		s.artLocks[target] = lock
-	}
-	s.artMu.Unlock()
-
-	lock.Lock()
-	return lock.Unlock
+	return s.artLocks.Lock(target)
 }
 
 func isUpToDate(target, source string) bool {
