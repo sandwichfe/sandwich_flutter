@@ -1181,25 +1181,65 @@ class _EmptyState extends StatelessWidget {
 
 class _WorkspaceError extends StatelessWidget {
   final String message;
+  // 原始异常文本：单行会撑破布局，改成可换行、可复制的小字。
+  final String detail;
   final VoidCallback onRetry;
+  // 初始化失败时整个工作台被错误页替换，侧栏与账号菜单一并消失，
+  // 这里必须留一个回登录页的出口，否则服务器长期不可达时改不了地址、退不出去。
+  final VoidCallback? onLogout;
 
-  const _WorkspaceError({required this.message, required this.onRetry});
+  const _WorkspaceError({
+    required this.message,
+    this.detail = '',
+    required this.onRetry,
+    this.onLogout,
+  });
 
   @override
-  Widget build(BuildContext context) => Center(
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const Icon(Icons.cloud_off_outlined, size: 52),
-        const SizedBox(height: 12),
-        Text(message),
-        const SizedBox(height: 16),
-        OutlinedButton.icon(
-          onPressed: onRetry,
-          icon: const Icon(Icons.refresh),
-          label: const Text('重试'),
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Center(
+      // 窄窗口下长文案需要换行并允许整体滚动，避免横向溢出。
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.cloud_off_outlined, size: 52),
+              const SizedBox(height: 12),
+              Text(message, textAlign: TextAlign.center),
+              if (detail.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                SelectableText(
+                  detail,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12, color: colors.outline),
+                ),
+              ],
+              const SizedBox(height: 16),
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 12,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: onRetry,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('重试'),
+                  ),
+                  if (onLogout != null)
+                    TextButton.icon(
+                      onPressed: onLogout,
+                      icon: const Icon(Icons.login),
+                      label: const Text('返回登录'),
+                    ),
+                ],
+              ),
+            ],
+          ),
         ),
-      ],
-    ),
-  );
+      ),
+    );
+  }
 }

@@ -53,6 +53,8 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
   bool favoritePeopleLoading = false;
   bool favoriteMovieLoading = false;
   String error = '';
+  // 初始化失败的原始异常文本，只用于错误页的小字详情，便于排查。
+  String errorDetail = '';
   String homeError = '';
   int queryVersion = 0;
 
@@ -89,15 +91,20 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
     // 工作台默认进入首页，媒体库详情仅在用户选择后再按需加载。
     activeId = '';
     loading = false;
+    // 重试成功后清掉上一次的错误，避免错误页或横幅残留在正常界面上。
+    error = '';
+    errorDetail = '';
     _notify();
     loadCounts();
     await loadHome();
   }
 
-  // 首页加载失败时的降级状态：保留已登录状态，只展示可重试的错误页。
-  void markInitializeFailed(String message) {
+  // 初始化失败时的降级状态：保留已登录状态，只展示可重试的错误页。
+  // message 面向用户，detail 保留原始异常供排查。
+  void markInitializeFailed(String message, {String detail = ''}) {
     loading = false;
     error = message;
+    errorDetail = detail;
     _notify();
   }
 

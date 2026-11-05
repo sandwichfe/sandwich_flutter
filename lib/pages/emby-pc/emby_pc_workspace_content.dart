@@ -117,7 +117,8 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
     }
     if (_c.homeError.isNotEmpty && !_c.homeLoaded) {
       return _WorkspaceError(
-        message: _c.homeError,
+        message: '首页加载失败',
+        detail: _c.homeError,
         onRetry: () => _c.loadHome(force: true),
       );
     }

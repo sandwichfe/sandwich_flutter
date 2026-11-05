@@ -177,8 +177,24 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         widget.onLogout();
         return;
       }
-      _c.markInitializeFailed('加载媒体库失败：$error');
+      _c.markInitializeFailed(
+        _describeInitializeError(error),
+        // 原始异常保留在详情里，便于排查但不再撑破错误页布局。
+        detail: error.toString(),
+      );
     }
+  }
+
+  // 原始异常带 URI 与 Windows 错误码，错误页主文案只留能指导用户行动的信息。
+  String _describeInitializeError(Object error) {
+    final text = error.toString();
+    final target = EmbyPcService.instance.serverUrl;
+    final suffix = target.isEmpty ? '' : '：$target';
+    if (text.contains('超时')) return '连接服务器超时$suffix';
+    if (text.contains('SocketException') || text.contains('ClientException')) {
+      return '无法连接服务器$suffix';
+    }
+    return '加载媒体库失败$suffix';
   }
 
   // 以下三个筛选写入集中在这里，工具栏只负责展示选项。
@@ -700,7 +716,13 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                   )._buildMobileNavigationDrawer(context)
                   : null,
           body: _c.error.isNotEmpty && _c.libraries.isEmpty
-              ? _WorkspaceError(message: _c.error, onRetry: _initialize)
+              ? _WorkspaceError(
+                  message: _c.error,
+                  detail: _c.errorDetail,
+                  onRetry: _initialize,
+                  // 清会话后回到登录页，用户可重新填写服务器地址再登录。
+                  onLogout: _logout,
+                )
               : Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
