@@ -284,6 +284,17 @@ func (s *Store) CountLibraryItems(ctx context.Context, libraryID string) (int, e
 	return total, err
 }
 
+// CountCoverCandidates 统计库里可能进拼图封面的视频条目数。
+// 与 RecentLibraryItemIDs 的过滤条件保持一致，用它区分"片子本来就少"和"海报还没生成完"。
+func (s *Store) CountCoverCandidates(ctx context.Context, libraryID string) (int, error) {
+	var total int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM items
+		 WHERE (library_id = ? OR parent_id = ?)
+		   AND type IN ('Movie', 'Video', 'Episode')`, libraryID, libraryID).Scan(&total)
+	return total, err
+}
+
 func firstPath(paths []string) string {
 	if len(paths) == 0 {
 		return ""

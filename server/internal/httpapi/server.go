@@ -23,6 +23,8 @@ type Server struct {
 	artworkJobs *media.ArtworkJobManager
 	// imageRenderer 负责按宽度/画质缩放图片并做磁盘缓存。
 	imageRenderer *media.ImageRenderer
+	// libraryCovers 生成媒体库默认拼图封面（最近加入的 4 张条目海报拼成 2×2）。
+	libraryCovers *media.LibraryCoverBuilder
 
 	// baseCtx 是后台任务（扫描、图片生成）的父 context，进程退出时取消。
 	baseCtx context.Context
@@ -41,10 +43,15 @@ func New(cfg config.Config, st *store.Store, images *media.ImageStore, bif *medi
 		artwork: media.NewArtworkGenerator(images, media.NewProber(cfg.FFprobePath), cfg.FFmpegPath),
 		// 缩放结果落在数据目录下，和 BIF 缓存同级。
 		imageRenderer: media.NewImageRenderer(filepath.Join(cfg.DataDir, "cache", "images")),
+		libraryCovers: media.NewLibraryCoverBuilder(images, st),
 		mux:           http.NewServeMux(),
 	}
 	// 批量任务在后台跑，生成完成后通过回调回写图片标记。
 	server.artworkJobs = media.NewArtworkJobManager(server.artwork, server.markGeneratedImageTags)
+	// 扫描是条目增删的唯一入口，扫描结束在这里重建媒体库拼图封面。
+	if scanner != nil {
+		scanner.SetScanFinishedHook(server.rebuildLibraryCovers)
+	}
 	server.routes()
 	return server
 }

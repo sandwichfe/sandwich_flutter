@@ -33,6 +33,10 @@ var artworkDefaults = map[string][2]int{
 // 只取中间段，避开片头片尾的纯黑帧与字幕滚动画面。
 var sniffRatios = []float64{0.10, 0.25, 0.40, 0.55, 0.70, 0.85}
 
+// sniffConcurrency 限制嗅探时同时运行的 ffmpeg 数量。
+// 候选点本身只有几个，全开收益有限；此外并发越多，越容易争抢同一文件所在磁盘的带宽。
+const sniffConcurrency = 3
+
 // ArtworkOptions 汇总一次生成请求的参数。
 type ArtworkOptions struct {
 	SourcePath   string
@@ -154,6 +158,7 @@ func formatClock(seconds float64) string {
 
 // sniffPosition 在几个候选时间点抽帧，挑画面信息量最大的一帧。
 // 打分同时惩罚过暗和过亮的画面（黑场、白场、字幕淡入淡出）。
+// 各候选点互不依赖，按 sniffConcurrency 并发执行。
 func (g *ArtworkGenerator) sniffPosition(ctx context.Context, sourcePath string, durationSeconds float64) float64 {
 	if durationSeconds <= 1 {
 		return 0
@@ -164,20 +169,43 @@ func (g *ArtworkGenerator) sniffPosition(ctx context.Context, sourcePath string,
 	}
 	defer os.RemoveAll(tempDir)
 
-	bestPosition := durationSeconds * 0.30
-	bestScore := -1.0
+	// 每个 worker 只写自己下标的分数，互不重叠，因此不需要加锁。
+	// -1 表示该候选点抽帧或解码失败。
+	scores := make([]float64, len(sniffRatios))
+	for index := range scores {
+		scores[index] = -1
+	}
+
+	sem := make(chan struct{}, sniffConcurrency)
+	var wg sync.WaitGroup
 	for index, ratio := range sniffRatios {
-		position := durationSeconds * ratio
-		candidate := filepath.Join(tempDir, "sniff_"+strconv.Itoa(index)+".jpg")
-		if err := g.extractFrame(ctx, sourcePath, position, 320, 0, candidate); err != nil {
-			continue
-		}
-		score := frameScore(candidate)
-		if score > bestScore {
-			bestScore, bestPosition = score, position
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(index int, ratio float64) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			position := durationSeconds * ratio
+			candidate := filepath.Join(tempDir, "sniff_"+strconv.Itoa(index)+".jpg")
+			if err := g.extractFrame(ctx, sourcePath, position, 320, 0, candidate); err != nil {
+				return
+			}
+			scores[index] = frameScore(candidate)
+		}(index, ratio)
+	}
+	wg.Wait()
+
+	bestIndex := -1
+	for index, score := range scores {
+		// 严格大于：分数相同时保留更靠前的候选点，与串行遍历的取舍保持一致。
+		if score >= 0 && (bestIndex < 0 || score > scores[bestIndex]) {
+			bestIndex = index
 		}
 	}
-	return bestPosition
+	if bestIndex < 0 {
+		return durationSeconds * 0.30
+	}
+	return durationSeconds * sniffRatios[bestIndex]
 }
 
 // frameScore 用灰度标准差作为"细节丰富度"，再按过暗/过亮像素占比做惩罚。

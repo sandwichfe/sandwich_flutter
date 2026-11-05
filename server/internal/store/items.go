@@ -503,6 +503,35 @@ func (s *Store) LibraryVideoItems(ctx context.Context, libraryID string) ([]Libr
 	return items, rows.Err()
 }
 
+// RecentLibraryItemIDs 按加入时间倒序返回库内视频条目的 ID，供媒体库拼图封面取材。
+// 同一批导入的条目 date_created 完全相同，用 sort_name/name 兜底保证顺序稳定，
+// 否则每次查询取到的"最近四部"可能顺序不同，拼图会反复重建。
+func (s *Store) RecentLibraryItemIDs(ctx context.Context, libraryID string, limit int) ([]string, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id FROM items
+		 WHERE (library_id = ? OR parent_id = ?)
+		   AND type IN ('Movie', 'Video', 'Episode')
+		 ORDER BY date_created DESC, sort_name ASC, name ASC
+		 LIMIT ?`, libraryID, libraryID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("查询媒体库最近条目失败: %w", err)
+	}
+	defer rows.Close()
+
+	ids := make([]string, 0, limit)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // ItemSource 是生成封面需要的条目信息：源文件路径与时长。
 type ItemSource struct {
 	ID           string

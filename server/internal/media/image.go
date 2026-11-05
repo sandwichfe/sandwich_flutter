@@ -43,6 +43,13 @@ func (s *ImageStore) GeneratedPath(itemID, imageType string, index int) string {
 		strings.ToLower(imageType), strconv.Itoa(index)+".jpg")
 }
 
+// GeneratedMetaPath 返回生成图旁边的元数据文件路径（缓存标记、重建签名等）。
+// 派生信息跟着图片文件走，删除图片时只清目录即可，不必为它新增数据库列。
+func (s *ImageStore) GeneratedMetaPath(itemID, imageType string, index int, ext string) string {
+	path := s.GeneratedPath(itemID, imageType, index)
+	return strings.TrimSuffix(path, filepath.Ext(path)) + "." + ext
+}
+
 // SaveGeneratedImage 写入服务端生成的图片，规则与上传一致：能解码就统一转成 JPEG。
 func (s *ImageStore) SaveGeneratedImage(itemID, imageType string, index int, raw []byte) (string, error) {
 	if len(raw) == 0 {

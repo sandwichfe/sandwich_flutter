@@ -25,10 +25,19 @@ type virtualFolderDto struct {
 	PreferLocalArtwork bool `json:"PreferLocalArtwork"`
 }
 
-func libraryToDto(lib store.Library) dto.BaseItemDto {
+// libraryToDto 把媒体库包装成客户端视图条目。
+// 只有带上 Primary 标记，客户端才会去请求库封面，否则一律按无图处理。
+func (s *Server) libraryToDto(lib store.Library) dto.BaseItemDto {
 	locations := lib.Paths
 	if locations == nil {
 		locations = []string{}
+	}
+	// 手动/目录封面优先，其次才是拼图封面，规则与读图链路一致。
+	imageTags := map[string]string{}
+	if s.libraryCovers != nil {
+		if tag := s.libraryCovers.Tag(lib.ID); tag != "" {
+			imageTags["Primary"] = tag
+		}
 	}
 	return dto.BaseItemDto{
 		ID:             lib.ID,
@@ -37,7 +46,9 @@ func libraryToDto(lib store.Library) dto.BaseItemDto {
 		CollectionType: lib.CollectionType,
 		IsFolder:       true,
 		Locations:      locations,
-		ImageTags:      map[string]string{},
+		ImageTags:      imageTags,
+		// 客户端优先用 PrimaryImageTag 做缓存键，两个字段保持一致。
+		PrimaryImageTag: imageTags["Primary"],
 	}
 }
 
@@ -51,7 +62,7 @@ func (s *Server) handleViews(w http.ResponseWriter, r *http.Request) {
 
 	items := make([]dto.BaseItemDto, 0, len(libraries))
 	for _, lib := range libraries {
-		items = append(items, libraryToDto(lib))
+		items = append(items, s.libraryToDto(lib))
 	}
 	writeJSON(w, http.StatusOK, dto.QueryResult{Items: items, TotalRecordCount: len(items)})
 }
@@ -258,6 +269,9 @@ func (s *Server) handleDeleteVirtualFolder(w http.ResponseWriter, r *http.Reques
 		_ = s.images.RemoveItem(itemID)
 		s.imageRenderer.RemoveItem(itemID)
 	}
+	// 库自身也有一份拼图封面（images/{libraryID}/generated），删除库时一并回收。
+	_ = s.images.RemoveItem(lib.ID)
+	s.imageRenderer.RemoveItem(lib.ID)
 	log.Printf("已删除媒体库 %s，同时清理 %d 个条目", lib.Name, len(itemIDs))
 	writeNoContent(w)
 }
@@ -280,6 +294,32 @@ func (s *Server) scanLibraryAsync(lib *store.Library) {
 	go func() {
 		if _, err := s.scanner.ScanLibrary(s.baseContext(), target, log.Printf); err != nil {
 			log.Printf("媒体库 %s 扫描失败: %v", target.Name, err)
+		}
+	}()
+}
+
+// rebuildLibraryCovers 在扫描结束后重建拼图封面。
+// 串行执行：多个库同时拼接会重复争抢 CPU 与磁盘，而这里不在请求路径上，排队没有副作用。
+// 是否真的重拼由签名决定，所以"每次扫描都调用"不会产生多余的文件写入。
+func (s *Server) rebuildLibraryCovers(libraryIDs []string) {
+	if s.libraryCovers == nil || len(libraryIDs) == 0 {
+		return
+	}
+	go func() {
+		ctx := s.baseContext()
+		for _, id := range libraryIDs {
+			lib, err := s.store.LibraryByID(ctx, id)
+			if err != nil {
+				continue
+			}
+			updated, err := s.libraryCovers.Rebuild(ctx, *lib)
+			if err != nil {
+				log.Printf("[library-cover] 生成媒体库封面失败 library=%s: %v", id, err)
+				continue
+			}
+			if updated {
+				log.Printf("[library-cover] 已更新媒体库封面 library=%s (%s)", id, lib.Name)
+			}
 		}
 	}()
 }

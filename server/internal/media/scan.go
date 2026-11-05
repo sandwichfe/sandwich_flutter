@@ -48,6 +48,8 @@ type Scanner struct {
 	artLocks map[string]*sync.Mutex
 	// onItemRemoved 是条目删除后的清理回调（缓存回收注入），可为 nil。
 	onItemRemoved func(itemID string)
+	// onScanFinished 在扫描结束后回调本次涉及的媒体库 ID（派生数据重建注入），可为 nil。
+	onScanFinished func(libraryIDs []string)
 }
 
 func NewScanner(s *store.Store, prober *Prober, images *ImageStore, bif *BifCache) *Scanner {
@@ -65,6 +67,21 @@ func NewScanner(s *store.Store, prober *Prober, images *ImageStore, bif *BifCach
 // 不放进构造函数：缓存回收是可选的运维组件，扫描本身不依赖它。
 func (s *Scanner) SetItemRemovedHook(hook func(itemID string)) {
 	s.onItemRemoved = hook
+}
+
+// SetScanFinishedHook 注册扫描结束回调（媒体库封面等派生数据重建用）。
+// 扫描是条目增删的唯一入口，创建库、手动扫描、片源变动最终都会走到这里。
+func (s *Scanner) SetScanFinishedHook(hook func(libraryIDs []string)) {
+	s.onScanFinished = hook
+}
+
+// notifyScanFinished 把本次扫描涉及的库交给回调。回调负责异步处理，
+// 这里只做一次投递，不阻塞扫描令牌的释放。
+func (s *Scanner) notifyScanFinished(libraryIDs []string) {
+	if s.onScanFinished == nil || len(libraryIDs) == 0 {
+		return
+	}
+	s.onScanFinished(libraryIDs)
 }
 
 // scanWorkers 决定扫描并发度。耗时几乎全在 ffprobe 子进程和图片转码上，
@@ -88,6 +105,10 @@ func (s *Scanner) ScanAll(ctx context.Context, logf func(string, ...any)) (int, 
 	if !s.beginScan(logf) {
 		return 0, nil
 	}
+	// defer 是后进先出：progress.finish → Unlock → 回调，
+	// 保证回调执行时扫描状态已标记完成、扫描令牌也已释放。
+	scannedLibraries := make([]string, 0, 8)
+	defer func() { s.notifyScanFinished(scannedLibraries) }()
 	defer s.scanMu.Unlock()
 	defer s.progress.finish()
 
@@ -104,6 +125,8 @@ func (s *Scanner) ScanAll(ctx context.Context, logf func(string, ...any)) (int, 
 	for _, lib := range libraries {
 		imported, scanErr := s.scanLibrary(ctx, lib, logf)
 		total += imported
+		// 扫描失败也记入：条目可能已有增删，覆盖按当前条目重建仍然是对的。
+		scannedLibraries = append(scannedLibraries, lib.ID)
 		if scanErr != nil {
 			logf("扫描媒体库 %s 失败: %v", lib.Name, scanErr)
 		}
@@ -120,6 +143,8 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib store.Library, logf func(
 	if !s.beginScan(logf) {
 		return 0, nil
 	}
+	// 与 ScanAll 相同：先置完成状态并释放令牌，最后通知派生数据重建。
+	defer func() { s.notifyScanFinished([]string{lib.ID}) }()
 	defer s.scanMu.Unlock()
 	defer s.progress.finish()
 	return s.scanLibrary(ctx, lib, logf)
