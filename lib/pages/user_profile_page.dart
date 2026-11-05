@@ -78,6 +78,8 @@ class _AvatarEditorSheetState extends State<_AvatarEditorSheet> {
     final service = EmbyPcService.instance;
     final colors = Theme.of(context).colorScheme;
     final userName = service.currentUserName.trim();
+    // 没有头像标记时地址为空，直接显示占位图标，不发起图片请求。
+    final avatarUrl = service.userAvatarUrl(maxWidth: 192);
     return Padding(
       padding: EdgeInsets.fromLTRB(
         24,
@@ -93,8 +95,16 @@ class _AvatarEditorSheetState extends State<_AvatarEditorSheet> {
           CircleAvatar(
             radius: 48,
             backgroundColor: colors.surfaceContainerHighest,
-            foregroundImage: NetworkImage(service.userAvatarUrl(maxWidth: 192)),
-            onForegroundImageError: (_, _) {},
+            foregroundImage: avatarUrl == null
+                ? null
+                : NetworkImage(avatarUrl),
+            // 加载失败后标记为不可用并重建，避免反复请求 404 地址。
+            onForegroundImageError: avatarUrl == null
+                ? null
+                : (_, _) {
+                    service.markUserAvatarUnavailable();
+                    if (mounted) setState(() {});
+                  },
             child: Icon(
               Icons.person_outline,
               size: 40,

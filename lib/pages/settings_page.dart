@@ -104,6 +104,8 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    // 没有头像标记时地址为空，列表项直接显示占位图标，不发起图片请求。
+    final avatarUrl = EmbyPcService.instance.userAvatarUrl();
     return Scaffold(
       appBar: AppBar(title: const Text('设置')),
       body: ListenableBuilder(
@@ -131,10 +133,16 @@ class _SettingsPageState extends State<SettingsPage> {
                 backgroundColor: Theme.of(
                   context,
                 ).colorScheme.surfaceContainerHighest,
-                foregroundImage: NetworkImage(
-                  EmbyPcService.instance.userAvatarUrl(),
-                ),
-                onForegroundImageError: (_, _) {},
+                foregroundImage: avatarUrl == null
+                    ? null
+                    : NetworkImage(avatarUrl),
+                // 加载失败后标记为不可用并重建，避免设置页反复请求 404 地址。
+                onForegroundImageError: avatarUrl == null
+                    ? null
+                    : (_, _) {
+                        EmbyPcService.instance.markUserAvatarUnavailable();
+                        if (mounted) setState(() {});
+                      },
                 child: const Icon(Icons.person_outline),
               ),
               title: const Text('修改头像'),

@@ -29,6 +29,7 @@ class EmbyPcService {
   static const _userIdKey = 'emby_pc_user_id';
   static const _tokenKey = 'emby_pc_token';
   static const _userNameKey = 'emby_pc_user_name';
+  static const _userAvatarTagKey = 'emby_pc_user_avatar_tag';
   static const _loginNameKey = 'emby_pc_login_name';
   static const _passwordKey = 'emby_pc_password';
   static const _rememberKey = 'emby_pc_remember_password';
@@ -41,7 +42,18 @@ class EmbyPcService {
   String userId = '';
   String accessToken = '';
   String currentUserName = '';
+  // 服务端下发的主图标记：为空表示该用户没设头像，客户端不必再请求图片。
+  String currentUserAvatarTag = '';
   int _userAvatarRevision = 0;
+  // 头像请求失败后置位，本次会话不再重试，避免每次重建都重复请求同一个 404 地址。
+  bool _avatarUnavailable = false;
+
+  // 头像状态变化（加载失败、上传成功）时通知界面重建，切换占位图标或新头像。
+  final ValueNotifier<int> avatarRevision = ValueNotifier<int>(0);
+
+  /// 是否值得发起头像请求：没有主图标记或本次会话已确认失败时返回 false。
+  bool get hasUserAvatar =>
+      currentUserAvatarTag.isNotEmpty && !_avatarUnavailable;
 
   bool get isLoggedIn => accessToken.isNotEmpty && userId.isNotEmpty;
 
@@ -51,6 +63,11 @@ class EmbyPcService {
     userId = prefs.getString(_userIdKey) ?? '';
     accessToken = prefs.getString(_tokenKey) ?? '';
     currentUserName = prefs.getString(_userNameKey) ?? '';
+    // 旧版本没有存过标记（null）时先允许请求一次，避免已有头像的用户升级后看不到头像；
+    // 明确存过空值才说明服务端确认该用户没有头像。
+    currentUserAvatarTag = prefs.getString(_userAvatarTagKey) ?? 'unknown';
+    // 冷启动时重新给头像一次机会，上次会话的失败不应永久生效。
+    _avatarUnavailable = false;
   }
 
   Future<EmbyPcSavedLogin> readSavedLogin() async {
@@ -99,11 +116,15 @@ class EmbyPcService {
     userId = id;
     accessToken = token;
     currentUserName = user['Name']?.toString() ?? username.trim();
+    // 登录响应带回主图标记，客户端据此决定是否请求头像图片。
+    currentUserAvatarTag = user['PrimaryImageTag']?.toString() ?? '';
+    _avatarUnavailable = false;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_serverKey, serverUrl);
     await prefs.setString(_userIdKey, userId);
     await prefs.setString(_tokenKey, accessToken);
     await prefs.setString(_userNameKey, currentUserName);
+    await prefs.setString(_userAvatarTagKey, currentUserAvatarTag);
     await prefs.setString(_loginNameKey, username.trim());
     await prefs.setBool(_rememberKey, rememberPassword);
     if (rememberPassword) {
@@ -117,10 +138,13 @@ class EmbyPcService {
     accessToken = '';
     userId = '';
     currentUserName = '';
+    currentUserAvatarTag = '';
+    _avatarUnavailable = false;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_tokenKey);
     await prefs.remove(_userIdKey);
     await prefs.remove(_userNameKey);
+    await prefs.remove(_userAvatarTagKey);
   }
 
   Future<List<EmbyPcItem>> getLibraries() async {
@@ -425,6 +449,15 @@ class EmbyPcService {
     );
     _ensureSuccess(response, '上传头像失败');
     _userAvatarRevision++;
+    // 服务端在新头像落盘后回传主图标记，用它解除失败记忆并刷新图片地址。
+    final newTag = response.headers['x-primary-image-tag']?.trim() ?? '';
+    currentUserAvatarTag = newTag.isNotEmpty
+        ? newTag
+        : 'local-$_userAvatarRevision';
+    _avatarUnavailable = false;
+    avatarRevision.value++;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_userAvatarTagKey, currentUserAvatarTag);
   }
 
   Future<void> deleteItemImage(
@@ -812,14 +845,25 @@ class EmbyPcService {
   }
 
   // 用户头像使用 Swagger 的 Users/{Id}/Images/{Type} 接口，请求当前登录用户的主图。
-  String userAvatarUrl({int maxWidth = 96}) =>
-      _uri('/emby/Users/$userId/Images/Primary', {
-        'api_key': accessToken,
-        'MaxWidth': '$maxWidth',
-        'Quality': '82',
-        // 上传后改变地址，避免 Flutter 的网络图片缓存继续显示旧头像。
-        'v': '$_userAvatarRevision',
-      }).toString();
+  // 没有主图标记或本次会话已确认加载失败时返回 null，界面直接显示占位图标，
+  // 避免每次重建都去向一个必然 404 的地址发请求。
+  String? userAvatarUrl({int maxWidth = 96}) {
+    if (!hasUserAvatar) return null;
+    return _uri('/emby/Users/$userId/Images/Primary', {
+      'api_key': accessToken,
+      'MaxWidth': '$maxWidth',
+      'Quality': '82',
+      // 上传后改变地址，避免 Flutter 的网络图片缓存继续显示旧头像。
+      'v': '$_userAvatarRevision',
+    }).toString();
+  }
+
+  // 头像加载失败后由界面回调触发：本次会话不再重试，直到重新登录或上传新头像。
+  void markUserAvatarUnavailable() {
+    if (_avatarUnavailable) return;
+    _avatarUnavailable = true;
+    avatarRevision.value++;
+  }
 
   // 多版本播放通过 MediaSourceId 指定源，未指定时保持 Emby 默认选择。
   String streamUrl(String itemId, {String? mediaSourceId}) =>

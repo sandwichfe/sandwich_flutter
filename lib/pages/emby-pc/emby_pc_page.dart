@@ -134,6 +134,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     _scrollController.addListener(_onScroll);
     // 数据变化统一由 controller 通知，页面只在这里同步一次重建。
     _c.addListener(_onWorkspaceChanged);
+    // 头像加载失败后服务层通知一次，立即重建切回占位图标，不再重复请求。
+    EmbyPcService.instance.avatarRevision.addListener(_onWorkspaceChanged);
     // 401 集中拦截：任何请求发现令牌失效都由服务层通知一次，这里统一回登录页。
     EmbyPcService.instance.unauthorizedRevision.addListener(_handleSessionExpired);
     _initialize();
@@ -687,6 +689,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   void dispose() {
     _c.removeListener(_onWorkspaceChanged);
     _c.dispose();
+    EmbyPcService.instance.avatarRevision.removeListener(_onWorkspaceChanged);
     EmbyPcService.instance.unauthorizedRevision.removeListener(
       _handleSessionExpired,
     );

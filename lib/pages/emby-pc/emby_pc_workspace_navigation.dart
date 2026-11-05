@@ -62,16 +62,22 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
     bool collapsed = false,
   }) {
     final colors = Theme.of(context).colorScheme;
-    final userName = EmbyPcService.instance.currentUserName.trim();
+    final service = EmbyPcService.instance;
+    final userName = service.currentUserName.trim();
     final displayName = userName.isEmpty ? '当前用户' : userName;
-    final avatarImage = NetworkImage(EmbyPcService.instance.userAvatarUrl());
+    // 没有头像标记时地址为空，直接走占位图标，不发起图片请求。
+    final avatarUrl = service.userAvatarUrl();
+    final avatarImage = avatarUrl == null ? null : NetworkImage(avatarUrl);
     // 菜单入口和账号信息区共用头像样式，仅通过半径区分信息层级。
     Widget buildAvatar(double radius) => CircleAvatar(
       radius: radius,
       backgroundColor: colors.surfaceContainerHighest,
       foregroundImage: avatarImage,
-      // 用户未设置头像或图片请求失败时显示稳定的账号占位图标。
-      onForegroundImageError: (_, _) {},
+      // 用户未设置头像或图片请求失败时显示稳定的账号占位图标；
+      // 失败一次就标记为不可用，避免页面重建时反复请求同一个 404 地址。
+      onForegroundImageError: avatarImage == null
+          ? null
+          : (_, _) => service.markUserAvatarUnavailable(),
       child: Icon(
         Icons.person_outline,
         size: radius + 4,

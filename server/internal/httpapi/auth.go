@@ -98,6 +98,8 @@ func (s *Server) handleUploadUserAvatar(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	_ = s.store.UpdateUserImageTag(userID, tag)
+	// 回传新的主图标记，客户端据此刷新头像地址并解除“无头像”状态。
+	w.Header().Set("X-Primary-Image-Tag", tag)
 	writeNoContent(w)
 }
 
