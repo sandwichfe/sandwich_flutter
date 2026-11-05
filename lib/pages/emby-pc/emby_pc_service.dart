@@ -594,6 +594,28 @@ class EmbyPcService {
     );
   }
 
+  // 最新入库：后端 Items/Latest 直接返回数组，按 DateCreated 倒序。
+  Future<List<EmbyPcItem>> getLatestItems({
+    int limit = 24,
+    String libraryId = '',
+  }) async {
+    final response = await _client.get(
+      _uri('/emby/Users/$userId/Items/Latest', {
+        'Limit': '${limit.clamp(1, 100)}',
+        if (libraryId.isNotEmpty) 'ParentId': libraryId,
+      }),
+      headers: _tokenHeader,
+    );
+    _ensureSuccess(response, '读取最新入库失败');
+    if (response.bodyBytes.isEmpty) return const [];
+    final data = jsonDecode(utf8.decode(response.bodyBytes));
+    if (data is! List) return const [];
+    return data
+        .whereType<Map>()
+        .map((item) => EmbyPcItem.fromJson(_asMap(item)))
+        .toList();
+  }
+
   Future<EmbyPcPage> searchItems(
     String searchTerm, {
     int limit = 60,
@@ -751,6 +773,27 @@ class EmbyPcService {
         : await _client.delete(_uri(path), headers: _tokenHeader);
     final data = _decodeResponse(response, '更新收藏状态失败');
     return data['IsFavorite'] is bool ? data['IsFavorite'] as bool : favorite;
+  }
+
+  // 手动标记已看/未看：Emby 用同一资源的 POST/DELETE 表达两种状态。
+  // 标记已看时服务端会同时清零续播位置，列表进度条随之消失。
+  Future<bool> setPlayed(String itemId, bool played) async {
+    final path = '/emby/Users/$userId/PlayedItems/$itemId';
+    final response = played
+        ? await _client.post(_uri(path), headers: _tokenHeader)
+        : await _client.delete(_uri(path), headers: _tokenHeader);
+    final data = _decodeResponse(response, '更新观看状态失败');
+    return data['Played'] is bool ? data['Played'] as bool : played;
+  }
+
+  // 图片地址仍带 api_key 便于直接请求，但缓存键必须去掉凭据：
+  // 否则重装或改密码后令牌变化，整库海报会被当成新图片全部重新下载。
+  static String imageCacheKey(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null || uri.queryParameters['api_key'] == null) return url;
+    final query = Map<String, String>.from(uri.queryParameters)
+      ..remove('api_key');
+    return uri.replace(queryParameters: query).toString();
   }
 
   // source 留空时由服务端按条目所属媒体库的偏好决定读目录图还是生成图；

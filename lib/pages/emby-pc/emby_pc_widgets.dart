@@ -172,7 +172,13 @@ class _EmbyPcHorizontalDragScrollBehavior extends MaterialScrollBehavior {
 }
 
 // 卡片只负责分发管理动作，具体弹窗和接口调用由所在页面处理。
-enum EmbyPcMediaAction { editMetadata, editImages, refreshMetadata }
+// togglePlayed 用于手动标记已看/未看，属于用户数据而不是元数据编辑。
+enum EmbyPcMediaAction {
+  editMetadata,
+  editImages,
+  refreshMetadata,
+  togglePlayed,
+}
 
 class EmbyPcMediaTile extends StatefulWidget {
   final EmbyPcItem item;
@@ -227,10 +233,12 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
             : (widget.item.playbackPositionTicks / widget.item.runTimeTicks)
                 .clamp(0.0, 1.0)
                 .toDouble();
-    return Semantics(
-      button: true,
-      label: '打开 ${widget.item.name}',
-      child: MouseRegion(
+    // 网格里每张卡片独立成层，滚动时避免整屏重新绘制。
+    return RepaintBoundary(
+      child: Semantics(
+        button: true,
+        label: '打开 ${widget.item.name}',
+        child: MouseRegion(
         onEnter: (_) => setState(() => _hovered = true),
         onExit: (_) => setState(() => _hovered = false),
         cursor: SystemMouseCursors.click,
@@ -254,6 +262,7 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
                       progress: progress,
                     ),
           ),
+        ),
         ),
       ),
     );
@@ -346,6 +355,13 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
                 top: 8,
                 right: 8,
                 child: _MediaBadge(label: _qualityLabel(widget.item)),
+              ),
+            // 已看状态常驻左上角，和右上角的分辨率角标互不遮挡。
+            if (widget.item.played)
+              Positioned(
+                top: 8,
+                left: 8,
+                child: _MediaBadge(label: '已看'),
               ),
             _buildCardActions(bottom: progress > 0 ? 8 : 6),
             if (progress > 0)
@@ -470,8 +486,24 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
                 padding: EdgeInsets.zero,
                 enabled: !widget.actionBusy,
                 onSelected: widget.onAction,
-                itemBuilder: (context) => const [
+                itemBuilder: (context) => [
+                  // 已看状态就地切换，成功后列表角标与进度条同步更新。
                   PopupMenuItem(
+                    value: EmbyPcMediaAction.togglePlayed,
+                    child: Row(
+                      children: [
+                        Icon(
+                          widget.item.played
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 12),
+                        Text(widget.item.played ? '标记为未看' : '标记为已看'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
                     value: EmbyPcMediaAction.editMetadata,
                     child: Row(
                       children: [
@@ -481,7 +513,7 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
                       ],
                     ),
                   ),
-                  PopupMenuItem(
+                  const PopupMenuItem(
                     value: EmbyPcMediaAction.editImages,
                     child: Row(
                       children: [
@@ -491,7 +523,7 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
                       ],
                     ),
                   ),
-                  PopupMenuItem(
+                  const PopupMenuItem(
                     value: EmbyPcMediaAction.refreshMetadata,
                     child: Row(
                       children: [
@@ -540,126 +572,6 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
     if (width >= 1900 || height >= 1000) return '1080';
     if (width >= 1200 || height >= 700) return '720';
     return '';
-  }
-}
-
-/// 列表主视觉只使用当前媒体的真实 Backdrop，不引入与内容无关的装饰图片。
-class EmbyPcFeatureBanner extends StatelessWidget {
-  final EmbyPcItem item;
-  final VoidCallback onOpen;
-  final VoidCallback onPlay;
-
-  const EmbyPcFeatureBanner({
-    super.key,
-    required this.item,
-    required this.onOpen,
-    required this.onPlay,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    final imageUrl = EmbyPcService.instance.imageUrlForItem(
-      item,
-      type: 'Backdrop',
-      maxWidth: 1280,
-    );
-    final isResumable = item.playbackPositionTicks > 0 && !item.played;
-    return Semantics(
-      button: true,
-      label: '打开 ${item.name}',
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        child: GestureDetector(
-          onTap: onOpen,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: SizedBox(
-              height: 220,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  EmbyPcNetworkImage(url: imageUrl),
-                  const DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.centerLeft,
-                        end: Alignment.centerRight,
-                        colors: [Color(0xF0000000), Color(0x18000000)],
-                        stops: [0.0, 0.78],
-                      ),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(28, 22, 28, 22),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 560),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              isResumable ? '继续观看' : '精选媒体',
-                              style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.78),
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 5),
-                            Text(
-                              item.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 25,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 7),
-                            _MediaMetadata(item: item, onDark: true),
-                            if (item.overview.trim().isNotEmpty) ...[
-                              const SizedBox(height: 9),
-                              Text(
-                                item.overview.trim(),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.82),
-                                  fontSize: 13,
-                                  height: 1.45,
-                                ),
-                              ),
-                            ],
-                            const SizedBox(height: 13),
-                            FilledButton.icon(
-                              onPressed: onPlay,
-                              style: FilledButton.styleFrom(
-                                backgroundColor: Colors.white,
-                                foregroundColor: colors.primary,
-                                minimumSize: const Size(0, 38),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                              ),
-                              icon: const Icon(Icons.play_arrow_rounded),
-                              label: Text(isResumable ? '继续播放' : '播放'),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
   }
 }
 
@@ -743,17 +655,33 @@ class EmbyPcNetworkImage extends StatelessWidget {
     if (url.isEmpty) {
       return _ImagePlaceholder(color: colors.surfaceContainerHigh);
     }
-    return CachedNetworkImage(
-      imageUrl: url,
-      fit: fit,
-      fadeInDuration: const Duration(milliseconds: 160),
-      placeholder:
-          (_, _) => _ImagePlaceholder(
-            color: colors.surfaceContainerHigh,
-            loading: true,
-          ),
-      errorWidget:
-          (_, _, _) => _ImagePlaceholder(color: colors.surfaceContainerHigh),
+    // 按实际显示宽度解码：列表卡片不必把 1600px 原图整张放进内存缓存。
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final memWidth = constraints.hasBoundedWidth
+            ? ((constraints.maxWidth * MediaQuery.devicePixelRatioOf(context))
+                      .ceil()
+                      .clamp(64, 2048))
+                  .toInt()
+            : null;
+        return CachedNetworkImage(
+          imageUrl: url,
+          // 缓存键去掉 api_key：换令牌或重装后同一张海报仍命中已有缓存。
+          cacheKey: EmbyPcService.imageCacheKey(url),
+          memCacheWidth: memWidth,
+          fit: fit,
+          fadeInDuration: const Duration(milliseconds: 160),
+          placeholder:
+              (_, _) => _ImagePlaceholder(
+                color: colors.surfaceContainerHigh,
+                loading: true,
+              ),
+          errorWidget:
+              (_, _, _) => _ImagePlaceholder(
+                color: colors.surfaceContainerHigh,
+              ),
+        );
+      },
     );
   }
 }

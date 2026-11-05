@@ -34,10 +34,14 @@ class _GlobalSearchDialogState extends State<_GlobalSearchDialog> {
     final query = value.trim();
     final version = ++_requestVersion;
     setState(() {
-      _items = const [];
-      _total = 0;
       _error = '';
       _loading = query.isNotEmpty;
+      // 输入过程中保留上一次结果，避免面板在 loading 与结果之间反复闪；
+      // 只有真正清空关键词时才丢弃旧内容。
+      if (query.isEmpty) {
+        _items = const [];
+        _total = 0;
+      }
     });
     if (query.isEmpty) return;
     if (!debounce) {
@@ -236,7 +240,12 @@ class _GlobalSearchDialogState extends State<_GlobalSearchDialog> {
 
     final media = _items.where((item) => item.type != 'Person').toList();
     final people = _items.where((item) => item.type == 'Person').toList();
-    return CustomScrollView(
+    return Column(
+      children: [
+        // 结果保留期间用 2 像素细条提示正在查询，不把整块面板变成转圈。
+        if (_loading) const LinearProgressIndicator(minHeight: 2),
+        Expanded(
+          child: CustomScrollView(
       slivers: [
         ..._buildResultSection('影视内容', media),
         ..._buildResultSection('演员', people),
@@ -271,6 +280,9 @@ class _GlobalSearchDialogState extends State<_GlobalSearchDialog> {
           )
         else
           const SliverToBoxAdapter(child: SizedBox(height: 12)),
+      ],
+          ),
+        ),
       ],
     );
   }

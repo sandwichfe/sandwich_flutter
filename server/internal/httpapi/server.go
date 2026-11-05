@@ -159,4 +159,8 @@ func (s *Server) routes() {
 	// 收藏
 	s.mux.HandleFunc("POST /emby/Users/{userId}/FavoriteItems/{itemId}", s.handleSetFavorite(true))
 	s.mux.HandleFunc("DELETE /emby/Users/{userId}/FavoriteItems/{itemId}", s.handleSetFavorite(false))
+
+	// 已看 / 未看
+	s.mux.HandleFunc("POST /emby/Users/{userId}/PlayedItems/{itemId}", s.handleSetPlayed(true))
+	s.mux.HandleFunc("DELETE /emby/Users/{userId}/PlayedItems/{itemId}", s.handleSetPlayed(false))
 }

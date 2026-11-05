@@ -117,8 +117,11 @@ class EmbyPcItem {
   }
 
   // 详情页切换媒体版本时复用同一条目，只替换服务端返回的版本字段。
+  // played 用于标记已看后立即更新列表角标与续播按钮，无需整页重拉。
   EmbyPcItem copyWith({
     bool? isFavorite,
+    bool? played,
+    int? playbackPositionTicks,
     List<EmbyPcMediaSource>? mediaSources,
     int? runTimeTicks,
     int? width,
@@ -142,8 +145,9 @@ class EmbyPcItem {
     dateCreated: dateCreated,
     lastPlayedDate: lastPlayedDate,
     isFavorite: isFavorite ?? this.isFavorite,
-    played: played,
-    playbackPositionTicks: playbackPositionTicks,
+    played: played ?? this.played,
+    playbackPositionTicks:
+        playbackPositionTicks ?? this.playbackPositionTicks,
     genres: genres,
     tags: tags,
     studios: studios,

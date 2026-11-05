@@ -152,7 +152,8 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
   bool _muted = _sessionVolume <= 0;
   double _volume = _sessionVolume;
   double _volumeBeforeMute = _sessionVolumeBeforeMute;
-  double? _networkSpeedBytesPerSecond;
+  // 网速变化频繁，单独用 notifier 承载，避免只有加载层的文字刷新却重建整个页面。
+  final ValueNotifier<double?> _networkSpeed = ValueNotifier<double?>(null);
   String _error = '';
   bool _playerReady = false;
   bool _isPlaying = false;
@@ -166,6 +167,9 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
   bool _closing = false;
   bool _windowClosing = false;
   bool _allowPop = false;
+  // 标题栏在播放中跟随鼠标活动隐藏，避免顶部黑条长期占用画面。
+  bool _chromeVisible = true;
+  Timer? _chromeTimer;
   bool _stopReportQueued = false;
   bool _playerDisposed = false;
   late final _ThumbnailPreviewController _thumbnailPreviewController;
@@ -280,7 +284,10 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
   void _listenToPlayerState() {
     _playerSubscriptions.add(
       _player.stream.playing.listen((playing) {
-        if (mounted && !_windowClosing) setState(() => _isPlaying = playing);
+        if (!mounted || _windowClosing) return;
+        setState(() => _isPlaying = playing);
+        // 播放开始后隐藏标题栏，暂停时立即恢复。
+        _syncChromeVisibility();
       }),
     );
     _playerSubscriptions.add(
@@ -332,6 +339,13 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
         });
       }),
     );
+    // 播完立即结算：上报结束位置后服务端会把条目置为已看，列表返回时角标随之变化。
+    _playerSubscriptions.add(
+      _player.stream.completed.listen((completed) {
+        if (!completed || !mounted || _windowClosing) return;
+        unawaited(_handlePlaybackCompleted());
+      }),
+    );
   }
 
   Future<void> _observeNetworkSpeed() async {
@@ -349,14 +363,11 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
             final rawInputRate = cacheState['raw-input-rate'];
             if (rawInputRate is! num) return;
 
+            if (_windowClosing || !mounted) return;
             final speed = math.max(0.0, rawInputRate.toDouble());
-            if (_networkSpeedBytesPerSecond == speed) return;
-            if (_loading || _buffering) {
-              if (_windowClosing) return;
-              setState(() => _networkSpeedBytesPerSecond = speed);
-            } else {
-              _networkSpeedBytesPerSecond = speed;
-            }
+            if (_networkSpeed.value == speed) return;
+            // 直接更新 notifier：加载/缓冲提示是唯一订阅者，不触发整页重建。
+            _networkSpeed.value = speed;
           } catch (_) {
             // 缓存属性短暂不可解析时保留上一次速率，不影响视频播放。
           }
@@ -441,8 +452,10 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
   Future<void> _reportPlayback(
     EmbyPcPlaybackEvent event, {
     String progressEventName = 'TimeUpdate',
+    // seek 后播放器状态里的位置可能尚未同步，允许直接使用目标位置上报。
+    Duration? positionOverride,
   }) {
-    final ticks = _player.state.position.inMicroseconds * 10;
+    final ticks = (positionOverride ?? _player.state.position).inMicroseconds * 10;
     final paused = !_player.state.playing;
     final muted = _muted;
     final volumeLevel = _volume.round().clamp(0, 100).toInt();
@@ -483,6 +496,46 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
     );
   }
 
+  // 跳转后立即补一次进度上报，跨设备续播不必再等 10 秒定时器。
+  Future<void> _seekTo(Duration target) async {
+    await _player.seek(target);
+    if (!mounted || _windowClosing) return;
+    unawaited(
+      _reportPlayback(EmbyPcPlaybackEvent.progress, positionOverride: target),
+    );
+  }
+
+  // 播放到结尾：先补最终进度再发停止，服务端据此把条目标记为已看。
+  Future<void> _handlePlaybackCompleted() async {
+    if (_stopReportQueued) return;
+    _stopReportQueued = true;
+    _progressTimer?.cancel();
+    if (mounted && !_windowClosing) setState(() => _isPlaying = false);
+    await _reportPlayback(EmbyPcPlaybackEvent.progress);
+    await _reportPlayback(EmbyPcPlaybackEvent.stopped);
+  }
+
+  // 播放中 2 秒无鼠标活动就隐藏标题栏；暂停或关闭中始终可见。
+  void _syncChromeVisibility() {
+    _chromeTimer?.cancel();
+    if (!_isPlaying || _closing || _windowClosing) {
+      if (!_chromeVisible && mounted) setState(() => _chromeVisible = true);
+      return;
+    }
+    _chromeTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted && _isPlaying && !_closing && !_windowClosing) {
+        setState(() => _chromeVisible = false);
+      }
+    });
+  }
+
+  // 鼠标在窗口内移动时唤回标题栏并重新计时。
+  void _revealChrome() {
+    if (!_isPlaying || _closing) return;
+    if (!_chromeVisible) setState(() => _chromeVisible = true);
+    _syncChromeVisibility();
+  }
+
   Future<void> _initializeAndroidSystemVolume() async {
     final volume = await _AndroidSystemVolume.startObserving(
       _synchronizeAndroidSystemVolume,
@@ -504,7 +557,12 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
   // 正常返回前等待最后进度和停止事件完成，短时间播放也不再依赖 dispose 异步兜底。
   Future<void> _closePlayer() async {
     if (_closing) return;
-    setState(() => _closing = true);
+    // 退出上报期间唤回标题栏，让返回按钮旁的进度指示可见。
+    _chromeTimer?.cancel();
+    setState(() {
+      _closing = true;
+      _chromeVisible = true;
+    });
     await _finishPlaybackReports();
     if (!mounted) return;
     setState(() => _allowPop = true);
@@ -608,6 +666,8 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
   @override
   void dispose() {
     _progressTimer?.cancel();
+    _chromeTimer?.cancel();
+    _networkSpeed.dispose();
     // 音量用会话值落盘：滑条拖动过程中不写磁盘，退出时保存一次。
     unawaited(_savePlayerPreference(_volumePrefsKey, _sessionVolume));
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
@@ -641,38 +701,53 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
       onPopInvokedWithResult: (didPop, result) {
         if (!didPop) unawaited(_closePlayer());
       },
-      child: Scaffold(
+      child: MouseRegion(
+        // 鼠标在窗口内移动即唤回标题栏，静止 2 秒后自动隐藏。
+        onHover: (_) => _revealChrome(),
+        child: Scaffold(
         backgroundColor: Colors.black,
-        appBar: AppBar(
-          backgroundColor: Colors.black,
-          foregroundColor: Colors.white,
-          leading: BackButton(
-            onPressed: _closing ? null : () => unawaited(_closePlayer()),
-          ),
-          title: Text(widget.item.name, overflow: TextOverflow.ellipsis),
-          // 退出上报期间提供明确状态，并禁用重复返回操作。
-          actions: [
-            if (_closing)
-              const Padding(
-                padding: EdgeInsets.only(right: 16),
-                child: Center(
-                  child: SizedBox.square(
-                    dimension: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  ),
+        // 标题栏浮在画面之上：隐藏时视频不会因为少了一行而重新布局。
+        extendBodyBehindAppBar: true,
+        appBar: PreferredSize(
+          preferredSize: const Size.fromHeight(kToolbarHeight),
+          child: IgnorePointer(
+            ignoring: !_chromeVisible,
+            child: AnimatedOpacity(
+              opacity: _chromeVisible ? 1 : 0,
+              duration: const Duration(milliseconds: 180),
+              child: AppBar(
+                backgroundColor: Colors.black.withValues(alpha: 0.55),
+                foregroundColor: Colors.white,
+                leading: BackButton(
+                  onPressed: _closing ? null : () => unawaited(_closePlayer()),
                 ),
+                title: Text(widget.item.name, overflow: TextOverflow.ellipsis),
+                // 退出上报期间提供明确状态，并禁用重复返回操作。
+                actions: [
+                  if (_closing)
+                    const Padding(
+                      padding: EdgeInsets.only(right: 16),
+                      child: Center(
+                        child: SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
-          ],
+            ),
+          ),
         ),
         body:
           _loading
               ? Center(
                 child: _PlayerLoadingIndicator(
                   statusText: '正在加载',
-                  networkSpeedBytesPerSecond: _networkSpeedBytesPerSecond,
+                  networkSpeed: _networkSpeed,
                 ),
               )
               : _error.isNotEmpty
@@ -709,8 +784,7 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
                         duration: _duration,
                         isPlaying: _isPlaying,
                         buffering: _buffering,
-                        networkSpeedBytesPerSecond:
-                            _networkSpeedBytesPerSecond,
+                        networkSpeed: _networkSpeed,
                         thumbnailPreviewController: _thumbnailPreviewController,
                         muted: _muted,
                         volume: _volume,
@@ -727,9 +801,12 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
                             (value) => unawaited(_setVolume(value)),
                         onSpeedChanged:
                             (rate) => unawaited(_setPlaybackRate(rate)),
+                        // 控制层所有 seek 都经过页面，跳转后立即补一次上报。
+                        onSeek: (value) => unawaited(_seekTo(value)),
                       ),
                 ),
               ),
+        ),
       ),
     );
   }
@@ -877,7 +954,7 @@ class _PlayerControls extends StatefulWidget {
   final Duration duration;
   final bool isPlaying;
   final bool buffering;
-  final double? networkSpeedBytesPerSecond;
+  final ValueListenable<double?> networkSpeed;
   final _ThumbnailPreviewController thumbnailPreviewController;
   final bool muted;
   final double volume;
@@ -890,6 +967,8 @@ class _PlayerControls extends StatefulWidget {
   final ValueChanged<BoxFit> onVideoFitChanged;
   final ValueChanged<double> onVolumeChanged;
   final ValueChanged<double> onSpeedChanged;
+  // 所有 seek 统一走页面回调，便于在跳转后立即补一次进度上报。
+  final ValueChanged<Duration> onSeek;
 
   const _PlayerControls({
     required this.player,
@@ -897,7 +976,7 @@ class _PlayerControls extends StatefulWidget {
     required this.duration,
     required this.isPlaying,
     required this.buffering,
-    required this.networkSpeedBytesPerSecond,
+    required this.networkSpeed,
     required this.thumbnailPreviewController,
     required this.muted,
     required this.volume,
@@ -909,6 +988,7 @@ class _PlayerControls extends StatefulWidget {
     required this.onVideoFitChanged,
     required this.onVolumeChanged,
     required this.onSpeedChanged,
+    required this.onSeek,
   });
 
   @override
@@ -921,8 +1001,8 @@ class _PlayerControlsState extends State<_PlayerControls> {
   static const _keyboardRewindStep = Duration(seconds: -5);
   // 每次方向键调整 5 个音量单位，与桌面端音量操作保持一致。
   static const _keyboardVolumeStep = 5.0;
-  // 安卓全屏播放一段时间无操作后隐藏工具栏，避免长期遮挡画面。
-  static const _controlsAutoHideDelay = Duration(seconds: 3);
+  // 播放中一段时间无操作后隐藏工具栏，避免长期遮挡画面。
+  static const _controlsAutoHideDelay = Duration(seconds: 2);
 
   Timer? _controlsHideTimer;
   bool _controlsVisible = true;
@@ -953,8 +1033,7 @@ class _PlayerControlsState extends State<_PlayerControls> {
   Duration get duration => widget.duration;
   bool get isPlaying => widget.isPlaying;
   bool get buffering => widget.buffering;
-  double? get networkSpeedBytesPerSecond =>
-      widget.networkSpeedBytesPerSecond;
+  ValueListenable<double?> get networkSpeed => widget.networkSpeed;
   _ThumbnailPreviewController get thumbnailPreviewController =>
       widget.thumbnailPreviewController;
   bool get muted => widget.muted;
@@ -967,12 +1046,25 @@ class _PlayerControlsState extends State<_PlayerControls> {
   VoidCallback get onToggleMute => widget.onToggleMute;
   ValueChanged<BoxFit> get onVideoFitChanged => widget.onVideoFitChanged;
   ValueChanged<double> get onVolumeChanged => widget.onVolumeChanged;
+  ValueChanged<Duration> get onSeek => widget.onSeek;
 
   bool get _usesAndroidTouchGestures =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
   bool get _usesAndroidFullscreenControls =>
       _usesAndroidTouchGestures && isFullscreen(context);
+
+  // 桌面端播放中同样自动隐藏控制层，让画面完整可见；暂停时保持可见便于操作。
+  bool get _usesDesktopAutoHideControls {
+    if (kIsWeb) return false;
+    return defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.macOS ||
+        defaultTargetPlatform == TargetPlatform.linux;
+  }
+
+  bool get _autoHideControls =>
+      _usesAndroidFullscreenControls ||
+      (_usesDesktopAutoHideControls && isPlaying);
 
   @override
   void didChangeDependencies() {
@@ -983,7 +1075,7 @@ class _PlayerControlsState extends State<_PlayerControls> {
   @override
   void didUpdateWidget(covariant _PlayerControls oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!_usesAndroidFullscreenControls || !isPlaying) {
+    if (!_autoHideControls || !isPlaying) {
       _controlsHideTimer?.cancel();
       _controlsVisible = true;
     } else if (!oldWidget.isPlaying) {
@@ -994,7 +1086,7 @@ class _PlayerControlsState extends State<_PlayerControls> {
   }
 
   void _synchronizeControlsVisibility() {
-    if (_usesAndroidFullscreenControls && isPlaying) {
+    if (_autoHideControls && isPlaying) {
       _scheduleControlsHide();
     } else {
       _controlsHideTimer?.cancel();
@@ -1004,15 +1096,22 @@ class _PlayerControlsState extends State<_PlayerControls> {
 
   void _scheduleControlsHide() {
     _controlsHideTimer?.cancel();
-    if (!_usesAndroidFullscreenControls || !isPlaying) return;
+    if (!_autoHideControls || !isPlaying) return;
     _controlsHideTimer = Timer(_controlsAutoHideDelay, () {
-      if (!mounted || !_usesAndroidFullscreenControls || !isPlaying) return;
+      if (!mounted || !_autoHideControls || !isPlaying) return;
       setState(() => _controlsVisible = false);
     });
   }
 
+  // 指针移动时重新显示控制层并重置计时；鼠标静止 2 秒后再次隐藏。
+  void _revealControls() {
+    if (!_autoHideControls) return;
+    if (!_controlsVisible) setState(() => _controlsVisible = true);
+    _scheduleControlsHide();
+  }
+
   void _handleSurfaceTap() {
-    if (!_usesAndroidFullscreenControls) {
+    if (!_autoHideControls) {
       onTogglePlay();
       return;
     }
@@ -1027,25 +1126,25 @@ class _PlayerControlsState extends State<_PlayerControls> {
   }
 
   void _handleControlsPointerDown(PointerDownEvent event) {
-    if (_usesAndroidFullscreenControls) _controlsHideTimer?.cancel();
+    if (_autoHideControls) _controlsHideTimer?.cancel();
   }
 
   void _handleControlsPointerEnd(PointerEvent event) {
-    if (_usesAndroidFullscreenControls) _scheduleControlsHide();
+    if (_autoHideControls) _scheduleControlsHide();
   }
 
   void _handleVideoFitMenuOpened() {
     // 菜单显示期间保持底部工具栏可见，避免用户选择模式时工具栏先行隐藏。
-    if (_usesAndroidFullscreenControls) _controlsHideTimer?.cancel();
+    if (_autoHideControls) _controlsHideTimer?.cancel();
   }
 
   void _handleVideoFitMenuCanceled() {
-    if (_usesAndroidFullscreenControls) _scheduleControlsHide();
+    if (_autoHideControls) _scheduleControlsHide();
   }
 
   void _handleVideoFitSelected(BoxFit fit) {
     onVideoFitChanged(fit);
-    if (_usesAndroidFullscreenControls) _scheduleControlsHide();
+    if (_autoHideControls) _scheduleControlsHide();
   }
 
   String _videoFitLabel(BoxFit fit) {
@@ -1117,7 +1216,7 @@ class _PlayerControlsState extends State<_PlayerControls> {
         targetPosition > mediaDuration) {
       targetPosition = mediaDuration;
     }
-    unawaited(player.seek(targetPosition));
+    onSeek(targetPosition);
   }
 
   void _adjustVolume(double delta) {
@@ -1133,8 +1232,8 @@ class _PlayerControlsState extends State<_PlayerControls> {
   @override
   Widget build(BuildContext context) {
     final usesAndroidFullscreenControls = _usesAndroidFullscreenControls;
-    final controlsVisible =
-        !usesAndroidFullscreenControls || _controlsVisible || !isPlaying;
+    // 桌面端播放中同样按自动隐藏状态决定控制层可见性。
+    final controlsVisible = !_autoHideControls || _controlsVisible || !isPlaying;
     final pausedIndicator = Container(
       width: 72,
       height: 72,
@@ -1210,9 +1309,15 @@ class _PlayerControlsState extends State<_PlayerControls> {
       },
       child: Focus(
         autofocus: true,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
+        // 鼠标移动即唤回控制层；控制层隐藏期间一并隐藏系统光标。
+        child: MouseRegion(
+          cursor: controlsVisible
+              ? SystemMouseCursors.click
+              : SystemMouseCursors.none,
+          onHover: (_) => _revealControls(),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
             // 安卓全屏单击画面只切换工具栏；其他平台继续沿用单击播放或暂停。
             Positioned.fill(
               child: Semantics(
@@ -1229,7 +1334,10 @@ class _PlayerControlsState extends State<_PlayerControls> {
                         child: playbackStateIndicator,
                       )
                     : MouseRegion(
-                        cursor: SystemMouseCursors.click,
+                        // 控制层隐藏时连同光标一起隐藏，避免画面上残留箭头。
+                        cursor: controlsVisible
+                            ? SystemMouseCursors.click
+                            : SystemMouseCursors.none,
                         child: GestureDetector(
                           behavior: HitTestBehavior.opaque,
                           onTap: onTogglePlay,
@@ -1250,8 +1358,7 @@ class _PlayerControlsState extends State<_PlayerControls> {
                       ? Center(
                           child: _PlayerLoadingIndicator(
                             statusText: '正在缓冲',
-                            networkSpeedBytesPerSecond:
-                                networkSpeedBytesPerSecond,
+                            networkSpeed: networkSpeed,
                           ),
                         )
                       : const SizedBox.shrink(),
@@ -1322,8 +1429,7 @@ class _PlayerControlsState extends State<_PlayerControls> {
                                   duration: duration,
                                   thumbnailController:
                                       thumbnailPreviewController,
-                                  onSeek: (value) =>
-                                      unawaited(player.seek(value)),
+                                  onSeek: onSeek,
                                 ),
                               ),
                               Padding(
@@ -1435,7 +1541,8 @@ class _PlayerControlsState extends State<_PlayerControls> {
               ),
             ),
           ],
-        ),
+            ),
+          ),
       ),
     );
   }
@@ -1809,16 +1916,24 @@ class _AndroidPlayerGestureLayerState
 
 class _PlayerLoadingIndicator extends StatelessWidget {
   final String statusText;
-  final double? networkSpeedBytesPerSecond;
+  final ValueListenable<double?> networkSpeed;
 
   const _PlayerLoadingIndicator({
     required this.statusText,
-    required this.networkSpeedBytesPerSecond,
+    required this.networkSpeed,
   });
 
   @override
   Widget build(BuildContext context) {
-    final speedText = _formatNetworkSpeed(networkSpeedBytesPerSecond);
+    // 只有这块文字随网速刷新，播放器页面自身不再因为速率变化重建。
+    return ValueListenableBuilder<double?>(
+      valueListenable: networkSpeed,
+      builder: (context, speed, _) => _buildContent(speed),
+    );
+  }
+
+  Widget _buildContent(double? bytesPerSecond) {
+    final speedText = _formatNetworkSpeed(bytesPerSecond);
     return Semantics(
       container: true,
       liveRegion: true,

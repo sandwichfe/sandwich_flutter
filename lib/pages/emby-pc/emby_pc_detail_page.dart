@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 
 import 'emby_pc_models.dart';
 import 'emby_pc_person_page.dart';
-import 'emby_pc_player_page.dart';
+import 'emby_pc_playback.dart';
 import 'emby_pc_service.dart';
 import 'emby_pc_toast.dart';
 import 'emby_pc_widgets.dart';
@@ -245,18 +245,16 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
   Future<void> _play([int? positionTicks, String? mediaSourceId]) async {
     final detail = _detail;
     if (detail == null) return;
-    final played = await Navigator.of(context).push<bool>(
-      embyPcFadeRoute(
-        context,
-        (_) => EmbyPcPlayerPage(
-          item: detail,
-          startPositionTicks: positionTicks ?? detail.playbackPositionTicks,
-          mediaSourceId: mediaSourceId,
-        ),
+    final played = await openEmbyPcPlayer(
+      context,
+      EmbyPcPlaybackRequest(
+        item: detail,
+        startPositionTicks: positionTicks ?? detail.playbackPositionTicks,
+        mediaSourceId: mediaSourceId,
       ),
     );
     // 播放器已完成停止上报后重新请求详情，立即展示服务端保存的进度。
-    if (played == true && mounted) await _loadDetail();
+    if (played && mounted) await _loadDetail();
   }
 
   @override

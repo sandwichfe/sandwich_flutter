@@ -20,6 +20,29 @@ func (s *Store) SetFavorite(ctx context.Context, userID, itemID string, favorite
 	return favorite, nil
 }
 
+// SetPlayed 对应 POST/DELETE /Users/{userId}/PlayedItems/{itemId}。
+// 标记已看时同时清零续播位置并累计一次播放次数，列表进度条会随之消失。
+func (s *Store) SetPlayed(ctx context.Context, userID, itemID string, played bool) (bool, error) {
+	playCountIncrement := 0
+	if played {
+		playCountIncrement = 1
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO user_data (user_id, item_id, played, playback_position_ticks, play_count, last_played_date)
+		 VALUES (?, ?, ?, 0, ?, ?)
+		 ON CONFLICT(user_id, item_id) DO UPDATE SET
+		   played = excluded.played,
+		   playback_position_ticks = 0,
+		   play_count = user_data.play_count + ?,
+		   last_played_date = excluded.last_played_date`,
+		userID, itemID, boolToInt(played), playCountIncrement, NowISO(), playCountIncrement,
+	)
+	if err != nil {
+		return played, fmt.Errorf("更新观看状态失败: %w", err)
+	}
+	return played, nil
+}
+
 func (s *Store) UserDataFor(ctx context.Context, userID, itemID string) (*UserData, error) {
 	var data UserData
 	var isFavorite, played int

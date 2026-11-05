@@ -11,7 +11,7 @@ import 'emby_pc_item_images_dialog.dart';
 import 'emby_pc_login_page.dart';
 import 'emby_pc_models.dart';
 import 'emby_pc_person_page.dart';
-import 'emby_pc_player_page.dart';
+import 'emby_pc_playback.dart';
 import 'emby_pc_service.dart';
 import 'emby_pc_toast.dart';
 import 'emby_pc_widgets.dart';
@@ -109,7 +109,8 @@ class EmbyPcWorkspace extends StatefulWidget {
   State<EmbyPcWorkspace> createState() => _EmbyPcWorkspaceState();
 }
 
-class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
+class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
+    with WidgetsBindingObserver {
   // 数据与查询状态由 controller 承载，页面只保留纯 UI 状态。
   final _c = EmbyPcWorkspaceController();
   // 页面级 Scaffold key 仅用于控制移动端导航抽屉的打开与关闭。
@@ -119,6 +120,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   // 演员筛选的搜索框独立于顶部标题搜索，二者互不影响。
   final _personController = TextEditingController();
   final _scrollController = ScrollController();
+  // 每个视图记住自己的滚动位置：切库、切收藏或从详情返回后停在原处。
+  final Map<String, double> _scrollOffsets = {};
   bool _sidebarCollapsed = false;
   final Set<String> _favoriteBusyIds = {};
   final Set<String> _libraryActionBusyIds = {};
@@ -126,11 +129,11 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   // 媒体库搜索沿用首页搜索的短防抖，连续输入时只执行最后一次查询。
   Timer? _searchDebounceTimer;
   Timer? _loadMoreDebounceTimer;
-  DateTime? _lastLoadMoreTime;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _scrollController.addListener(_onScroll);
     // 数据变化统一由 controller 通知，页面只在这里同步一次重建。
     _c.addListener(_onWorkspaceChanged);
@@ -233,38 +236,48 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   Future<void> _searchPersons() =>
       _c.searchPersons(_personController.text.trim());
 
+  // 接近底部时加载下一页：单飞去抖，快速滚动只保留最后一次请求。
   void _onScroll() {
     if (_c.view == 'home') return;
-    // 正在加载时不处理滚动事件，避免创建无用的定时器
-    if (_c.loading || _c.loadingMore) return;
+    if (_c.loading || _c.loadingMore || _c.refreshing) return;
+    if (_scrollController.position.extentAfter > 700) return;
+    _loadMoreDebounceTimer?.cancel();
+    _loadMoreDebounceTimer = Timer(const Duration(milliseconds: 200), () {
+      if (!mounted || _c.loading || _c.loadingMore || _c.refreshing) return;
+      _syncQueryInput();
+      _c.loadItems(reset: false);
+    });
+  }
 
-    if (_scrollController.position.extentAfter < 700) {
-      final now = DateTime.now();
-      // 节流：如果距离上次加载不到 1000ms，使用防抖延迟执行
-      if (_lastLoadMoreTime != null &&
-          now.difference(_lastLoadMoreTime!).inMilliseconds < 1000) {
-        // 防抖：取消旧定时器，延迟到节流间隔结束后执行
-        _loadMoreDebounceTimer?.cancel();
-        final remainingTime =
-            800 - now.difference(_lastLoadMoreTime!).inMilliseconds;
-        _loadMoreDebounceTimer = Timer(
-          Duration(milliseconds: remainingTime + 100),
-          () {
-            // 定时器触发时再次检查状态，避免在加载过程中重复触发
-            if (!_c.loading && !_c.loadingMore) {
-              _lastLoadMoreTime = DateTime.now();
-              _syncQueryInput();
-              _c.loadItems(reset: false);
-            }
-          },
-        );
-      } else {
-        // 节流间隔已过，立即执行并记录时间
-        _loadMoreDebounceTimer?.cancel();
-        _lastLoadMoreTime = now;
-        _syncQueryInput();
-        _c.loadItems(reset: false);
-      }
+  // 视图键只区分内容来源，筛选条件变化仍视为同一视图。
+  String get _scrollKey => '${_c.view}:${_c.activeId}';
+
+  // 切换视图前记录当前位置，返回该视图时再恢复。
+  void _rememberScrollOffset() {
+    if (_scrollController.hasClients) {
+      _scrollOffsets[_scrollKey] = _scrollController.offset;
+    }
+  }
+
+  void _restoreScrollOffset() {
+    final target = _scrollOffsets[_scrollKey] ?? 0;
+    // 新列表要到下一帧才有尺寸，恢复到有效滚动范围内避免越界。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      final position = _scrollController.position;
+      _scrollController.jumpTo(
+        target
+            .clamp(position.minScrollExtent, position.maxScrollExtent)
+            .toDouble(),
+      );
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 回到前台刷新首页，后台扫描新增的内容不必重进应用才可见。
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_c.refreshHomeOnResume());
     }
   }
 
@@ -276,60 +289,98 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
 
   Future<void> _selectHome() async {
     if (_c.view == 'home') return;
+    _rememberScrollOffset();
     // 切换首页时使正在进行的媒体库分页请求失效，避免旧结果覆盖当前状态。
     _c.queryVersion++;
     setState(() {
       _c.view = 'home';
       _c.activeId = '';
+      _c.clearItems();
       _resetQueryControllers();
     });
     await _c.loadHome();
+    _restoreScrollOffset();
   }
 
   Future<void> _selectLibrary(String id) async {
     if (id.isEmpty || (_c.view == 'library' && id == _c.activeId)) return;
+    _rememberScrollOffset();
     setState(() {
       _c.view = 'library';
       _c.activeId = id;
+      // 切库必须清空旧列表，避免上一个媒体库的内容短暂显示在新标题下。
+      _c.clearItems();
       _resetQueryControllers();
     });
     await _c.loadItems(reset: true);
+    _restoreScrollOffset();
   }
 
   Future<void> _selectFavorites(String view) async {
     if (_c.view == view) return;
+    _rememberScrollOffset();
     setState(() {
       _c.view = view;
       _c.activeId = '';
+      _c.clearItems();
       _resetQueryControllers();
     });
     await _c.loadItems(reset: true);
+    _restoreScrollOffset();
+  }
+
+  // 首页“最新入库”分区展开为完整列表，按加入日期倒序。
+  Future<void> _selectLatest() async {
+    if (_c.view == 'latest') return;
+    _rememberScrollOffset();
+    setState(() {
+      _c.view = 'latest';
+      _c.activeId = '';
+      _c.clearItems();
+      _resetQueryControllers();
+      _c.sortBy = 'DateCreated';
+      _c.sortOrder = 'Descending';
+    });
+    await _c.loadItems(reset: true);
+    _restoreScrollOffset();
   }
 
   Future<void> _selectPeople() async {
     if (_c.view == 'people') return;
+    _rememberScrollOffset();
     setState(() {
       _c.view = 'people';
       _c.activeId = '';
+      _c.clearItems();
       _resetQueryControllers();
       // 人物按名称展示，避免沿用影片默认的上映日期排序。
       _c.sortBy = 'SortName';
       _c.sortOrder = 'Ascending';
     });
     await _c.loadItems(reset: true);
+    _restoreScrollOffset();
   }
 
   Future<void> _selectRecentlyPlayed() async {
     if (_c.view == 'recently-played') return;
+    _rememberScrollOffset();
     setState(() {
       _c.view = 'recently-played';
       _c.activeId = '';
+      _c.clearItems();
       _resetQueryControllers();
       // Resume uses Emby Web's default DatePlayed descending order.
       _c.sortBy = 'DatePlayed';
       _c.sortOrder = 'Descending';
     });
     await _c.loadItems(reset: true);
+    _restoreScrollOffset();
+  }
+
+  // 空列表一键恢复：清空搜索、年份、演员与全部筛选后重新查询。
+  Future<void> _clearAllFilters() async {
+    setState(_resetQueryControllers);
+    await _applyQuery();
   }
 
   void _resetQueryControllers() {
@@ -455,6 +506,18 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     if (_mediaActionBusyIds.contains(item.id)) return false;
     setState(() => _mediaActionBusyIds.add(item.id));
     try {
+      // 标记已看只改用户数据，成功后立即同步角标与续播位置，不必重拉列表。
+      if (action == EmbyPcMediaAction.togglePlayed) {
+        final value = await EmbyPcService.instance.setPlayed(
+          item.id,
+          !item.played,
+        );
+        if (!mounted) return false;
+        _c.applyPlayedResult(item, value);
+        _showWorkspaceMessage(value ? '已标记为已看' : '已标记为未看');
+        return true;
+      }
+
       if (action == EmbyPcMediaAction.editMetadata) {
         final metadata = await EmbyPcService.instance.getItemForEditing(
           item.id,
@@ -657,36 +720,24 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   }
 
   Future<void> _playItem(EmbyPcItem item) async {
-    // 直接播放返回后会刷新列表，提前记录位置，避免列表重建时滚动到顶部。
-    final scrollOffset =
-        _scrollController.hasClients ? _scrollController.offset : null;
-    final played = await Navigator.of(context).push<bool>(
-      embyPcFadeRoute(
-        context,
-        (_) => EmbyPcPlayerPage(
-          item: item,
-          startPositionTicks: item.playbackPositionTicks,
-        ),
+    // 播放返回后会刷新列表，通过统一的播放上下文起播并记住当前位置。
+    _rememberScrollOffset();
+    final played = await openEmbyPcPlayer(
+      context,
+      EmbyPcPlaybackRequest(
+        item: item,
+        startPositionTicks: item.playbackPositionTicks,
       ),
     );
     // 直接播放返回后刷新当前工作台视图，避免继续显示旧的播放进度。
-    if (played != true || !mounted) return;
+    if (!played || !mounted) return;
     await _reloadMediaAfterChange();
-    if (!mounted || scrollOffset == null) return;
-    // 列表刷新后的尺寸需要到下一帧才能确定，再将位置恢复到有效滚动范围。
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scrollController.hasClients) return;
-      final position = _scrollController.position;
-      _scrollController.jumpTo(
-        scrollOffset
-            .clamp(position.minScrollExtent, position.maxScrollExtent)
-            .toDouble(),
-      );
-    });
+    _restoreScrollOffset();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _c.removeListener(_onWorkspaceChanged);
     _c.dispose();
     EmbyPcService.instance.avatarRevision.removeListener(_onWorkspaceChanged);

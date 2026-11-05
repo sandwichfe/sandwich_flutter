@@ -18,6 +18,8 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
           _EmbyPcWorkspaceToolbar(
             this,
           )._buildWorkspaceHeader(context, compact: compact),
+          // 保留旧列表的同时用 2 像素细条提示正在刷新，避免整块白屏闪动。
+          if (_c.refreshing) const LinearProgressIndicator(minHeight: 2),
           if (_c.view != 'home')
             _EmbyPcWorkspaceToolbar(this)._buildToolbar(context),
           if (_c.view != 'home' && _c.error.isNotEmpty)
@@ -36,7 +38,10 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
                 : _c.loading && _c.items.isEmpty
                 ? const Center(child: CircularProgressIndicator())
                 : _c.items.isEmpty
-                ? const _EmptyState()
+                ? _EmptyState(
+                    hasFilters: _hasActiveFilters,
+                    onClearFilters: _clearAllFilters,
+                  )
                 : CustomScrollView(
                     controller: _scrollController,
                     slivers: [
@@ -147,6 +152,16 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
             onOpenSection: _selectRecentlyPlayed,
           ),
         ),
+        // 最新入库聚合全部媒体库，避免只在各库分区里各看十条。
+        if (_c.homeLatest.isNotEmpty)
+          SliverToBoxAdapter(
+            child: _buildHomeMediaSection(
+              context,
+              title: '最新入库',
+              items: _c.homeLatest,
+              onOpenSection: _selectLatest,
+            ),
+          ),
         ..._c.libraries.map(
           (library) => SliverToBoxAdapter(
             child: _buildHomeMediaSection(
@@ -154,6 +169,8 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
               title: library.name,
               items: _c.homeLibraryItems[library.id] ?? const [],
               onOpenSection: () => _selectLibrary(library.id),
+              // 单个分区换一批，不影响其它媒体库的展示顺序。
+              onShuffle: () => _c.shuffleHomeLibrary(library.id),
             ),
           ),
         ),
@@ -168,7 +185,23 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('媒体库', style: Theme.of(context).textTheme.titleLarge),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '媒体库',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+              ),
+              // 首页手动刷新：后台扫描入库后不必重进应用即可看到新内容。
+              IconButton(
+                tooltip: '刷新首页',
+                visualDensity: VisualDensity.compact,
+                onPressed: _c.homeLoading ? null : () => _c.loadHome(force: true),
+                icon: const Icon(Icons.refresh_rounded, size: 20),
+              ),
+            ],
+          ),
           const SizedBox(height: 12),
           if (_c.libraries.isEmpty)
             const SizedBox(height: 80, child: Center(child: Text('暂无媒体库')))
@@ -201,6 +234,7 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
     required List<EmbyPcItem> items,
     bool showLastPlayedTime = false,
     VoidCallback? onOpenSection,
+    VoidCallback? onShuffle,
   }) {
     final titleWidget = Row(
       mainAxisSize: MainAxisSize.min,
@@ -219,22 +253,34 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
         ],
       ],
     );
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(26, 18, 26, 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (onOpenSection == null)
-            titleWidget
-          else
-            InkWell(
+    final titleBlock =
+        onOpenSection == null
+            ? titleWidget
+            : InkWell(
               onTap: onOpenSection,
               borderRadius: BorderRadius.circular(6),
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 2),
                 child: titleWidget,
               ),
-            ),
+            );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(26, 18, 26, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(child: titleBlock),
+              if (onShuffle != null)
+                IconButton(
+                  tooltip: '换一批$title',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: _c.homeLoading ? null : onShuffle,
+                  icon: const Icon(Icons.autorenew_rounded, size: 19),
+                ),
+            ],
+          ),
           const SizedBox(height: 12),
           if (items.isEmpty)
             const SizedBox(

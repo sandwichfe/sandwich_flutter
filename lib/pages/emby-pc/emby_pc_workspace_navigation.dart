@@ -5,6 +5,7 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
   String get _pageTitle {
     if (_c.view == 'home') return '首页';
     if (_c.view == 'recently-played') return '继续观看';
+    if (_c.view == 'latest') return '最新入库';
     if (_c.view == 'people') return '演员列表';
     if (_c.view == 'favorite-movies') return '收藏影片';
     if (_c.view == 'favorite-people') return '收藏演员';
@@ -432,7 +433,8 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
                   ),
                   _SidebarButton(
                     icon: Icons.history_rounded,
-                    title: '播放记录',
+                    // 与侧栏、页面标题统一为“继续观看”，避免同一视图多种叫法。
+                    title: '继续观看',
                     count: null,
                     showCount: false,
                     active: _c.view == 'recently-played',

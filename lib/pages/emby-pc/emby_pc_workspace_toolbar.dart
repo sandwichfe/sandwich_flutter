@@ -257,6 +257,10 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
         _c.minRating?.toString() ?? '',
       ].where((value) => value.isNotEmpty).length;
 
+  // 搜索词同样会筛出空列表，空状态需要据此决定是否给出恢复入口。
+  bool get _hasActiveFilters =>
+      _activeFilterCount > 0 || _searchController.text.trim().isNotEmpty;
+
   Widget _buildFilterMenu(
     BuildContext context, {
     bool compact = false,

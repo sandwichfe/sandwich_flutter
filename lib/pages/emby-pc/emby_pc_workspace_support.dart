@@ -1160,7 +1160,11 @@ class _LibraryOrderDialogState extends State<_LibraryOrderDialog> {
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState();
+  // 有筛选条件时，空列表多半是筛出来的，需要提供一键恢复入口。
+  final bool hasFilters;
+  final VoidCallback onClearFilters;
+
+  const _EmptyState({required this.hasFilters, required this.onClearFilters});
 
   @override
   Widget build(BuildContext context) => Center(
@@ -1174,6 +1178,22 @@ class _EmptyState extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         const Text('没有找到媒体'),
+        if (hasFilters) ...[
+          const SizedBox(height: 6),
+          Text(
+            '当前筛选条件没有匹配到内容',
+            style: TextStyle(
+              fontSize: 12,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            onPressed: onClearFilters,
+            icon: const Icon(Icons.filter_alt_off_outlined, size: 18),
+            label: const Text('清除筛选'),
+          ),
+        ],
       ],
     ),
   );

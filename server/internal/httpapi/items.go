@@ -242,6 +242,24 @@ func (s *Server) handleRefreshItem(w http.ResponseWriter, r *http.Request) {
 	writeNoContent(w)
 }
 
+// handleSetPlayed 对应 Emby 的 PlayedItems 资源：POST 标记已看，DELETE 标记未看。
+func (s *Server) handleSetPlayed(played bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := r.PathValue("userId")
+		itemID := r.PathValue("itemId")
+
+		current, err := s.store.SetPlayed(r.Context(), userID, itemID, played)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "更新观看状态失败")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"Played":                current,
+			"PlaybackPositionTicks": 0,
+		})
+	}
+}
+
 func (s *Server) handleSetFavorite(favorite bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := r.PathValue("userId")

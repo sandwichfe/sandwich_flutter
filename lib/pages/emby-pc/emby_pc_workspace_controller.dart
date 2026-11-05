@@ -13,8 +13,11 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
 
   // ---- 媒体库与首页摘要 ----
   List<EmbyPcItem> libraries = const [];
-  List<EmbyPcItem> items = const [];
+  // 列表可变，分页时原地追加，避免每次滚动加载都复制整个列表。
+  List<EmbyPcItem> items = <EmbyPcItem>[];
   List<EmbyPcItem> recentlyPlayed = const [];
+  // 首页“最新入库”跨媒体库聚合，单独保存便于“换一批/刷新”时只重拉这一块。
+  List<EmbyPcItem> homeLatest = const [];
   Map<String, List<EmbyPcItem>> homeLibraryItems = const {};
   final Map<String, int?> libraryCounts = {};
   int? favoriteMovieCount;
@@ -47,8 +50,12 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
   int total = 0;
   bool loading = true;
   bool loadingMore = false;
+  // 已有数据的前提下重新查询（筛选/排序/搜索）：列表保持可见，只在顶部显示细进度条。
+  bool refreshing = false;
   bool homeLoading = false;
   bool homeLoaded = false;
+  // 首页最近一次成功加载时间，用于回前台时判断是否值得自动刷新。
+  DateTime? homeLoadedAt;
   bool countsLoading = true;
   bool favoritePeopleLoading = false;
   bool favoriteMovieLoading = false;
@@ -115,21 +122,24 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
     homeError = '';
     _notify();
     try {
-      // 首页数据彼此独立，首次进入时并行获取继续观看和各媒体库前十条。
-      final results = await Future.wait<EmbyPcPage>([
+      // 首页数据彼此独立，首次进入时并行获取继续观看、最新入库和各媒体库前十条。
+      final results = await Future.wait<dynamic>([
         _service.getResumeItems(),
+        _service.getLatestItems(limit: 24),
         ...snapshot.map(
           (library) => _service.getItems(libraryId: library.id, limit: 10),
         ),
       ]);
       if (_disposed) return;
-      recentlyPlayed = results.first.items;
+      recentlyPlayed = (results[0] as EmbyPcPage).items;
+      homeLatest = results[1] as List<EmbyPcItem>;
       homeLibraryItems = {
         for (var index = 0; index < snapshot.length; index++)
-          snapshot[index].id: results[index + 1].items,
+          snapshot[index].id: (results[index + 2] as EmbyPcPage).items,
       };
       homeLoading = false;
       homeLoaded = true;
+      homeLoadedAt = DateTime.now();
       _notify();
     } catch (failure) {
       if (_disposed) return;
@@ -196,11 +206,11 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
     }
     final requestVersion = reset ? ++queryVersion : queryVersion;
     if (reset) {
-      loading = true;
+      // 已有数据时保留列表，用顶部细进度条提示刷新，避免每次筛选都白屏闪一下。
+      refreshing = items.isNotEmpty;
+      loading = !refreshing;
       loadingMore = false;
       error = '';
-      items = const [];
-      total = 0;
     } else {
       loadingMore = true;
     }
@@ -253,18 +263,64 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
               sortOrder: sortOrder,
             );
       if (_disposed || requestVersion != queryVersion) return;
-      items = reset ? page.items : [...items, ...page.items];
+      if (reset) {
+        items = page.items;
+      } else {
+        // 原地追加，滚动加载不再复制已加载的全部条目。
+        items.addAll(page.items);
+      }
       total = page.total;
       loading = false;
       loadingMore = false;
+      refreshing = false;
       _notify();
     } catch (failure) {
       if (_disposed || requestVersion != queryVersion) return;
       loading = false;
       loadingMore = false;
+      refreshing = false;
       error = failure.toString();
       _notify();
     }
+  }
+
+  // 切换视图时显式清空列表：旧视图的条目不能短暂显示在新标题下。
+  void clearItems() {
+    items = <EmbyPcItem>[];
+    total = 0;
+    error = '';
+  }
+
+  // 首页单个媒体库换一批：按 Random 排序只替换该分区，不影响其它分区。
+  Future<void> shuffleHomeLibrary(String libraryId) async {
+    if (homeLoading) return;
+    try {
+      final page = await _service.getItems(
+        libraryId: libraryId,
+        limit: 10,
+        sortBy: 'Random',
+        sortOrder: 'Ascending',
+      );
+      if (_disposed) return;
+      homeLibraryItems = {...homeLibraryItems, libraryId: page.items};
+      _notify();
+    } catch (failure) {
+      if (_disposed) return;
+      homeError = failure.toString();
+      _notify();
+    }
+  }
+
+  // 回到前台时刷新首页：后台新增内容不必重进应用才可见。
+  // 短时间反复切换窗口不重复请求，至少间隔 60 秒。
+  Future<void> refreshHomeOnResume() async {
+    if (!homeLoaded) return;
+    final loadedAt = homeLoadedAt;
+    if (loadedAt != null &&
+        DateTime.now().difference(loadedAt) < const Duration(seconds: 60)) {
+      return;
+    }
+    await loadHome(force: true);
   }
 
   // 保存列表偏好后按当前条件重新查询首页数据。
@@ -343,29 +399,33 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
     productionYear = null;
   }
 
-  // 收藏写入成功后同步本地列表与侧栏计数，避免整页重拉。
-  void applyFavoriteResult(EmbyPcItem item, bool value) {
-    final updated = item.copyWith(isFavorite: value);
-    items = items
-        .map((entry) => entry.id == item.id ? updated : entry)
-        .toList();
-    // 首页横向列表持有独立快照，收藏完成后同步状态以立即刷新图标。
-    recentlyPlayed = recentlyPlayed
-        .map(
-          (entry) =>
-              entry.id == item.id ? entry.copyWith(isFavorite: value) : entry,
-        )
-        .toList();
+  // 用新条目替换列表与首页快照中的同一条内容，避免整页重拉。
+  void _replaceItemEverywhere(EmbyPcItem updated) {
+    final index = items.indexWhere((entry) => entry.id == updated.id);
+    if (index >= 0) items[index] = updated;
+    recentlyPlayed = _replaceInList(recentlyPlayed, updated);
+    homeLatest = _replaceInList(homeLatest, updated);
     homeLibraryItems = {
       for (final library in homeLibraryItems.entries)
-        library.key: library.value
-            .map(
-              (entry) => entry.id == item.id
-                  ? entry.copyWith(isFavorite: value)
-                  : entry,
-            )
-            .toList(),
+        library.key: _replaceInList(library.value, updated),
     };
+  }
+
+  // 只重建命中的那一条，避免每张卡片都随整表 map 重建。
+  List<EmbyPcItem> _replaceInList(
+    List<EmbyPcItem> source,
+    EmbyPcItem updated,
+  ) {
+    final index = source.indexWhere((entry) => entry.id == updated.id);
+    if (index < 0) return source;
+    final next = List<EmbyPcItem>.of(source);
+    next[index] = updated;
+    return next;
+  }
+
+  // 收藏写入成功后同步本地列表与侧栏计数，避免整页重拉。
+  void applyFavoriteResult(EmbyPcItem item, bool value) {
+    _replaceItemEverywhere(item.copyWith(isFavorite: value));
     if (!value && view == 'favorite-movies') {
       items = items.where((entry) => entry.id != item.id).toList();
       total = (total - 1).clamp(0, 1 << 30).toInt();
@@ -381,6 +441,23 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
       favoritePeopleCount = (favoritePeopleCount! + (value ? 1 : -1))
           .clamp(0, 1 << 30)
           .toInt();
+    }
+    _notify();
+  }
+
+  // 标记已看后本地立即同步：列表角标与继续观看分区都不需要重新请求。
+  void applyPlayedResult(EmbyPcItem item, bool value) {
+    _replaceItemEverywhere(
+      item.copyWith(
+        played: value,
+        // 已看的条目不再保留续播位置，卡片进度条要同步消失。
+        playbackPositionTicks: value ? 0 : item.playbackPositionTicks,
+      ),
+    );
+    // 继续观看只保留未看完的条目，标记已看后应立即从当前视图移除。
+    if (value && view == 'recently-played') {
+      items = items.where((entry) => entry.id != item.id).toList();
+      total = (total - 1).clamp(0, 1 << 30).toInt();
     }
     _notify();
   }

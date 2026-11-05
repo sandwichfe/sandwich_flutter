@@ -383,8 +383,23 @@ class _Summary extends StatelessWidget {
               tooltip: '更多',
               enabled: !actionBusy,
               onSelected: onAction,
-              itemBuilder: (context) => const [
+              itemBuilder: (context) => [
                 PopupMenuItem(
+                  value: EmbyPcMediaAction.togglePlayed,
+                  child: Row(
+                    children: [
+                      Icon(
+                        detail.played
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 12),
+                      Text(detail.played ? '标记为未看' : '标记为已看'),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
                   value: EmbyPcMediaAction.editMetadata,
                   child: Row(
                     children: [
@@ -394,7 +409,7 @@ class _Summary extends StatelessWidget {
                     ],
                   ),
                 ),
-                PopupMenuItem(
+                const PopupMenuItem(
                   value: EmbyPcMediaAction.editImages,
                   child: Row(
                     children: [
@@ -404,7 +419,7 @@ class _Summary extends StatelessWidget {
                     ],
                   ),
                 ),
-                PopupMenuItem(
+                const PopupMenuItem(
                   value: EmbyPcMediaAction.refreshMetadata,
                   child: Row(
                     children: [
