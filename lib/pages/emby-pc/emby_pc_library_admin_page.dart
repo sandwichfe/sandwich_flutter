@@ -204,7 +204,7 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
     if (started && mounted) _startScanPolling();
   }
 
-  // 封面来源按库切换：只改渲染取图，不重扫媒体库。
+  // 封面来源按库切换：决定扫描时取目录图还是直接使用生成图，不影响已有图片。
   Future<void> _toggleArtworkSource(EmbyPcVirtualFolder folder) {
     final preferLocal = !folder.preferLocalArtwork;
     return _runForLibrary(
@@ -213,7 +213,9 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
         folder.id,
         preferLocal,
       ),
-      preferLocal ? '「${folder.name}」改用目录内的海报' : '「${folder.name}」改用生成的封面',
+      preferLocal
+          ? '「${folder.name}」下次扫描将使用目录内的海报'
+          : '「${folder.name}」已切换为使用生成的封面',
     );
   }
 

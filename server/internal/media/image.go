@@ -29,18 +29,17 @@ func NewImageStore(root string) *ImageStore {
 	return &ImageStore{root: root}
 }
 
-// generatedDir 是"服务端从视频画面生成"的图片子目录。
-// 与目录导入、手动上传的图片分开存放，客户端可以用 Source 参数在两者之间切换，互不覆盖。
-const generatedDir = "generated"
+// 图片来源标记：一个槽位只有一张图，origin 说明它是怎么来的。
+// 扫描导入时据此避免覆盖用户自己上传或生成的图。
+const (
+	OriginImport   = "import"
+	OriginUpload   = "upload"
+	OriginGenerate = "generate"
+	OriginAuto     = "auto"
+)
 
 func (s *ImageStore) ItemPath(itemID, imageType string, index int) string {
 	return filepath.Join(s.root, sanitizeID(itemID), sanitizeImageType(imageType), strconv.Itoa(index)+".jpg")
-}
-
-// GeneratedPath 返回生成图片的落盘位置。
-func (s *ImageStore) GeneratedPath(itemID, imageType string, index int) string {
-	return filepath.Join(s.root, sanitizeID(itemID), generatedDir,
-		sanitizeImageType(imageType), strconv.Itoa(index)+".jpg")
 }
 
 // sanitizeImageType 对图片类型做白名单清洗。
@@ -58,56 +57,83 @@ func sanitizeImageType(value string) string {
 	return cleaned
 }
 
-// GeneratedMetaPath 返回生成图旁边的元数据文件路径（缓存标记、重建签名等）。
+// ItemMetaPath 返回图片旁边的派生信息文件路径（来源、重建签名、删除标记等）。
 // 派生信息跟着图片文件走，删除图片时只清目录即可，不必为它新增数据库列。
-func (s *ImageStore) GeneratedMetaPath(itemID, imageType string, index int, ext string) string {
-	path := s.GeneratedPath(itemID, imageType, index)
+func (s *ImageStore) ItemMetaPath(itemID, imageType string, index int, ext string) string {
+	path := s.ItemPath(itemID, imageType, index)
 	return strings.TrimSuffix(path, filepath.Ext(path)) + "." + ext
 }
 
-// SaveGeneratedImage 写入服务端生成的图片，规则与上传一致：能解码就统一转成 JPEG。
-func (s *ImageStore) SaveGeneratedImage(itemID, imageType string, index int, raw []byte) (string, error) {
-	if len(raw) == 0 {
-		return "", fmt.Errorf("图片内容为空")
-	}
-	path := s.GeneratedPath(itemID, imageType, index)
+// WriteOrigin 记录这张图是怎么来的：扫描导入、手动上传、视频生成、自动拼接。
+// 扫描导入时据此判断是否该覆盖现有图。
+func (s *ImageStore) WriteOrigin(itemID, imageType string, index int, origin string) error {
+	path := s.ItemMetaPath(itemID, imageType, index, "origin")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", fmt.Errorf("创建生成图片目录失败: %w", err)
+		return err
 	}
-	if normalized, err := transcodeToJPEG(raw, 92); err == nil {
-		raw = normalized
+	if err := writeFileAtomic(path, []byte(origin)); err != nil {
+		return fmt.Errorf("写入图片来源失败: %w", err)
 	}
-	if err := writeFileAtomic(path, raw); err != nil {
-		return "", fmt.Errorf("写入生成图片失败: %w", err)
-	}
-	return hashTag(raw), nil
+	return nil
 }
 
-func (s *ImageStore) LoadGeneratedImage(itemID, imageType string, index int) ([]byte, error) {
-	return readFileOrNotFound(s.GeneratedPath(itemID, imageType, index))
+func (s *ImageStore) ReadOrigin(itemID, imageType string, index int) string {
+	raw, err := os.ReadFile(s.ItemMetaPath(itemID, imageType, index, "origin"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
 }
 
-// HasItemImage / HasGeneratedImage 只判断文件是否存在且非空。
-// 批量检查缺图时用它们，避免为了确认存在就读整张图。
+// RemoveOrigin 删除来源标记；图片被删掉后旧来源不能残留，
+// 否则扫描会误以为这张图仍是用户上传的而跳过重新导入。
+func (s *ImageStore) RemoveOrigin(itemID, imageType string, index int) error {
+	err := os.Remove(s.ItemMetaPath(itemID, imageType, index, "origin"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// ItemLockedPath 是条目图片锁的标记文件。锁跟图片目录走，不需要新增数据库列，
+// 和 .origin / .disabled 一样属于条目的派生状态。
+func (s *ImageStore) ItemLockedPath(itemID string) string {
+	return filepath.Join(s.root, sanitizeID(itemID), "locked")
+}
+
+// SetItemLocked 设置图片锁：锁定后扫描导入与自动重建封面都不会覆盖这个条目的图片。
+// 手动上传、手动生成、手动删除仍然允许，锁只挡自动流程。
+func (s *ImageStore) SetItemLocked(itemID string, locked bool) error {
+	path := s.ItemLockedPath(itemID)
+	if !locked {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	if err := writeFileAtomic(path, []byte("1")); err != nil {
+		return fmt.Errorf("写入图片锁失败: %w", err)
+	}
+	return nil
+}
+
+// ItemLocked 表示这个条目的图片被用户锁定了，自动流程不能覆盖。
+func (s *ImageStore) ItemLocked(itemID string) bool {
+	return fileExists(s.ItemLockedPath(itemID))
+}
+
+// HasItemImage 只判断文件是否存在且非空。
+// 批量检查缺图时用它，避免为了确认存在就读整张图。
 func (s *ImageStore) HasItemImage(itemID, imageType string, index int) bool {
 	return fileExists(s.ItemPath(itemID, imageType, index))
-}
-
-func (s *ImageStore) HasGeneratedImage(itemID, imageType string, index int) bool {
-	return fileExists(s.GeneratedPath(itemID, imageType, index))
 }
 
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.Size() > 0
-}
-
-func (s *ImageStore) DeleteGeneratedImage(itemID, imageType string, index int) error {
-	err := os.Remove(s.GeneratedPath(itemID, imageType, index))
-	if errors.Is(err, os.ErrNotExist) {
-		return ErrImageNotFound
-	}
-	return err
 }
 
 func (s *ImageStore) UserAvatarPath(userID string) string {

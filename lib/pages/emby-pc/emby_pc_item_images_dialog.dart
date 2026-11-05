@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
@@ -43,6 +45,10 @@ class _EmbyPcItemImagesDialogState extends State<EmbyPcItemImagesDialog> {
   bool _generating = false;
   int _imageRevision = 0;
 
+  // 图片锁：锁上后扫描导入与自动重拼不会覆盖，手动操作不受影响。
+  bool _locked = false;
+  bool _lockBusy = false;
+
   // 只有视频条目能从画面抽帧生成图片（剧集、媒体库等没有可抽帧的文件）。
   bool get _canGenerateArtwork =>
       widget.item.type.isNotEmpty &&
@@ -53,6 +59,39 @@ class _EmbyPcItemImagesDialogState extends State<EmbyPcItemImagesDialog> {
     super.initState();
     // 图像列表仅在用户打开编辑弹窗时按需获取。
     _loadImages();
+    _loadLock();
+  }
+
+  Future<void> _loadLock() async {
+    try {
+      final locked = await EmbyPcService.instance.getItemImagesLocked(
+        widget.item.id,
+      );
+      if (mounted) setState(() => _locked = locked);
+    } catch (_) {
+      // 锁状态读不到时不阻塞编辑，按未锁定处理。
+    }
+  }
+
+  Future<void> _toggleLock() async {
+    if (_lockBusy) return;
+    final target = !_locked;
+    setState(() => _lockBusy = true);
+    try {
+      final locked = await EmbyPcService.instance.setItemImagesLocked(
+        widget.item.id,
+        target,
+      );
+      if (!mounted) return;
+      setState(() => _locked = locked);
+      _showMessage(
+        locked ? '已锁定，扫描不会覆盖这些图片' : '已解锁，扫描时可以更新这些图片',
+      );
+    } catch (error) {
+      if (mounted) _showMessage(error.toString(), type: EmbyPcToastType.error);
+    } finally {
+      if (mounted) setState(() => _lockBusy = false);
+    }
   }
 
   Future<void> _loadImages({bool showProgress = true}) async {
@@ -71,8 +110,7 @@ class _EmbyPcItemImagesDialogState extends State<EmbyPcItemImagesDialog> {
     }
   }
 
-  // 同一类型可能同时存在目录图与生成图，槽位优先展示目录图，
-  // 只有生成图时（目录里没有海报）自然回退到生成图。
+  // 一个槽位只有一张图，主槽位取该类型第一张，背景图列表按同一顺序展示。
   EmbyPcImageInfo? _imageFor(String type) {
     final matches = _imagesFor(type);
     return matches.isEmpty ? null : matches.first;
@@ -192,7 +230,6 @@ class _EmbyPcItemImagesDialogState extends State<EmbyPcItemImagesDialog> {
         widget.item.id,
         type: image.type,
         index: image.index,
-        source: image.source,
       );
       _changed = true;
       _imageRevision++;
@@ -264,6 +301,23 @@ class _EmbyPcItemImagesDialogState extends State<EmbyPcItemImagesDialog> {
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                   ),
+                  IconButton(
+                    tooltip: _locked
+                        ? '已锁定：扫描不会覆盖这些图片'
+                        : '锁定图片，扫描时不覆盖',
+                    onPressed: _lockBusy ? null : _toggleLock,
+                    icon: _lockBusy
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Icon(
+                            _locked ? Icons.lock : Icons.lock_open_outlined,
+                            color: _locked
+                                ? Theme.of(context).colorScheme.primary
+                                : null,
+                          ),
+                  ),
                   if (_canGenerateArtwork)
                     _generating
                         ? const Padding(
@@ -320,11 +374,10 @@ class _EmbyPcItemImagesDialogState extends State<EmbyPcItemImagesDialog> {
                                 return _buildAddBackdropSlot();
                               }
                               final image = backdropImages[index];
-                              final title = image.isGenerated
-                                  ? '${_backdropImageSlot.label}（生成）'
-                                  : (image.fileName.trim().isEmpty
-                                        ? '${_backdropImageSlot.label} ${index + 1}'
-                                        : image.fileName);
+                              // 背景图可以有多张，有文件名就显示文件名，否则用序号。
+                              final title = image.fileName.trim().isEmpty
+                                  ? '${_backdropImageSlot.label} ${index + 1}'
+                                  : image.fileName;
                               return _buildImageSlot(
                                 _backdropImageSlot,
                                 image,
@@ -406,7 +459,6 @@ class _EmbyPcItemImagesDialogState extends State<EmbyPcItemImagesDialog> {
             index: image.index,
             maxWidth: 520,
             cacheKey: '$_imageRevision',
-            source: image.source,
           );
     return Material(
       color: colors.surfaceContainerLow,
@@ -435,10 +487,7 @@ class _EmbyPcItemImagesDialogState extends State<EmbyPcItemImagesDialog> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        title ??
-                            (image?.isGenerated == true
-                                ? '${slot.label}（生成）'
-                                : slot.label),
+                        title ?? slot.label,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontWeight: FontWeight.w600),
@@ -517,6 +566,11 @@ class _ArtworkGenerateDialogState extends State<_ArtworkGenerateDialog> {
   bool _primary = true;
   bool _backdrop = true;
 
+  // 取帧预览：拖动滑块时按进度点向服务端要一帧画面。
+  Timer? _previewTimer;
+  String _previewUrl = '';
+  int _previewTicks = -1;
+
   // 前端拿不到时长时无法给出进度点，只能走自动嗅探。
   bool get _hasDuration => widget.item.runTimeTicks > 0;
   bool get _effectiveSniff => _sniff || !_hasDuration;
@@ -539,6 +593,51 @@ class _ArtworkGenerateDialogState extends State<_ArtworkGenerateDialog> {
     if (_backdrop) 'Backdrop',
   ];
 
+  @override
+  void dispose() {
+    _previewTimer?.cancel();
+    super.dispose();
+  }
+
+  // 拖动过程中只在停手一小会儿后取帧，松手时立刻刷新：
+  // 既不会每移动一格就打一次 ffmpeg，也不会觉得预览慢半拍。
+  void _schedulePreview({bool immediate = false}) {
+    if (_effectiveSniff) return;
+    _previewTimer?.cancel();
+    if (immediate) {
+      _refreshPreview();
+      return;
+    }
+    _previewTimer = Timer(const Duration(milliseconds: 180), _refreshPreview);
+  }
+
+  void _refreshPreview() {
+    if (!mounted || _effectiveSniff) return;
+    final ticks = _positionTicks;
+    // 同一进度点的画面是一致的，拖回去时直接复用缓存，不重复抽帧。
+    if (ticks == _previewTicks && _previewUrl.isNotEmpty) return;
+    setState(() {
+      _previewTicks = ticks;
+      _previewUrl = EmbyPcService.instance.framePreviewUrl(
+        widget.item.id,
+        positionTicks: ticks,
+      );
+    });
+  }
+
+  void _toggleSniff(bool value) {
+    // 打开自动嗅探时收起预览；关掉后立刻给出一帧，避免先看到空白。
+    _previewTimer?.cancel();
+    setState(() {
+      _sniff = value;
+      if (value) {
+        _previewUrl = '';
+        _previewTicks = -1;
+      }
+    });
+    if (!value) _schedulePreview(immediate: true);
+  }
+
   void _confirm() {
     Navigator.pop(
       context,
@@ -556,51 +655,61 @@ class _ArtworkGenerateDialogState extends State<_ArtworkGenerateDialog> {
       title: Text('生成海报与封面 · ${widget.item.name}', maxLines: 1),
       content: SizedBox(
         width: 420,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('自动嗅探画面'),
-              subtitle: Text(
-                _hasDuration
-                    ? '在片长中段抽样若干帧，自动选择画面最清晰的一帧'
-                    : '缺少片长信息，只能自动嗅探画面',
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('自动嗅探画面'),
+                subtitle: Text(
+                  _hasDuration
+                      ? '在片长中段抽样若干帧，自动选择画面最清晰的一帧'
+                      : '缺少片长信息，只能自动嗅探画面',
+                ),
+                value: _effectiveSniff,
+                onChanged: _hasDuration ? _toggleSniff : null,
               ),
-              value: _effectiveSniff,
-              onChanged: _hasDuration
-                  ? (value) => setState(() => _sniff = value)
-                  : null,
-            ),
-            if (!_effectiveSniff) ...[
+              if (!_effectiveSniff) ...[
+                const SizedBox(height: 4),
+                _FramePreview(
+                  url: _previewUrl,
+                  positionLabel: _positionLabel,
+                  // 海报是 2:3，画面上标出居中裁切范围，选帧时就能看到最终构图。
+                  showPosterGuide: _primary,
+                ),
+                const SizedBox(height: 8),
+                Slider(
+                  value: _percent,
+                  min: 0.02,
+                  max: 0.98,
+                  divisions: 96,
+                  label: _positionLabel,
+                  onChanged: (value) {
+                    setState(() => _percent = value);
+                    _schedulePreview();
+                  },
+                  onChangeEnd: (_) => _schedulePreview(immediate: true),
+                ),
+              ],
               const SizedBox(height: 8),
-              Text('取帧进度：$_positionLabel'),
-              Slider(
-                value: _percent,
-                min: 0.02,
-                max: 0.98,
-                divisions: 96,
-                label: _positionLabel,
-                onChanged: (value) => setState(() => _percent = value),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('生成海报'),
+                subtitle: const Text('竖版 2:3'),
+                value: _primary,
+                onChanged: (value) => setState(() => _primary = value ?? false),
+              ),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('生成封面'),
+                subtitle: const Text('横版 16:9'),
+                value: _backdrop,
+                onChanged: (value) => setState(() => _backdrop = value ?? false),
               ),
             ],
-            const SizedBox(height: 8),
-            CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('生成海报'),
-              subtitle: const Text('竖版 2:3'),
-              value: _primary,
-              onChanged: (value) => setState(() => _primary = value ?? false),
-            ),
-            CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('生成封面'),
-              subtitle: const Text('横版 16:9'),
-              value: _backdrop,
-              onChanged: (value) => setState(() => _backdrop = value ?? false),
-            ),
-          ],
+          ),
         ),
       ),
       actions: [
@@ -610,9 +719,137 @@ class _ArtworkGenerateDialogState extends State<_ArtworkGenerateDialog> {
         ),
         FilledButton(
           onPressed: _types.isEmpty ? null : _confirm,
-          child: const Text('生成'),
+          // 手动选帧时明确告诉用户确认动作就是"用这一帧"。
+          child: Text(_effectiveSniff ? '生成' : '用这一帧生成'),
         ),
       ],
+    );
+  }
+}
+
+// 取帧预览框：拖动滑块时实时显示服务端抽出的那一帧。
+// 单独用 Image.network 而不用全局的 CachedNetworkImage：滑动会连续产生大量地址，
+// 这些临时画面不该写进海报的磁盘缓存，留在内存 ImageCache 里就够。
+class _FramePreview extends StatelessWidget {
+  final String url;
+  final String positionLabel;
+  final bool showPosterGuide;
+
+  const _FramePreview({
+    required this.url,
+    required this.positionLabel,
+    required this.showPosterGuide,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: AspectRatio(
+        aspectRatio: 16 / 9,
+        child: ColoredBox(
+          color: colors.surfaceContainerHighest,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (url.isEmpty)
+                Center(
+                  child: Text(
+                    '拖动下方滑块预览这一帧',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                )
+              else
+                Image.network(
+                  url,
+                  fit: BoxFit.cover,
+                  // 换帧期间保留上一张，拖动过程不会黑屏闪烁。
+                  gaplessPlayback: true,
+                  loadingBuilder: (context, child, progress) {
+                    if (progress == null) return child;
+                    return Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        child,
+                        Center(
+                          child: SizedBox.square(
+                            dimension: 22,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                  errorBuilder: (context, error, stackTrace) => Center(
+                    child: Text(
+                      '这一帧取不到画面，换个位置试试',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                ),
+              // 海报是竖版 2:3：在 16:9 画面上框出居中裁切区，
+              // 拖动选帧时看到的就是生成后的构图，而不是播放器的整幅画面。
+              if (url.isNotEmpty && showPosterGuide)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: Align(
+                      alignment: Alignment.center,
+                      child: FractionallySizedBox(
+                        widthFactor: 0.375,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.white70),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              if (url.isNotEmpty && showPosterGuide)
+                Positioned(
+                  left: 8,
+                  bottom: 8,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.62),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      child: Text(
+                        '竖框内为海报画面',
+                        style: TextStyle(color: Colors.white, fontSize: 12),
+                      ),
+                    ),
+                  ),
+                ),
+              if (url.isNotEmpty)
+                Positioned(
+                  right: 8,
+                  bottom: 8,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.62),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      child: Text(
+                        positionLabel,
+                        style: const TextStyle(color: Colors.white, fontSize: 12),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

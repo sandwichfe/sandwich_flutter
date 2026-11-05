@@ -125,20 +125,32 @@ func (g *ArtworkGenerator) Generate(ctx context.Context, itemID string, opts Art
 
 	for _, imageType := range types {
 		width, height := artworkSize(imageType, opts.Width)
-		target := g.images.GeneratedPath(itemID, imageType, 0)
-		if err := g.extractFrame(ctx, opts.SourcePath, positionSeconds, width, height, target); err != nil {
-			return result, fmt.Errorf("生成%s失败: %w", artworkTypeLabel(imageType), err)
-		}
-		raw, err := os.ReadFile(target)
-		if err != nil {
-			return result, fmt.Errorf("读取生成的%s失败: %w", artworkTypeLabel(imageType), err)
-		}
-		tag, err := g.images.SaveGeneratedImage(itemID, imageType, 0, raw)
+		// 先抽到临时文件，再统一走 SaveItemImage 转码落盘：
+		// 一个槽位只有一张图，生成就是覆盖这张图，不再分 generated 目录。
+		dir, err := os.MkdirTemp("", "embyx-artwork-*")
 		if err != nil {
 			return result, err
 		}
+		target := filepath.Join(dir, "frame.jpg")
+		err = g.extractFrame(ctx, opts.SourcePath, positionSeconds, width, height, target)
+		if err != nil {
+			os.RemoveAll(dir)
+			return result, fmt.Errorf("生成%s失败: %w", artworkTypeLabel(imageType), err)
+		}
+		raw, readErr := os.ReadFile(target)
+		os.RemoveAll(dir)
+		if readErr != nil {
+			return result, fmt.Errorf("读取生成的%s失败: %w", artworkTypeLabel(imageType), readErr)
+		}
+		tag, err := g.images.SaveItemImage(itemID, imageType, 0, raw)
+		if err != nil {
+			return result, err
+		}
+		if err := g.images.WriteOrigin(itemID, imageType, 0, OriginGenerate); err != nil {
+			log.Printf("[artwork] 写入图片来源失败 item=%s 类型=%s: %v", itemID, imageType, err)
+		}
 		log.Printf("[artwork] 落盘 item=%s 类型=%s 目标=%q 字节=%d tag=%s",
-			itemID, imageType, target, len(raw), tag)
+			itemID, imageType, g.images.ItemPath(itemID, imageType, 0), len(raw), tag)
 		result.Tags[imageType] = tag
 	}
 	return result, nil
@@ -249,6 +261,29 @@ func frameScore(path string) float64 {
 	mean := sum / float64(total)
 	stdDev := math.Sqrt(math.Max(0, sumSquare/float64(total)-mean*mean))
 	return stdDev * (1 - float64(extreme)/float64(total))
+}
+
+// PreviewFrame 抽取指定时间点的一帧用于滑块预览：只返回 JPEG 字节，
+// 不写图片目录，也不回写任何图片标记，纯粹给编辑弹窗看效果。
+// 走临时文件而不是 pipe，是为了复用 extractFrame 的裁剪与错误处理。
+func (g *ArtworkGenerator) PreviewFrame(ctx context.Context, sourcePath string, positionSeconds float64, maxWidth int) ([]byte, error) {
+	if sourcePath == "" {
+		return nil, fmt.Errorf("该条目没有可用的视频文件")
+	}
+	if positionSeconds < 0 {
+		positionSeconds = 0
+	}
+	dir, err := os.MkdirTemp("", "embyx-frame-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+
+	target := filepath.Join(dir, "frame.jpg")
+	if err := g.extractFrame(ctx, sourcePath, positionSeconds, maxWidth, 0, target); err != nil {
+		return nil, err
+	}
+	return os.ReadFile(target)
 }
 
 // extractFrame 抽取指定时间点的一帧，按目标尺寸居中裁切。

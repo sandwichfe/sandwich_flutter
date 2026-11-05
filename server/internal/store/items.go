@@ -601,9 +601,10 @@ func (s *Store) ItemSource(ctx context.Context, itemID string) (ItemSource, erro
 	return source, err
 }
 
-// EnsureImageTag 只在条目还没有该类型图片标记时写入，
-// 避免服务端生成的图覆盖目录导入或手动上传的 tag。
-func (s *Store) EnsureImageTag(ctx context.Context, itemID, imageType, tag string) error {
+// ReplaceImageTag 无条件写入图片标记：一个槽位只有一张图，
+// 换图后标记必须同步变化，否则客户端会一直命中旧缓存。
+// 背景图固定替换第 0 张，其余序号的标记保留。
+func (s *Store) ReplaceImageTag(ctx context.Context, itemID, imageType, tag string) error {
 	if tag == "" {
 		return nil
 	}
@@ -622,17 +623,16 @@ func (s *Store) EnsureImageTag(ctx context.Context, itemID, imageType, tag strin
 	if strings.EqualFold(imageType, "Backdrop") {
 		var tags []string
 		unmarshalJSON(backdropTags, &tags)
-		if len(tags) > 0 {
-			return nil
+		if len(tags) == 0 {
+			tags = []string{tag}
+		} else {
+			tags[0] = tag
 		}
-		return s.SetImageTags(ctx, itemID, "backdrop_tags", []string{tag})
+		return s.SetImageTags(ctx, itemID, "backdrop_tags", tags)
 	}
 
 	parsed := map[string]string{}
 	unmarshalJSON(imageTags, &parsed)
-	if parsed[imageType] != "" {
-		return nil
-	}
 	parsed[imageType] = tag
 	return s.SetImageTags(ctx, itemID, "image_tags", parsed)
 }

@@ -139,6 +139,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /emby/Items/{itemId}/Images/{type}/{index}", s.handleImage)
 	// 从视频画面生成海报/封面（本项目扩展，不属于 Emby 协议）。
 	s.mux.HandleFunc("POST /emby/Items/{itemId}/Images/Generate", s.handleGenerateArtwork)
+	// 取帧预览：按进度点抽一帧直接返回，供滑块实时选帧（不落盘）。
+	s.mux.HandleFunc("GET /emby/Items/{itemId}/Images/Frame", s.handleFramePreview)
+	// 图片锁定：锁上后扫描导入与自动重拼封面不会覆盖，手动上传/生成不受限（本项目扩展）。
+	s.mux.HandleFunc("GET /emby/Items/{itemId}/Images/Lock", s.handleImageLock)
+	s.mux.HandleFunc("POST /emby/Items/{itemId}/Images/Lock", s.handleSetImageLock)
 	s.mux.HandleFunc("POST /emby/Items/{itemId}/Images/{type}", s.handleUploadImage)
 	s.mux.HandleFunc("POST /emby/Items/{itemId}/Images/{type}/{index}", s.handleUploadImage)
 	s.mux.HandleFunc("DELETE /emby/Items/{itemId}/Images/{type}/{index}", s.handleDeleteImage)

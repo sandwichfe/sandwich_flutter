@@ -111,7 +111,7 @@ func (s *Server) handleCreateArtworkJob(w http.ResponseWriter, r *http.Request) 
 	for _, item := range items {
 		needed := make([]string, 0, len(imageTypes))
 		for _, imageType := range imageTypes {
-			if s.needsArtwork(item.ID, imageType, library.PreferLocalArtwork, payload.Force) {
+			if s.needsArtwork(item.ID, imageType, payload.Force) {
 				needed = append(needed, imageType)
 			}
 		}
@@ -185,19 +185,12 @@ func (s *Server) handleCancelArtworkJob(w http.ResponseWriter, r *http.Request) 
 }
 
 // needsArtwork 判断某个条目是否还需要生成指定类型的图片。
-// 库偏好目录图时，目录里已有图或已有生成图（作为兜底）都算满足。
-func (s *Server) needsArtwork(itemID, imageType string, preferLocal, force bool) bool {
+// 一个槽位只有一张图：有图就算满足，没有才生成。
+func (s *Server) needsArtwork(itemID, imageType string, force bool) bool {
 	if force {
 		return true
 	}
-	if !preferLocal {
-		// 优先展示生成图，缺就必须补。
-		return !s.images.HasGeneratedImage(itemID, imageType, 0)
-	}
-	if s.images.HasItemImage(itemID, imageType, 0) {
-		return false
-	}
-	return !s.images.HasGeneratedImage(itemID, imageType, 0)
+	return !s.images.HasItemImage(itemID, imageType, 0)
 }
 
 // clampArtworkRatio 把前端传来的取帧比例收口到 2%~98%，

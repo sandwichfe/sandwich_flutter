@@ -232,8 +232,6 @@ type ImageInfo struct {
 	Width      int    `json:"Width,omitempty"`
 	Height     int    `json:"Height,omitempty"`
 	Size       int64  `json:"Size,omitempty"`
-	// Source 区分图片来源：local（目录导入/手动上传）与 generated（服务端从画面生成）。
-	Source string `json:"Source,omitempty"`
 }
 
 // MarshalRaw 便于在 handler 里复用手动拼装的 JSON 片段。

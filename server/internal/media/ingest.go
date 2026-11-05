@@ -1,6 +1,7 @@
 package media
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -129,60 +130,74 @@ func normalizeProviderIDs(ids map[string]string) map[string]string {
 }
 
 // importArtwork 把目录里的本地图片拷进自管图片目录，并把 tag 回写到条目。
+// 条目图片被锁定、或库选了"视频生成的封面"时跳过目录图，避免覆盖用户/生成结果；
+// 人物头像有自己的锁，不受条目锁与库开关影响。
 func (s *Scanner) importArtwork(item *store.Item, videoPath string, logf func(string, ...any)) {
 	// 同目录的图片与演员头像只枚举一次：网络盘上这两次 ReadDir 是扫描里最贵的一环。
 	dir := filepath.Dir(videoPath)
 	snapshot := s.snapshotDir(dir)
 	art := findArtworkIn(dir, filepath.Base(videoPath), snapshot.images)
-	// 目录图回退（poster/folder/cover/movie）会让同目录多个视频共用一张图，
-	// 这行日志能直接看出每个条目的海报究竟来自哪个文件。
-	primarySource := art.Primary
-	if primarySource == "" {
-		primarySource = "（未找到）"
-	}
-	logf("匹配图片 %s → 海报=%s 背景=%d 张", videoPath, primarySource, len(art.Backdrops))
 
-	if art.Primary != "" {
-		if tag, err := s.saveArtwork(item.ID, "Primary", 0, art.Primary); err == nil {
-			item.ImageTags["Primary"] = tag
-		} else {
-			logf("导入海报失败 %s: %v", art.Primary, err)
+	if s.images.ItemLocked(item.ID) {
+		// 用户锁定了这个条目的图片：扫描不再用目录图覆盖。
+		logf("图片已锁定，跳过目录图 %s", videoPath)
+	} else if !s.libraryPreferLocal(item.LibraryID) {
+		logf("封面来源为视频生成，跳过目录图 %s", videoPath)
+	} else {
+		// 目录图回退（poster/folder/cover/movie）会让同目录多个视频共用一张图，
+		// 这行日志能直接看出每个条目的海报究竟来自哪个文件。
+		primarySource := art.Primary
+		if primarySource == "" {
+			primarySource = "（未找到）"
 		}
-	}
+		logf("匹配图片 %s → 海报=%s 背景=%d 张", videoPath, primarySource, len(art.Backdrops))
 
-	for index, path := range art.Backdrops {
-		tag, err := s.saveArtwork(item.ID, "Backdrop", index, path)
-		if err != nil {
-			logf("导入背景图失败 %s: %v", path, err)
-			continue
+		if art.Primary != "" {
+			if tag, err := s.saveArtwork(item.ID, "Primary", 0, art.Primary); err == nil {
+				item.ImageTags["Primary"] = tag
+			} else {
+				logf("导入海报失败 %s: %v", art.Primary, err)
+			}
 		}
-		item.BackdropTags = append(item.BackdropTags, tag)
-	}
 
-	extraImages := []struct {
-		imageType string
-		path      string
-	}{
-		{"Thumb", art.Thumb},
-		{"Logo", art.Logo},
-		{"Banner", art.Banner},
-		{"Disc", art.Disc},
-		{"Art", art.ClearArt},
-	}
-	for _, extra := range extraImages {
-		if extra.path == "" {
-			continue
+		for index, path := range art.Backdrops {
+			tag, err := s.saveArtwork(item.ID, "Backdrop", index, path)
+			if err != nil {
+				logf("导入背景图失败 %s: %v", path, err)
+				continue
+			}
+			item.BackdropTags = append(item.BackdropTags, tag)
 		}
-		if tag, err := s.saveArtwork(item.ID, extra.imageType, 0, extra.path); err == nil {
-			item.ImageTags[extra.imageType] = tag
-		} else {
-			logf("导入 %s 失败 %s: %v", extra.imageType, extra.path, err)
+
+		extraImages := []struct {
+			imageType string
+			path      string
+		}{
+			{"Thumb", art.Thumb},
+			{"Logo", art.Logo},
+			{"Banner", art.Banner},
+			{"Disc", art.Disc},
+			{"Art", art.ClearArt},
+		}
+		for _, extra := range extraImages {
+			if extra.path == "" {
+				continue
+			}
+			if tag, err := s.saveArtwork(item.ID, extra.imageType, 0, extra.path); err == nil {
+				item.ImageTags[extra.imageType] = tag
+			} else {
+				logf("导入 %s 失败 %s: %v", extra.imageType, extra.path, err)
+			}
 		}
 	}
 
 	// .actors/<演员名>.jpg 由 tinyMediaManager 一类工具生成。
 	for name, path := range snapshot.actors {
 		personID := store.StableID("person:" + name)
+		// 人物头像可能有自己的锁（人物不受条目锁影响）。
+		if s.images.ItemLocked(personID) {
+			continue
+		}
 		tag, err := s.saveArtwork(personID, "Primary", 0, path)
 		if err != nil {
 			continue
@@ -197,7 +212,18 @@ func (s *Scanner) importArtwork(item *store.Item, videoPath string, logf func(st
 	}
 }
 
+// libraryPreferLocal 查询媒体库的封面来源偏好；查不到时按目录图处理，
+// 与升级前的默认行为保持一致。
+func (s *Scanner) libraryPreferLocal(libraryID string) bool {
+	lib, err := s.store.LibraryByID(context.Background(), libraryID)
+	if err != nil {
+		return true
+	}
+	return lib.PreferLocalArtwork
+}
+
 // saveArtwork 幂等导入：目标文件比源文件新时直接复用，避免每次扫描重复转码。
+// 是否允许覆盖由调用方按图片锁与库偏好决定，这里只负责落盘。
 func (s *Scanner) saveArtwork(itemID, imageType string, index int, sourcePath string) (string, error) {
 	target := s.images.ItemPath(itemID, imageType, index)
 	unlock := s.lockArtworkTarget(target)
@@ -213,7 +239,14 @@ func (s *Scanner) saveArtwork(itemID, imageType string, index int, sourcePath st
 	if err != nil {
 		return "", err
 	}
-	return s.images.SaveItemImage(itemID, imageType, index, raw)
+	tag, err := s.images.SaveItemImage(itemID, imageType, index, raw)
+	if err != nil {
+		return "", err
+	}
+	if err := s.images.WriteOrigin(itemID, imageType, index, OriginImport); err != nil {
+		return tag, err
+	}
+	return tag, nil
 }
 
 // lockArtworkTarget 按目标文件加锁。演员头像由多个条目共用同一路径

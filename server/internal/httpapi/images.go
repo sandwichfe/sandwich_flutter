@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,18 +17,18 @@ import (
 	"embyx/internal/store"
 )
 
-// 图片来源标记，前端据此区分目录图与服务端生成图。
-const (
-	imageSourceLocal     = "local"
-	imageSourceGenerated = "generated"
-)
-
 func (s *Server) handleImage(w http.ResponseWriter, r *http.Request) {
 	itemID := r.PathValue("itemId")
 	imageType := r.PathValue("type")
 	index := atoi(r.PathValue("index"))
 
-	raw, err := s.loadItemImage(r, itemID, imageType, index)
+	// 一个槽位只有一张图：文件在就返回，不在就是 404，没有来源回退。
+	if r.URL.Query().Get("debugArtwork") != "" {
+		log.Printf("[image] 读取 item=%s 类型=%s 序号=%d 文件=%q",
+			itemID, imageType, index, s.images.ItemPath(itemID, imageType, index))
+	}
+
+	raw, err := s.images.LoadItemImage(itemID, imageType, index)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "图片不存在")
 		return
@@ -64,94 +65,113 @@ func (s *Server) handleListImages(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "读取图片列表失败")
 		return
 	}
-	// 生成图与目录图分开存放，但都算这个条目的图片，一起返回给编辑弹窗。
-	generated, err := s.images.ListGeneratedImages(itemID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "读取图片列表失败")
-		return
-	}
-
-	result := make([]dto.ImageInfo, 0, len(files)+len(generated))
+	// 一个槽位一张图，磁盘上有什么就返回什么，弹窗不再需要区分来源。
+	result := make([]dto.ImageInfo, 0, len(files))
 	for _, file := range files {
 		result = append(result, dto.ImageInfo{
 			ImageType:  file.Type,
 			ImageIndex: file.Index,
 			Filename:   file.Filename,
 			Size:       file.Size,
-			Source:     imageSourceLocal,
-		})
-	}
-	for _, file := range generated {
-		result = append(result, dto.ImageInfo{
-			ImageType:  file.Type,
-			ImageIndex: file.Index,
-			Filename:   file.Filename,
-			Size:       file.Size,
-			Source:     imageSourceGenerated,
 		})
 	}
 	writeJSON(w, http.StatusOK, result)
 }
 
-// loadItemImage 决定优先读目录图还是服务端生成图。
-// 两种图互相兜底：优先的那种不存在时自动回退另一种，避免列表出现空白。
-func (s *Server) loadItemImage(r *http.Request, itemID, imageType string, index int) ([]byte, error) {
-	// 用户手动删过媒体库封面时只认手动图，不再回退拼图；
-	// 想重新用拼图，走管理页"刷新媒体库图片"或带 Source=generated 显式请求。
-	if strings.EqualFold(imageType, "Primary") &&
-		artworkSourceParam(r) != imageSourceGenerated &&
-		s.libraryCovers != nil && s.libraryCovers.CoverDeleted(itemID) {
-		return s.images.LoadItemImage(itemID, imageType, index)
-	}
-	if s.preferGeneratedArtwork(r, itemID) {
-		raw, err := s.images.LoadGeneratedImage(itemID, imageType, index)
-		if errors.Is(err, media.ErrImageNotFound) {
-			s.logArtworkPick(r, "generated 缺失→回退 local", s.images.ItemPath(itemID, imageType, index))
-			return s.images.LoadItemImage(itemID, imageType, index)
-		}
-		s.logArtworkPick(r, "generated", s.images.GeneratedPath(itemID, imageType, index))
-		return raw, err
-	}
-	raw, err := s.images.LoadItemImage(itemID, imageType, index)
-	if errors.Is(err, media.ErrImageNotFound) {
-		s.logArtworkPick(r, "local 缺失→回退 generated", s.images.GeneratedPath(itemID, imageType, index))
-		return s.images.LoadGeneratedImage(itemID, imageType, index)
-	}
-	s.logArtworkPick(r, "local", s.images.ItemPath(itemID, imageType, index))
-	return raw, err
+// handleImageLock GET /emby/Items/{itemId}/Images/Lock
+// 读取图片锁状态：锁定后扫描导入、扫描结束的自动重拼都不会覆盖现有图片。
+func (s *Server) handleImageLock(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]bool{
+		"Locked": s.images.ItemLocked(r.PathValue("itemId")),
+	})
 }
 
-// logArtworkPick 打印客户端这次实际读到的图片文件，用于确认界面显示的是目录图还是生成图。
-// 只在 URL 带 debugArtwork=1 时输出，避免每个图片请求都刷日志。
-func (s *Server) logArtworkPick(r *http.Request, source string, path string) {
-	if r.URL.Query().Get("debugArtwork") == "" {
+// handleSetImageLock POST /emby/Items/{itemId}/Images/Lock
+// 正文 {"Locked":true}，也接受 ?locked=true，方便脚本调用。
+// 锁只挡自动流程，手动上传、生成、删除仍然允许。
+func (s *Server) handleSetImageLock(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
 		return
 	}
-	log.Printf("[image] 读取=%s 文件=%q", source, path)
-}
 
-// preferGeneratedArtwork 的优先级：显式 Source 参数（图像编辑弹窗预览用）>
-// 条目所属媒体库的封面来源偏好（设置页按库配置）> 默认读取目录图。
-func (s *Server) preferGeneratedArtwork(r *http.Request, itemID string) bool {
-	switch artworkSourceParam(r) {
-	case imageSourceGenerated:
-		return true
-	case imageSourceLocal:
-		return false
+	var payload struct {
+		Locked *bool `json:"Locked"`
 	}
-	return !s.store.ItemPreferLocalArtwork(r.Context(), itemID)
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&payload); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "请求体格式错误")
+		return
+	}
+
+	locked := payload.Locked
+	if locked == nil {
+		value := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("locked"), r.URL.Query().Get("Locked")))
+		if value == "" {
+			writeError(w, http.StatusBadRequest, "缺少 locked 参数")
+			return
+		}
+		parsed := strings.EqualFold(value, "true")
+		locked = &parsed
+	}
+
+	if err := s.images.SetItemLocked(r.PathValue("itemId"), *locked); err != nil {
+		log.Printf("[image] 更新图片锁失败 item=%s: %v", r.PathValue("itemId"), err)
+		writeError(w, http.StatusInternalServerError, "更新图片锁失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"Locked": *locked})
 }
 
-// artworkSourceParam 读取 Source 参数，兼容 camelCase / PascalCase 写法。
-func artworkSourceParam(r *http.Request) string {
-	query := r.URL.Query()
-	value := strings.ToLower(strings.TrimSpace(firstNonEmpty(
-		query.Get("Source"), query.Get("source"), query.Get("ArtworkSource"),
+// handleFramePreview GET /emby/Items/{itemId}/Images/Frame?PositionTicks=&MaxWidth=
+// 编辑弹窗里拖动取帧滑块时的实时预览：按进度点抽一帧直接返回，
+// 不落盘、不写图片标记，所以反复预览不会影响已有海报和封面。
+func (s *Server) handleFramePreview(w http.ResponseWriter, r *http.Request) {
+	itemID := r.PathValue("itemId")
+	ticks, err := strconv.ParseInt(strings.TrimSpace(firstNonEmpty(
+		r.URL.Query().Get("PositionTicks"), r.URL.Query().Get("positionTicks"),
+	)), 10, 64)
+	if err != nil || ticks < 0 {
+		writeError(w, http.StatusBadRequest, "取帧位置不合法")
+		return
+	}
+
+	// 预览只需要看得清，宽度上限压到 960，避免每次抽帧都解一张大图。
+	width := media.NormalizeRenderWidth(atoi(firstNonEmpty(
+		r.URL.Query().Get("MaxWidth"), r.URL.Query().Get("maxWidth"),
 	)))
-	if value == imageSourceGenerated || value == imageSourceLocal {
-		return value
+	if width <= 0 || width > 960 {
+		width = 640
 	}
-	return ""
+
+	source, err := s.store.ItemSource(r.Context(), itemID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "条目不存在")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "查询条目失败")
+		return
+	}
+	if source.Path == "" {
+		writeError(w, http.StatusBadRequest, "该条目没有可用的视频文件")
+		return
+	}
+
+	// 单帧解码通常在几百毫秒，超时上限只用于兜住异常片源。
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+
+	positionSeconds := float64(ticks) / 10_000_000
+	raw, err := s.artwork.PreviewFrame(ctx, source.Path, positionSeconds, width)
+	if err != nil {
+		log.Printf("[artwork] 预览取帧失败 item=%s 位置=%.3fs: %v", itemID, positionSeconds, err)
+		writeError(w, http.StatusInternalServerError, "截取画面失败")
+		return
+	}
+
+	w.Header().Set("Content-Type", "image/jpeg")
+	// 同一进度点的画面不会变，来回拖动可以直接命中缓存。
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	_, _ = w.Write(raw)
 }
 
 func (s *Server) handleUploadImage(w http.ResponseWriter, r *http.Request) {
@@ -177,6 +197,10 @@ func (s *Server) handleUploadImage(w http.ResponseWriter, r *http.Request) {
 	}
 	// 换了图就丢掉旧的缩放缓存，避免磁盘上堆积再也用不到的文件。
 	s.imageRenderer.RemoveItem(itemID)
+	// 记住这张是用户上传的：扫描导入目录图时不会把它覆盖掉。
+	if err := s.images.WriteOrigin(itemID, imageType, index, media.OriginUpload); err != nil {
+		log.Printf("[image] 写入图片来源失败 item=%s type=%s: %v", itemID, imageType, err)
+	}
 	if err := s.syncImageTags(r, itemID, imageType, index, tag); err != nil {
 		writeError(w, http.StatusInternalServerError, "更新图片标记失败")
 		return
@@ -203,41 +227,10 @@ func (s *Server) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
 	imageType := r.PathValue("type")
 	index := atoi(r.PathValue("index"))
 
-	// 媒体库不在 items 表里，封面标记由拼图目录自己维护，
+	// 媒体库不在 items 表里，封面标记由封面文件自己维护，
 	// 走 syncImageTags 回写 items 必然拿不到条目而报 500。
 	_, libErr := s.store.LibraryByID(r.Context(), itemID)
 	isLibrary := libErr == nil && s.libraryCovers != nil
-
-	// 编辑弹窗里生成图带 Source=generated，删除时必须落到对应的目录。
-	if artworkSourceParam(r) == imageSourceGenerated {
-		if err := s.images.DeleteGeneratedImage(itemID, imageType, index); err != nil {
-			if errors.Is(err, media.ErrImageNotFound) {
-				writeError(w, http.StatusNotFound, "图片不存在")
-				return
-			}
-			writeError(w, http.StatusInternalServerError, "删除图片失败")
-			return
-		}
-		s.imageRenderer.RemoveItem(itemID)
-		if isLibrary {
-			// 拼图连同 tag/sig 一起清掉，并记下用户删过封面，避免下次扫描又拼回来。
-			if err := s.libraryCovers.ForgetGeneratedCover(itemID); err != nil {
-				log.Printf("[library-cover] 清理媒体库拼图封面失败 library=%s: %v", itemID, err)
-			}
-			if err := s.libraryCovers.MarkCoverDeleted(itemID); err != nil {
-				writeError(w, http.StatusInternalServerError, "删除图片失败")
-				return
-			}
-			writeNoContent(w)
-			return
-		}
-		// 目录图还在时 tag 继续有效；否则清空标记，客户端回退到占位图。
-		if _, loadErr := s.images.LoadItemImage(itemID, imageType, index); loadErr != nil {
-			_ = s.syncImageTags(r, itemID, imageType, index, "")
-		}
-		writeNoContent(w)
-		return
-	}
 
 	if err := s.images.DeleteItemImage(itemID, imageType, index); err != nil {
 		if errors.Is(err, media.ErrImageNotFound) {
@@ -248,8 +241,15 @@ func (s *Server) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.imageRenderer.RemoveItem(itemID)
+	// 清掉来源标记：否则扫描会以为这里仍是用户设置过的图而跳过重新导入。
+	if err := s.images.RemoveOrigin(itemID, imageType, index); err != nil {
+		log.Printf("[image] 清理图片来源失败 item=%s type=%s: %v", itemID, imageType, err)
+	}
 	if isLibrary {
-		// 用户要自己传封面或显式重拼，这里不再用拼图自动兜底。
+		// 用户要自己传封面或显式重拼，这里不再自动拼回来。
+		if err := s.libraryCovers.ForgetGeneratedCover(itemID); err != nil {
+			log.Printf("[library-cover] 清理媒体库封面失败 library=%s: %v", itemID, err)
+		}
 		if err := s.libraryCovers.MarkCoverDeleted(itemID); err != nil {
 			writeError(w, http.StatusInternalServerError, "删除图片失败")
 			return
@@ -283,6 +283,10 @@ func (s *Server) syncImageTags(r *http.Request, itemID, imageType string, index 
 			tags = append(tags, "")
 		}
 		tags[index] = tag
+		// 删掉最后一张时把尾部空位裁掉，避免客户端看到一个空 tag 还去请求图片。
+		for len(tags) > 0 && tags[len(tags)-1] == "" {
+			tags = tags[:len(tags)-1]
+		}
 		return s.store.SetImageTags(r.Context(), itemID, "backdrop_tags", tags)
 	case "screenshot":
 		tags := append([]string(nil), item.ScreenshotImageTags...)
@@ -290,6 +294,9 @@ func (s *Server) syncImageTags(r *http.Request, itemID, imageType string, index 
 			tags = append(tags, "")
 		}
 		tags[index] = tag
+		for len(tags) > 0 && tags[len(tags)-1] == "" {
+			tags = tags[:len(tags)-1]
+		}
 		return s.store.SetImageTags(r.Context(), itemID, "screenshot_tags", tags)
 	default:
 		imageTags := map[string]string{}
@@ -370,12 +377,13 @@ func (s *Server) handleGenerateArtwork(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// markGeneratedImageTags 在目录里没有对应图片时回写 tag。
-// 客户端靠 ImageTags 决定是否发起图片请求，不回写的话生成图根本不会被加载。
+// markGeneratedImageTags 把生成结果回写到条目的图片标记。
+// 一个槽位只有一张图，生成就是覆盖它：标记必须一起更新，
+// 否则客户端 URL 里的 v 不变，会一直命中旧缓存看不到新图。
 // 批量任务在后台 goroutine 里调用，因此不依赖请求上下文。
 func (s *Server) markGeneratedImageTags(itemID string, tags map[string]string) {
 	for imageType, tag := range tags {
-		if err := s.store.EnsureImageTag(context.Background(), itemID, imageType, tag); err != nil {
+		if err := s.store.ReplaceImageTag(context.Background(), itemID, imageType, tag); err != nil {
 			log.Printf("回写图片标记失败 item=%s type=%s: %v", itemID, imageType, err)
 		}
 	}

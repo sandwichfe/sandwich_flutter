@@ -26,12 +26,11 @@ import (
 // 凑不满 3 张时先确认片子是不是本来就少：只有库里确实没有更多条目才按少数布局拼，
 // 否则等海报生成完再拼。
 //
-// 结果写在 generated/primary/0.jpg，而目录导入与手动上传的封面在 primary/0.jpg。
-// 读图链路对媒体库先读 primary、缺失才回退 generated，所以拼图只作兜底：
-// 用户一上传封面，拼图自动让位。
+// 封面只有一张：直接写 primary/0.jpg，来源记录在同名 .origin 里（auto）。
+// 用户手动上传的封面 origin=upload，自动重拼不会覆盖它；手动"刷新媒体库图片"除外。
 //
-// 用户手动删掉封面时写入 disabled 标记：此后读图不再回退拼图、扫描结束也不重拼，
-// 卡片回到占位图；要重新用拼图必须显式"刷新媒体库图片"，或自己上传新封面。
+// 用户手动删掉封面时写入 disabled 标记：此后扫描结束不再重拼，卡片回到占位图；
+// 要重新用拼图必须显式"刷新媒体库图片"，或自己上传新封面。
 const (
 	// libraryCoverCount 是拼图的列数上限，取最近的这么多张海报。
 	libraryCoverCount = 3
@@ -78,9 +77,15 @@ func (b *LibraryCoverBuilder) rebuild(ctx context.Context, lib store.Library, fo
 		if err := b.ClearCoverDeleted(lib.ID); err != nil {
 			return false, err
 		}
-	} else if b.CoverDeleted(lib.ID) {
+	} else {
 		// 用户删过封面：扫描结束的自动重建不再把拼图塞回去。
-		return false, nil
+		if b.CoverDeleted(lib.ID) {
+			return false, nil
+		}
+		// 库封面被锁定：扫描结束的自动重拼不再覆盖；手动刷新不受锁限制。
+		if b.images.ItemLocked(lib.ID) {
+			return false, nil
+		}
 	}
 
 	// 多取一些候选：条目海报可能还没生成，需要往后找够 3 张有图的。
@@ -93,7 +98,7 @@ func (b *LibraryCoverBuilder) rebuild(ctx context.Context, lib store.Library, fo
 		return false, b.removeCover(lib.ID)
 	}
 
-	sources := b.pickSources(lib, ids)
+	sources := b.pickSources(ids)
 	if len(sources) == 0 {
 		// 库里有条目但一张海报都没有：拼不出来，也不能把上一次的结果删掉。
 		return false, nil
@@ -119,14 +124,14 @@ func (b *LibraryCoverBuilder) rebuild(ctx context.Context, lib store.Library, fo
 	if err != nil {
 		return false, fmt.Errorf("拼接媒体库封面失败: %w", err)
 	}
-	tag, err := b.images.SaveGeneratedImage(lib.ID, "Primary", 0, raw)
-	if err != nil {
+	if _, err := b.images.SaveItemImage(lib.ID, "Primary", 0, raw); err != nil {
 		return false, err
 	}
-	// tag 供客户端做缓存键，sig 供下次判断是否需要重拼。
-	if err := b.writeMeta(lib.ID, "tag", tag); err != nil {
+	// 标记这张是自动拼的，扫描/重拼时才不会覆盖用户手动上传的封面。
+	if err := b.images.WriteOrigin(lib.ID, "Primary", 0, OriginAuto); err != nil {
 		return false, err
 	}
+	// sig 供下次判断是否需要重拼；封面 tag 直接由文件内容算，不再单独存。
 	if err := b.writeMeta(lib.ID, "sig", signature); err != nil {
 		return false, err
 	}
@@ -134,16 +139,13 @@ func (b *LibraryCoverBuilder) rebuild(ctx context.Context, lib store.Library, fo
 }
 
 // Tag 返回媒体库封面当前生效的标记，客户端把它拼进图片地址做缓存失效。
-// 手动/目录封面优先，与读图链路的优先级保持一致。
+// 一个槽位只有一张图：文件在就有 tag，文件不在就是没有封面。
 func (b *LibraryCoverBuilder) Tag(libraryID string) string {
-	if info, err := os.Stat(b.images.ItemPath(libraryID, "Primary", 0)); err == nil && info.Size() > 0 {
-		return hashTag([]byte(fmt.Sprintf("manual:%d:%d", info.Size(), info.ModTime().UnixNano())))
-	}
-	// 用户删过封面：拼图不再兜底，卡片直接回落到占位图。
-	if b.CoverDeleted(libraryID) {
+	info, err := os.Stat(b.images.ItemPath(libraryID, "Primary", 0))
+	if err != nil || info.Size() == 0 {
 		return ""
 	}
-	return b.readMeta(libraryID, "tag")
+	return hashTag([]byte(fmt.Sprintf("cover:%d:%d", info.Size(), info.ModTime().UnixNano())))
 }
 
 // MarkCoverDeleted 记录"管理员手动删除了媒体库封面"。
@@ -157,7 +159,7 @@ func (b *LibraryCoverBuilder) MarkCoverDeleted(libraryID string) error {
 
 // ClearCoverDeleted 取消删除标记，拼图封面重新生效。
 func (b *LibraryCoverBuilder) ClearCoverDeleted(libraryID string) error {
-	err := os.Remove(b.images.GeneratedMetaPath(libraryID, "Primary", 0, coverDeletedExt))
+	err := os.Remove(b.images.ItemMetaPath(libraryID, "Primary", 0, coverDeletedExt))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -166,7 +168,7 @@ func (b *LibraryCoverBuilder) ClearCoverDeleted(libraryID string) error {
 
 // CoverDeleted 表示管理员手动删除了封面，拼图不应再自动兜底。
 func (b *LibraryCoverBuilder) CoverDeleted(libraryID string) bool {
-	_, err := os.Stat(b.images.GeneratedMetaPath(libraryID, "Primary", 0, coverDeletedExt))
+	_, err := os.Stat(b.images.ItemMetaPath(libraryID, "Primary", 0, coverDeletedExt))
 	return err == nil
 }
 
@@ -182,10 +184,10 @@ type coverSource struct {
 }
 
 // pickSources 按条目实际会显示的那张海报取材，最多取 libraryCoverCount 张。
-func (b *LibraryCoverBuilder) pickSources(lib store.Library, ids []string) []coverSource {
+func (b *LibraryCoverBuilder) pickSources(ids []string) []coverSource {
 	sources := make([]coverSource, 0, libraryCoverCount)
 	for _, id := range ids {
-		path := b.itemCoverPath(lib, id)
+		path := b.itemCoverPath(id)
 		if path == "" {
 			continue
 		}
@@ -197,20 +199,11 @@ func (b *LibraryCoverBuilder) pickSources(lib store.Library, ids []string) []cov
 	return sources
 }
 
-// itemCoverPath 的查找顺序与 loadItemImage 一致：库偏好目录图时先找 primary，
-// 否则先找 generated，另一侧存在时兜底。返回空表示这个条目还没有任何主图。
-func (b *LibraryCoverBuilder) itemCoverPath(lib store.Library, itemID string) string {
-	local := b.images.ItemPath(itemID, "Primary", 0)
-	generated := b.images.GeneratedPath(itemID, "Primary", 0)
-	first, second := local, generated
-	if !lib.PreferLocalArtwork {
-		first, second = generated, local
-	}
-	if fileExists(first) {
-		return first
-	}
-	if fileExists(second) {
-		return second
+// itemCoverPath 返回条目唯一那张主图，没有就是空。
+func (b *LibraryCoverBuilder) itemCoverPath(itemID string) string {
+	path := b.images.ItemPath(itemID, "Primary", 0)
+	if fileExists(path) {
+		return path
 	}
 	return ""
 }
@@ -319,7 +312,7 @@ func cropToCover(src image.Image, width, height int) *image.RGBA {
 }
 
 func (b *LibraryCoverBuilder) readMeta(libraryID, ext string) string {
-	raw, err := os.ReadFile(b.images.GeneratedMetaPath(libraryID, "Primary", 0, ext))
+	raw, err := os.ReadFile(b.images.ItemMetaPath(libraryID, "Primary", 0, ext))
 	if err != nil {
 		return ""
 	}
@@ -327,7 +320,7 @@ func (b *LibraryCoverBuilder) readMeta(libraryID, ext string) string {
 }
 
 func (b *LibraryCoverBuilder) writeMeta(libraryID, ext, value string) error {
-	path := b.images.GeneratedMetaPath(libraryID, "Primary", 0, ext)
+	path := b.images.ItemMetaPath(libraryID, "Primary", 0, ext)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("创建媒体库封面目录失败: %w", err)
 	}
@@ -337,12 +330,13 @@ func (b *LibraryCoverBuilder) writeMeta(libraryID, ext, value string) error {
 	return nil
 }
 
-// removeCover 清理拼图与两个边车文件，用于库内条目被清空的场景。
+// removeCover 清理封面文件与其派生信息，用于库内条目被清空的场景。
+// 用户手动删除留下的 disabled 标记不动，避免删完又被自动拼回来。
 func (b *LibraryCoverBuilder) removeCover(libraryID string) error {
 	paths := []string{
-		b.images.GeneratedPath(libraryID, "Primary", 0),
-		b.images.GeneratedMetaPath(libraryID, "Primary", 0, "tag"),
-		b.images.GeneratedMetaPath(libraryID, "Primary", 0, "sig"),
+		b.images.ItemPath(libraryID, "Primary", 0),
+		b.images.ItemMetaPath(libraryID, "Primary", 0, "sig"),
+		b.images.ItemMetaPath(libraryID, "Primary", 0, "origin"),
 	}
 	for _, path := range paths {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {

@@ -441,6 +441,27 @@ class EmbyPcService {
         .toList();
   }
 
+  // 图片锁：锁上后扫描导入与自动重拼封面不会覆盖现有图片，
+  // 手动上传、生成、删除仍然允许。
+  Future<bool> getItemImagesLocked(String itemId) async {
+    final response = await _client.get(
+      _uri('/emby/Items/$itemId/Images/Lock'),
+      headers: _tokenHeader,
+    );
+    final data = _decodeResponse(response, '读取图片锁失败');
+    return data['Locked'] == true;
+  }
+
+  Future<bool> setItemImagesLocked(String itemId, bool locked) async {
+    final response = await _client.post(
+      _uri('/emby/Items/$itemId/Images/Lock'),
+      headers: {..._tokenHeader, 'Content-Type': 'application/json'},
+      body: jsonEncode({'Locked': locked}),
+    );
+    final data = _decodeResponse(response, '更新图片锁失败');
+    return data['Locked'] == true;
+  }
+
   Future<void> uploadItemImage(
     String itemId, {
     required String type,
@@ -487,10 +508,9 @@ class EmbyPcService {
     String itemId, {
     required String type,
     required int index,
-    String source = 'local',
   }) async {
     final response = await _client.delete(
-      _uri('/emby/Items/$itemId/Images/$type/$index', {'Source': source}),
+      _uri('/emby/Items/$itemId/Images/$type/$index'),
       headers: _tokenHeader,
     );
     _ensureSuccess(response, '删除图像失败');
@@ -819,15 +839,13 @@ class EmbyPcService {
     return uri.replace(queryParameters: query).toString();
   }
 
-  // source 留空时由服务端按条目所属媒体库的偏好决定读目录图还是生成图；
-  // 传 local/generated 则强制指定，图像编辑弹窗预览用。
+  // 一个槽位只有一张图，读到什么就是什么，不需要再指定来源。
   String imageUrl(
     String itemId, {
     String type = 'Primary',
     int index = 0,
     int maxWidth = 720,
     String cacheKey = '',
-    String? source,
   }) {
     final path = type == 'Primary'
         ? '/emby/Items/$itemId/Images/Primary'
@@ -836,8 +854,21 @@ class EmbyPcService {
       'api_key': accessToken,
       'maxWidth': '$maxWidth',
       'quality': '82',
-      if (source != null && source.isNotEmpty) 'Source': source,
       if (cacheKey.isNotEmpty) 'v': cacheKey,
+    }).toString();
+  }
+
+  // 取帧预览地址：按进度点让服务端抽一帧返回，不落盘也不改现有图片。
+  // 每个进度点对应一个 URL，来回拖动时可以直接命中图片缓存。
+  String framePreviewUrl(
+    String itemId, {
+    required int positionTicks,
+    int maxWidth = 640,
+  }) {
+    return _uri('/emby/Items/$itemId/Images/Frame', {
+      'api_key': accessToken,
+      'PositionTicks': '$positionTicks',
+      'MaxWidth': '$maxWidth',
     }).toString();
   }
 

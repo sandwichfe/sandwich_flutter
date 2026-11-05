@@ -22,7 +22,8 @@ type virtualFolderDto struct {
 	CollectionType string   `json:"CollectionType,omitempty"`
 	ItemId         string   `json:"ItemId,omitempty"`
 	ItemCount      int      `json:"ItemCount"`
-	// PreferLocalArtwork 为本库的封面来源偏好：true 读目录图，false 读服务端生成图。
+	// PreferLocalArtwork 为本库的封面来源偏好：true 扫描时导入目录图，
+	// false 不导入、直接使用生成图。图片本身只存一份，切换不会丢已有封面。
 	PreferLocalArtwork bool `json:"PreferLocalArtwork"`
 }
 

@@ -21,11 +21,6 @@ func (s *ImageStore) ListItemImages(itemID string) ([]ImageFile, error) {
 	return listImageFiles(filepath.Join(s.root, sanitizeID(itemID)))
 }
 
-// ListGeneratedImages 枚举服务端生成的图片，用于在编辑图像弹窗里区分来源。
-func (s *ImageStore) ListGeneratedImages(itemID string) ([]ImageFile, error) {
-	return listImageFiles(filepath.Join(s.root, sanitizeID(itemID), generatedDir))
-}
-
 func listImageFiles(base string) ([]ImageFile, error) {
 	entries, err := os.ReadDir(base)
 	if err != nil {

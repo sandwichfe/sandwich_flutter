@@ -133,20 +133,6 @@ func (s *Store) SaveLibrary(ctx context.Context, lib Library) error {
 	return nil
 }
 
-// ItemPreferLocalArtwork 返回条目所属媒体库的封面来源偏好。
-// 条目找不到对应媒体库时按"读取目录图"处理，保持和升级前一致的表现。
-func (s *Store) ItemPreferLocalArtwork(ctx context.Context, itemID string) bool {
-	var preferLocal int
-	err := s.db.QueryRowContext(ctx,
-		`SELECT l.prefer_local_artwork FROM items i
-		 JOIN libraries l ON l.id = i.library_id
-		 WHERE i.id = ?`, itemID).Scan(&preferLocal)
-	if err != nil {
-		return true
-	}
-	return preferLocal != 0
-}
-
 func (s *Store) nextLibrarySortOrder(ctx context.Context) (int, error) {
 	var maxOrder sql.NullInt64
 	if err := s.db.QueryRowContext(ctx, `SELECT MAX(sort_order) FROM libraries`).Scan(&maxOrder); err != nil {

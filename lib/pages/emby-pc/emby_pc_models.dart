@@ -196,16 +196,12 @@ class EmbyPcImageInfo {
   final int? width;
   final int? height;
 
-  // local = 目录导入或手动上传，generated = 服务端从视频画面生成。
-  final String source;
-
   const EmbyPcImageInfo({
     required this.type,
     required this.index,
     this.fileName = '',
     this.width,
     this.height,
-    this.source = 'local',
   });
 
   factory EmbyPcImageInfo.fromJson(Map<String, dynamic> json) =>
@@ -215,10 +211,7 @@ class EmbyPcImageInfo {
         fileName: _text(json['Filename']),
         width: _integerOrNull(json['Width']),
         height: _integerOrNull(json['Height']),
-        source: _text(json['Source']).isEmpty ? 'local' : _text(json['Source']),
       );
-
-  bool get isGenerated => source == 'generated';
 
   String get dimensions =>
       width == null || height == null ? '' : '${width}x$height';
