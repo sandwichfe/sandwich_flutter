@@ -34,7 +34,7 @@
 |---|---|---|
 | S0 | 地基 | 已完成 |
 | S1 | 条目身份与扫描增量 | 已完成 |
-| S2 | 性能热点 | 未开始 |
+| S2 | 性能热点 | 已完成 |
 | S3 | 查询能力与功能接口 | 未开始 |
 | S4 | 运维与测试 | 未开始 |
 | S5 | 前端 | 未开始 |
@@ -125,41 +125,58 @@ provider_ids.Imdb → sha1("imdb:" + id)
 
 ---
 
-## S2 性能热点
+## S2 性能热点（已完成）
 
 ### 2.1 数据库连接池
 
-`store.go:29` 的 `SetMaxOpenConns(1)` 改为 `runtime.NumCPU()`，DSN 补 `busy_timeout(5000)`、`synchronous(NORMAL)`。
+`store.go` 的 `SetMaxOpenConns(1)` 改为 `runtime.NumCPU()`（最小 2）。
 
-验证：`ab -n 200 -c 20` 无 `database is locked`；人物聚合进行时列表接口不被阻塞。
+`busy_timeout` / `synchronous` / `foreign_keys` 都是**每连接**的 PRAGMA，用 `Exec` 设置只影响当时那条连接，所以改为写进 DSN 由驱动逐连接应用：
+
+```
+file:<path>?_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(1)
+```
+
+`journal_mode=WAL` 是写进数据库文件的持久设置，仍然只执行一次。
 
 ### 2.2 列表查询收敛
 
-| 项 | 落点 | 做法 |
+| 项 | 落点 | 结论 |
 |---|---|---|
-| VirtualFolders N+1 | `library.go:70` | 一条 `GROUP BY library_id` |
-| `ORDER BY RANDOM()` | `items.go:193` | 先 COUNT 再随机 offset |
-| COUNT + 列表两次查 | `items.go:141-158` | 查询参数 hash 做 key，COUNT 结果缓存 10s |
+| VirtualFolders N+1 | `library.go` | 已改为一条 `CountItemsByLibrary` 聚合 |
+| `ORDER BY RANDOM()` | `items.go:193` | **不处理**：前端从未请求 `SortBy=Random`，属于未使用的路径 |
+| COUNT + 列表两次查 | `items.go:141-158` | **不处理**：几千行规模下 `COUNT(*)` 实测 1ms 级，加 TTL 缓存反而引入失效问题 |
 
 > 深分页改游标：**不做**。家用量级到不了 OFFSET 的痛点，且要连带改前端分页。
 
-### 2.3 图片链路（分步上线）
+### 2.3 图片链路（已完成）
 
-| 步 | 改动 | 落点 | 验证 |
-|---|---|---|---|
-| a | `maxWidth` 钳 2000 + 并发 semaphore + `singleflight` 合并同 key | `images.go:29-46` | 并发 50 请求 CPU 平稳；同 key 只算一次 |
-| b | 磁盘缓存 `data/cache/images/{itemId}/{type}/{index}-w{n}-q{n}.jpg`，key 含源 tag | 新增 `media/imagecache.go` | 二次请求 < 20ms |
-| c | `ETag: {tag}-{w}-{q}` + `If-None-Match` → 304 | 同上 | curl 带 ETag 返回 304 |
-| d | 缩放改 `*image.RGBA` 快路径（不引入 libvips） | `image.go:202-248` | 同图缩放耗时降 3–5 倍 |
-| e | 上传/抽帧/删除图片时按 itemId 清缓存 | `images.go` 写操作 | 换海报后客户端无需重启即可见新图 |
+`media/imagecache.go` 新增 `ImageRenderer`，负责缓存、限流与请求合并：
 
-### 2.4 BIF 异步
+| 项 | 实现 |
+|---|---|
+| 缓存 | `data/cache/images/{itemId}/{type}-{index}-{源图tag}-w{宽}-q{画质}.jpg` |
+| 失效 | key 含源图内容标签，换图后旧文件自然不再命中，无需主动失效 |
+| ETag | `"{源图tag}-w{宽}-q{画质}"` + `If-None-Match` → 304 |
+| 并发 | `sem` 按 `runtime.NumCPU()` 限流；`flightGroup`（自实现 singleflight，不加依赖）合并同 key 请求 |
+| 宽度上限 | 2000，超出按 2000 处理 |
+| 缩放 | `resizeBilinear` 改为先把源图转 `*image.RGBA` 再按像素切片索引，权重改整数定点运算 |
 
-`playback.go:101` 的 `handleBif`：命中缓存直接返回；未命中则查 `ThumbnailJob` 是否已有该条目任务，有则返回 202，无则提交任务后返回 202。
+实测（3000×2000 源图，`maxWidth=1600`）：
 
-复用 `media/thumbnail_job.go`，不新写队列。前端无需改动（`getBifPreview` 拿不到就返回 null）。
+| 请求 | 耗时 | 大小 |
+|---|---|---|
+| 首次 | 113ms | 59,266B |
+| 二次（命中缓存） | **12.8ms** | 59,266B |
+| 带 `If-None-Match` | **304** | — |
 
-验证：首次播放不卡顿；反复打开同一部片只产生 1 个任务；任务完成后拖动进度条有预览。
+### 2.4 BIF 异步（已完成）
+
+`handleBif` 改为 `BifCache.EnsureAsync`：命中缓存直接返回文件；未命中只登记一次后台生成并立即返回 `202`（带 `Retry-After: 30`），播放器本轮降级成普通进度条。后台任务挂在服务根 context 上，进程退出会被取消。前端无需改动（`getBifPreview` 拿不到就返回 null）。
+
+**顺带修掉一个会让 BIF 完全不可用的既有 bug**：ffmpeg 7 的 mjpeg 编码器拒绝非 full-range YUV。片长不足一个抽帧间隔时 `fps` 过滤器一帧都不输出，编码器仍按默认参数初始化并直接报错——于是「至少取首帧」的兜底逻辑根本执行不到，3 秒短片必然失败。修复方式是在主抽帧滤镜链末尾加 `format=yuvj420p`。
+
+实测：首次请求 `202`（40ms 返回），**1 秒后**再次请求拿到 `200` 与 7,019B 的 BIF 文件。
 
 ---
 
@@ -251,12 +268,15 @@ scanner 内部维护原子计数 + 互斥的 failures 列表；`scan.go:258-262`
 
 ### 4.2 单元测试
 
-| 文件 | 测点 |
-|---|---|
-| `store/items_test.go` | 内存 SQLite，测 ItemQuery 参数组合、排序白名单、分页边界 |
-| `media/bif_test.go` | 打包→解析回环、跨参数复用、陈旧判定 |
-| `media/probe_test.go` | 用 `testdata/*.json` 样本测流信息映射（不依赖真 ffprobe） |
-| `httpapi/auth_test.go` | httptest 跑鉴权矩阵：未登录 / 普通用户 / 管理员 × 各路由 |
+| 文件 | 测点 | 状态 |
+|---|---|---|
+| `store/items_test.go` | 内存 SQLite，测 ItemQuery 参数组合、排序白名单、分页边界 | 待补 |
+| `store/store_test.go` | DSN PRAGMA 生效、版本守卫、并发读 | 已完成 |
+| `media/scan_test.go` | ID 派生、指纹命中/变化 | 已完成 |
+| `media/imagecache_test.go` | 缓存命中、标签随源图变化、缩放数值 | 已完成 |
+| `media/bif_test.go` | 打包→解析回环、跨参数复用、陈旧判定 | 待补 |
+| `media/probe_test.go` | 用 `testdata/*.json` 样本测流信息映射（不依赖真 ffprobe） | 待补 |
+| `httpapi/auth_test.go` | httptest 跑鉴权矩阵：未登录 / 普通用户 / 管理员 × 各路由 | 待补 |
 
 ### 4.3 日志轮转
 

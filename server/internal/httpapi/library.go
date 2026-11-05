@@ -64,18 +64,21 @@ func (s *Server) handleListVirtualFolders(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// 一次聚合查出全部库的条目数，避免每个库各发一条 COUNT。
+	counts, err := s.store.CountItemsByLibrary(r.Context())
+	if err != nil {
+		log.Printf("统计媒体库条目数失败: %v", err)
+		counts = map[string]int{}
+	}
+
 	result := make([]virtualFolderDto, 0, len(libraries))
 	for _, lib := range libraries {
-		count, countErr := s.store.CountLibraryItems(r.Context(), lib.ID)
-		if countErr != nil {
-			count = 0
-		}
 		result = append(result, virtualFolderDto{
 			Name:               lib.Name,
 			Locations:          lib.Paths,
 			CollectionType:     lib.CollectionType,
 			ItemId:             lib.ID,
-			ItemCount:          count,
+			ItemCount:          counts[lib.ID],
 			PreferLocalArtwork: lib.PreferLocalArtwork,
 		})
 	}
@@ -253,6 +256,7 @@ func (s *Server) handleDeleteVirtualFolder(w http.ResponseWriter, r *http.Reques
 	}
 	for _, itemID := range itemIDs {
 		_ = s.images.RemoveItem(itemID)
+		s.imageRenderer.RemoveItem(itemID)
 	}
 	log.Printf("已删除媒体库 %s，同时清理 %d 个条目", lib.Name, len(itemIDs))
 	writeNoContent(w)

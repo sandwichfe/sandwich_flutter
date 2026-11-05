@@ -7,6 +7,8 @@ import (
 	_ "embed"
 	"encoding/hex"
 	"fmt"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -26,19 +28,25 @@ type Store struct {
 const schemaVersion = 2
 
 func Open(dbPath string) (*Store, error) {
-	db, err := sql.Open("sqlite", dbPath)
+	// busy_timeout / synchronous / foreign_keys 都是「每连接」的 PRAGMA，
+	// 用 Exec 设置只会作用于当时那一条连接，因此必须写在 DSN 里由驱动逐连接应用。
+	dsn := "file:" + filepath.ToSlash(dbPath) +
+		"?_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(1)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("打开数据库失败: %w", err)
 	}
-	// SQLite 单写模型，限制连接数避免 SQLITE_BUSY。
-	db.SetMaxOpenConns(1)
+	// WAL 支持多读一写：读请求可以并行，写仍由 SQLite 串行化。
+	maxConns := runtime.NumCPU()
+	if maxConns < 2 {
+		maxConns = 2
+	}
+	db.SetMaxOpenConns(maxConns)
 	db.SetConnMaxLifetime(0)
 
+	// journal_mode 是写进数据库文件的持久设置，一条连接设置一次即可。
 	if _, err := db.Exec(`PRAGMA journal_mode = WAL;`); err != nil {
 		return nil, fmt.Errorf("设置 WAL 失败: %w", err)
-	}
-	if _, err := db.Exec(`PRAGMA foreign_keys = ON;`); err != nil {
-		return nil, fmt.Errorf("启用外键失败: %w", err)
 	}
 
 	store := &Store{db: db}

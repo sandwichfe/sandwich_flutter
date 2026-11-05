@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	"image/color"
+	"image/draw"
 	_ "image/gif"
 	"image/jpeg"
 	_ "image/png"
@@ -200,8 +200,10 @@ func DecodeConfig(raw []byte) (int, int, error) {
 }
 
 func resizeBilinear(src image.Image, dstWidth, dstHeight int) *image.RGBA {
-	bounds := src.Bounds()
-	srcWidth, srcHeight := bounds.Dx(), bounds.Dy()
+	// 先统一转成 *image.RGBA 再按像素切片索引：
+	// 逐像素调用 image.Image.At() 的接口开销是这条路径上最大的成本。
+	source := toRGBA(src)
+	srcWidth, srcHeight := source.Rect.Dx(), source.Rect.Dy()
 	dst := image.NewRGBA(image.Rect(0, 0, dstWidth, dstHeight))
 
 	scaleX := float64(srcWidth) / float64(dstWidth)
@@ -218,6 +220,11 @@ func resizeBilinear(src image.Image, dstWidth, dstHeight int) *image.RGBA {
 		if y1 >= srcHeight {
 			y1 = srcHeight - 1
 		}
+		wy := uint32(weightY * 256)
+
+		row0 := source.Pix[y0*source.Stride:]
+		row1 := source.Pix[y1*source.Stride:]
+		dstRow := dst.Pix[dy*dst.Stride:]
 
 		for dx := 0; dx < dstWidth; dx++ {
 			sourceX := (float64(dx)+0.5)*scaleX - 0.5
@@ -230,39 +237,38 @@ func resizeBilinear(src image.Image, dstWidth, dstHeight int) *image.RGBA {
 			if x1 >= srcWidth {
 				x1 = srcWidth - 1
 			}
+			wx := uint32(weightX * 256)
 
-			r00, g00, b00, a00 := rgbaAt(src, bounds.Min.X+x0, bounds.Min.Y+y0)
-			r10, g10, b10, a10 := rgbaAt(src, bounds.Min.X+x1, bounds.Min.Y+y0)
-			r01, g01, b01, a01 := rgbaAt(src, bounds.Min.X+x0, bounds.Min.Y+y1)
-			r11, g11, b11, a11 := rgbaAt(src, bounds.Min.X+x1, bounds.Min.Y+y1)
-
-			dst.SetRGBA(dx, dy, color.RGBA{
-				R: blend(r00, r10, r01, r11, weightX, weightY),
-				G: blend(g00, g10, g01, g11, weightX, weightY),
-				B: blend(b00, b10, b01, b11, weightX, weightY),
-				A: blend(a00, a10, a01, a11, weightX, weightY),
-			})
+			p00 := row0[x0*4:]
+			p10 := row0[x1*4:]
+			p01 := row1[x0*4:]
+			p11 := row1[x1*4:]
+			out := dstRow[dx*4:]
+			out[0] = blendChannel(p00[0], p10[0], p01[0], p11[0], wx, wy)
+			out[1] = blendChannel(p00[1], p10[1], p01[1], p11[1], wx, wy)
+			out[2] = blendChannel(p00[2], p10[2], p01[2], p11[2], wx, wy)
+			out[3] = blendChannel(p00[3], p10[3], p01[3], p11[3], wx, wy)
 		}
 	}
 	return dst
 }
 
-func rgbaAt(src image.Image, x, y int) (uint8, uint8, uint8, uint8) {
-	r, g, b, a := src.At(x, y).RGBA()
-	return uint8(r >> 8), uint8(g >> 8), uint8(b >> 8), uint8(a >> 8)
+// toRGBA 把任意格式转成 *image.RGBA；本身就是 RGBA 时直接复用，不做拷贝。
+func toRGBA(src image.Image) *image.RGBA {
+	if rgba, ok := src.(*image.RGBA); ok {
+		return rgba
+	}
+	bounds := src.Bounds()
+	dst := image.NewRGBA(image.Rect(0, 0, bounds.Dx(), bounds.Dy()))
+	draw.Draw(dst, dst.Bounds(), src, bounds.Min, draw.Src)
+	return dst
 }
 
-func blend(v00, v10, v01, v11 uint8, weightX, weightY float64) uint8 {
-	top := float64(v00)*(1-weightX) + float64(v10)*weightX
-	bottom := float64(v01)*(1-weightX) + float64(v11)*weightX
-	value := top*(1-weightY) + bottom*weightY
-	if value < 0 {
-		return 0
-	}
-	if value > 255 {
-		return 255
-	}
-	return uint8(value)
+// blendChannel 用 0~256 的定点权值做双线性混合，整数运算明显快于浮点。
+func blendChannel(v00, v10, v01, v11 uint8, wx, wy uint32) uint8 {
+	top := uint32(v00)*(256-wx) + uint32(v10)*wx
+	bottom := uint32(v01)*(256-wx) + uint32(v11)*wx
+	return uint8((top*(256-wy) + bottom*wy) >> 16)
 }
 
 func hashTag(raw []byte) string {

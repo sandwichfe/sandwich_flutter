@@ -245,6 +245,30 @@ func (s *Store) DeleteItems(ctx context.Context, ids []string) error {
 	return tx.Commit()
 }
 
+// CountItemsByLibrary 一次查出全部媒体库的条目数（库 ID → 条目数）。
+// 设置页展示库列表时用它替代“每个库一条 COUNT”。
+func (s *Store) CountItemsByLibrary(ctx context.Context) (map[string]int, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT library_id, COUNT(*) FROM items GROUP BY library_id`)
+	if err != nil {
+		return nil, fmt.Errorf("统计媒体库条目数失败: %w", err)
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int, 8)
+	for rows.Next() {
+		var (
+			libraryID string
+			total     int
+		)
+		if err := rows.Scan(&libraryID, &total); err != nil {
+			return nil, err
+		}
+		counts[libraryID] = total
+	}
+	return counts, rows.Err()
+}
+
 func (s *Store) CountLibraryItems(ctx context.Context, libraryID string) (int, error) {
 	var total int
 	err := s.db.QueryRowContext(ctx,

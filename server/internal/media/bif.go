@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,8 +32,12 @@ type BifCache struct {
 	// 同一条目只允许一个抽帧进程，预生成任务与播放请求不会重复消耗 ffmpeg。
 	mu        sync.Mutex
 	itemLocks map[string]*sync.Mutex
+	// inflight 记录正在后台生成的条目，播放侧重复请求不会反复排任务。
+	inflight map[string]bool
 	// sem 限制同时运行的 ffmpeg 数量，批量预生成时不会把机器跑满。
 	sem chan struct{}
+	// baseCtx 是后台生成任务的父 context，进程退出时取消。
+	baseCtx context.Context
 }
 
 func NewBifCache(dir, ffmpegPath string) *BifCache {
@@ -40,8 +45,16 @@ func NewBifCache(dir, ffmpegPath string) *BifCache {
 		dir:        dir,
 		ffmpegPath: ffmpegPath,
 		itemLocks:  make(map[string]*sync.Mutex),
+		inflight:   make(map[string]bool),
 		sem:        make(chan struct{}, 2),
 	}
+}
+
+// SetBaseContext 设置后台生成任务的父 context。
+func (c *BifCache) SetBaseContext(ctx context.Context) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.baseCtx = ctx
 }
 
 // Path 返回指定参数对应的 BIF 缓存路径。
@@ -162,6 +175,57 @@ func (c *BifCache) Ensure(ctx context.Context, itemID, sourcePath string, interv
 	return path, err
 }
 
+// Lookup 只查已有缓存，不做任何生成，命中时返回可直接使用的 BIF 路径。
+func (c *BifCache) Lookup(itemID, sourcePath string, intervalMs uint32, width int) string {
+	if intervalMs == 0 {
+		intervalMs = 10000
+	}
+	if width <= 0 {
+		width = 320
+	}
+	target := c.Path(itemID, width, intervalMs)
+	if hit := c.reuse(itemID, sourcePath, target); hit != "" {
+		return hit
+	}
+	// 播放只是画进度条预览，其它宽度的现成缓存同样够用。
+	return c.anyVariant(itemID, sourcePath)
+}
+
+// EnsureAsync 返回可用的 BIF 路径；缓存缺失时只登记一次后台生成任务并返回 false。
+//
+// 这样首次播放不会被 ffmpeg 抽帧阻塞（原来一个请求可能要等几分钟），
+// 播放器先降级成普通进度条，生成完成后再打开就有预览图。
+func (c *BifCache) EnsureAsync(itemID, sourcePath string, intervalMs uint32, width int) (string, bool) {
+	if hit := c.Lookup(itemID, sourcePath, intervalMs, width); hit != "" {
+		return hit, true
+	}
+
+	key := sanitizeID(itemID)
+	c.mu.Lock()
+	if c.inflight[key] {
+		c.mu.Unlock()
+		return "", false
+	}
+	c.inflight[key] = true
+	baseCtx := c.baseCtx
+	c.mu.Unlock()
+
+	go func() {
+		defer func() {
+			c.mu.Lock()
+			delete(c.inflight, key)
+			c.mu.Unlock()
+		}()
+		if baseCtx == nil {
+			baseCtx = context.Background()
+		}
+		if _, err := c.Ensure(baseCtx, itemID, sourcePath, intervalMs, width); err != nil {
+			log.Printf("后台生成 BIF 失败 item=%s: %v", itemID, err)
+		}
+	}()
+	return "", false
+}
+
 // BifOptions 汇总生成参数，避免调用点出现一长串位置参数。
 type BifOptions struct {
 	IntervalMs uint32
@@ -245,12 +309,15 @@ func (c *BifCache) Generate(ctx context.Context, itemID, sourcePath string, opts
 	defer cancel()
 
 	seconds := float64(intervalMs) / 1000
+	// format=yuvj420p 是必需的：ffmpeg 7 的 mjpeg 编码器拒绝非 full-range 的 YUV。
+	// 片长不足一个抽帧间隔时 fps 过滤器一帧都不输出，编码器仍会按默认参数初始化并直接失败，
+	// 导致下面「至少取首帧」的兜底根本走不到。
 	args := []string{
 		"-y",
 		"-v", "error",
 		"-nostats",
 		"-i", sourcePath,
-		"-vf", fmt.Sprintf("fps=1/%g,scale=%d:-2", seconds, width),
+		"-vf", fmt.Sprintf("fps=1/%g,scale=%d:-2,format=yuvj420p", seconds, width),
 		"-q:v", "5",
 		"-progress", "pipe:1",
 		filepath.Join(tempDir, "frame_%05d.jpg"),

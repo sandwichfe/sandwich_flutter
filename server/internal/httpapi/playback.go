@@ -3,7 +3,6 @@ package httpapi
 import (
 	"encoding/json"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -98,11 +97,12 @@ func (s *Server) handleBif(w http.ResponseWriter, r *http.Request) {
 	}
 
 	width := atoi(r.URL.Query().Get("Width"))
-	bifPath, err := s.bif.Ensure(r.Context(), itemID, item.Path, 10000, width)
-	if err != nil {
-		// 无法生成时返回 404，播放器会自动降级为普通进度条。
-		log.Printf("生成 BIF 失败 item=%s: %v", itemID, err)
-		writeError(w, http.StatusNotFound, "缩略图不可用")
+	bifPath, ready := s.bif.EnsureAsync(itemID, item.Path, 10000, width)
+	if !ready {
+		// 首次播放不阻塞：后台抽帧，本次让播放器降级成普通进度条。
+		// 前端拿到非 200 会直接不显示预览，不会报错。
+		w.Header().Set("Retry-After", "30")
+		w.WriteHeader(http.StatusAccepted)
 		return
 	}
 

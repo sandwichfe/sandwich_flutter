@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -32,11 +33,21 @@ func (s *Server) handleImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	maxWidth := atoi(firstNonEmpty(r.URL.Query().Get("maxWidth"), r.URL.Query().Get("MaxWidth")))
-	quality := atoi(r.URL.Query().Get("quality"))
-	rendered, err := media.Render(raw, maxWidth, quality)
+	// 参数先归一化，保证 ETag 与缓存 key 用的是同一组值。
+	maxWidth := media.NormalizeRenderWidth(atoi(firstNonEmpty(r.URL.Query().Get("maxWidth"), r.URL.Query().Get("MaxWidth"))))
+	quality := media.NormalizeRenderQuality(atoi(r.URL.Query().Get("quality")))
+
+	rendered, tag, err := s.imageRenderer.Render(itemID, imageType, index, raw, maxWidth, quality)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "渲染图片失败")
+		return
+	}
+
+	// ETag 由源图内容与缩放参数组成：换图、换尺寸都会变，客户端不会拿到旧图。
+	etag := fmt.Sprintf(`"%s-w%d-q%d"`, tag, maxWidth, quality)
+	w.Header().Set("ETag", etag)
+	if match := r.Header.Get("If-None-Match"); match != "" && match == etag {
+		w.WriteHeader(http.StatusNotModified)
 		return
 	}
 
@@ -157,6 +168,8 @@ func (s *Server) handleUploadImage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "保存图片失败")
 		return
 	}
+	// 换了图就丢掉旧的缩放缓存，避免磁盘上堆积再也用不到的文件。
+	s.imageRenderer.RemoveItem(itemID)
 	if err := s.syncImageTags(r, itemID, imageType, index, tag); err != nil {
 		writeError(w, http.StatusInternalServerError, "更新图片标记失败")
 		return
@@ -185,6 +198,7 @@ func (s *Server) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "删除图片失败")
 			return
 		}
+		s.imageRenderer.RemoveItem(itemID)
 		// 目录图还在时 tag 继续有效；否则清空标记，客户端回退到占位图。
 		if _, loadErr := s.images.LoadItemImage(itemID, imageType, index); loadErr != nil {
 			_ = s.syncImageTags(r, itemID, imageType, index, "")
@@ -201,6 +215,7 @@ func (s *Server) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "删除图片失败")
 		return
 	}
+	s.imageRenderer.RemoveItem(itemID)
 	if err := s.syncImageTags(r, itemID, imageType, index, ""); err != nil {
 		writeError(w, http.StatusInternalServerError, "更新图片标记失败")
 		return
