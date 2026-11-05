@@ -654,6 +654,64 @@ class EmbyPcThumbnailJob {
       );
 }
 
+// GET /Library/ScanStatus 的实时扫描进度（管理员）。
+// 服务端字段全为小写驼峰；扫描没跑过时除 failures 外都是默认值。
+class EmbyPcScanStatus {
+  final bool running;
+  final String libraryId;
+  final String libraryName;
+  final int scanned;
+  final int total;
+  final String currentPath;
+  final List<EmbyPcScanFailure> failures;
+  final String startedAt;
+  final String finishedAt;
+
+  const EmbyPcScanStatus({
+    this.running = false,
+    this.libraryId = '',
+    this.libraryName = '',
+    this.scanned = 0,
+    this.total = 0,
+    this.currentPath = '',
+    this.failures = const [],
+    this.startedAt = '',
+    this.finishedAt = '',
+  });
+
+  // 分母未知（目录还没遍历完）时返回 null，界面显示不确定进度条。
+  double? get ratio =>
+      total <= 0 ? null : (scanned / total).clamp(0.0, 1.0).toDouble();
+
+  factory EmbyPcScanStatus.fromJson(Map<String, dynamic> json) =>
+      EmbyPcScanStatus(
+        running: _booleanOrNull(json['running']) ?? false,
+        libraryId: _text(json['libraryId']),
+        libraryName: _text(json['libraryName']),
+        scanned: _integer(json['scanned']),
+        total: _integer(json['total']),
+        currentPath: _text(json['currentPath']),
+        failures: _maps(
+          json['failures'],
+        ).map(EmbyPcScanFailure.fromJson).toList(),
+        startedAt: _text(json['startedAt']),
+        finishedAt: _text(json['finishedAt']),
+      );
+}
+
+class EmbyPcScanFailure {
+  final String path;
+  final String reason;
+
+  const EmbyPcScanFailure({required this.path, required this.reason});
+
+  factory EmbyPcScanFailure.fromJson(Map<String, dynamic> json) =>
+      EmbyPcScanFailure(
+        path: _text(json['path']),
+        reason: _text(json['reason']),
+      );
+}
+
 Map<String, dynamic> _map(dynamic value) =>
     value is Map ? Map<String, dynamic>.from(value) : <String, dynamic>{};
 

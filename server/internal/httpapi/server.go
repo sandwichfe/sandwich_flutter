@@ -49,6 +49,12 @@ func New(cfg config.Config, st *store.Store, images *media.ImageStore, bif *medi
 	return server
 }
 
+// ImageRenderer 暴露缩放缓存，供 main 装配缓存回收任务（S4.1）。
+// 回收按最近访问时间淘汰，必须和真正处理请求的实例是同一个。
+func (s *Server) ImageRenderer() *media.ImageRenderer {
+	return s.imageRenderer
+}
+
 func (s *Server) Handler() http.Handler {
 	// 访问日志放在鉴权外层，才能记录到被拒绝（401/403）的请求；
 	// 用户名由 withAuth 通过 statusRecorder 回填。

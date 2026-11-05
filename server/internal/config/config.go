@@ -25,6 +25,12 @@ type Config struct {
 	AdminPassword string
 	TokenTTL      time.Duration
 
+	// 缓存回收（S4.1）：data/cache 下图片与 BIF 缓存的总量上限与巡检间隔。
+	// 上限为 0 表示不按容量淘汰，只清理孤儿文件。
+	CacheImageLimitMB  int
+	CacheBifLimitMB    int
+	CacheSweepInterval time.Duration
+
 	// ConfigPath 记录实际使用的配置文件位置，便于启动日志提示。
 	ConfigPath string
 }
@@ -44,17 +50,26 @@ type fileConfig struct {
 		FFmpeg  string `yaml:"ffmpeg"`
 	} `yaml:"ffmpeg"`
 	TokenTTL string `yaml:"token_ttl"`
+	Cache    struct {
+		// 用指针区分「没写」与「显式写 0」：0 表示关闭容量淘汰。
+		ImageLimitMB *int   `yaml:"image_limit_mb"`
+		BifLimitMB   *int   `yaml:"bif_limit_mb"`
+		Sweep        string `yaml:"sweep_interval"`
+	} `yaml:"cache"`
 }
 
 func Default() Config {
 	return Config{
-		Addr:          ":8096",
-		DataDir:       "./data",
-		FFprobePath:   "ffprobe",
-		FFmpegPath:    "ffmpeg",
-		AdminUser:     "admin",
-		AdminPassword: "admin",
-		TokenTTL:      30 * 24 * time.Hour,
+		Addr:               ":8096",
+		DataDir:            "./data",
+		FFprobePath:        "ffprobe",
+		FFmpegPath:         "ffmpeg",
+		AdminUser:          "admin",
+		AdminPassword:      "admin",
+		TokenTTL:           30 * 24 * time.Hour,
+		CacheImageLimitMB:  2048,
+		CacheBifLimitMB:    1024,
+		CacheSweepInterval: 6 * time.Hour,
 	}
 }
 
@@ -174,6 +189,21 @@ func (c *Config) applyFile(fc fileConfig) {
 			log.Printf("token_ttl 格式无效（示例 720h），保持默认值: %q", value)
 		} else {
 			c.TokenTTL = ttl
+		}
+	}
+	// 缓存上限允许写 0（关闭容量淘汰），所以只在出现负值时回落默认值。
+	if fc.Cache.ImageLimitMB != nil && *fc.Cache.ImageLimitMB >= 0 {
+		c.CacheImageLimitMB = *fc.Cache.ImageLimitMB
+	}
+	if fc.Cache.BifLimitMB != nil && *fc.Cache.BifLimitMB >= 0 {
+		c.CacheBifLimitMB = *fc.Cache.BifLimitMB
+	}
+	if value := strings.TrimSpace(fc.Cache.Sweep); value != "" {
+		interval, err := time.ParseDuration(value)
+		if err != nil {
+			log.Printf("cache.sweep_interval 格式无效（示例 6h），保持默认值: %q", value)
+		} else if interval > 0 {
+			c.CacheSweepInterval = interval
 		}
 	}
 }
@@ -299,4 +329,12 @@ ffmpeg:
 
 # 登录令牌有效期（Go duration 格式），预留项
 token_ttl: 720h
+
+cache:
+  # 缩放图片缓存总量上限（MB）；超出后按最久未使用淘汰，0 表示不限制
+  image_limit_mb: 2048
+  # 进度条缩略图（BIF）缓存总量上限（MB），0 表示不限制
+  bif_limit_mb: 1024
+  # 缓存巡检间隔（Go duration 格式）：清理已删除条目的残留文件并执行容量淘汰
+  sweep_interval: 6h
 `

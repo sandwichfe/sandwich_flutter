@@ -46,6 +46,8 @@ type Scanner struct {
 	// artLocks 按图片目标 ID 加锁：演员头像被多个条目共用，并发写同一文件会重复转码。
 	artMu    sync.Mutex
 	artLocks map[string]*sync.Mutex
+	// onItemRemoved 是条目删除后的清理回调（缓存回收注入），可为 nil。
+	onItemRemoved func(itemID string)
 }
 
 func NewScanner(s *store.Store, prober *Prober, images *ImageStore, bif *BifCache) *Scanner {
@@ -57,6 +59,12 @@ func NewScanner(s *store.Store, prober *Prober, images *ImageStore, bif *BifCach
 		workers:  scanWorkers(),
 		artLocks: make(map[string]*sync.Mutex),
 	}
+}
+
+// SetItemRemovedHook 注册条目删除后的清理回调（S4.1 用它立即回收缩放缓存）。
+// 不放进构造函数：缓存回收是可选的运维组件，扫描本身不依赖它。
+func (s *Scanner) SetItemRemovedHook(hook func(itemID string)) {
+	s.onItemRemoved = hook
 }
 
 // scanWorkers 决定扫描并发度。耗时几乎全在 ffprobe 子进程和图片转码上，
@@ -227,6 +235,9 @@ func (s *Scanner) purgeMissingItems(ctx context.Context, lib store.Library, root
 	for _, itemID := range stale {
 		_ = s.images.RemoveItem(itemID)
 		s.removeCachedBif(itemID)
+		if s.onItemRemoved != nil {
+			s.onItemRemoved(itemID)
+		}
 	}
 	logf("媒体库 %s 清理了 %d 个源文件已不存在的条目", lib.Name, len(stale))
 }

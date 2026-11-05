@@ -252,6 +252,9 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
         _markFilter,
         _videoType,
         _yearController.text.trim(),
+        _genreFilter,
+        _personFilter,
+        _minRating?.toString() ?? '',
       ].where((value) => value.isNotEmpty).length;
 
   Widget _buildFilterMenu(
@@ -319,6 +322,38 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                   ),
                   if (showAdvancedFilters) ...[
                     _buildQueryGroup(
+                      title: _genreOptions.isEmpty
+                          ? '流派（加载中…）'
+                          : '流派',
+                      // 流派可能很多，只展示条目最多的前 12 个，避免面板过长。
+                      options: {
+                        '': '全部流派',
+                        for (final genre in _genreOptions.take(12))
+                          genre.id:
+                              genre.childCount == null
+                                  ? genre.name
+                                  : '${genre.name} ${genre.childCount}',
+                      },
+                      selected: _genreFilter,
+                      availableWidth: contentWidth,
+                      onSelected: _selectGenre,
+                    ),
+                    _buildQueryGroup(
+                      title: '最低评分',
+                      options: const {
+                        '': '不限评分',
+                        '7': '7 分以上',
+                        '8': '8 分以上',
+                        '9': '9 分以上',
+                      },
+                      selected: _minRating?.toInt().toString() ?? '',
+                      availableWidth: contentWidth,
+                      onSelected: (value) =>
+                          _selectMinRating(double.tryParse(value)),
+                    ),
+                  ],
+                  if (showAdvancedFilters) ...[
+                    _buildQueryGroup(
                       title: '播放状态',
                       options: statuses,
                       selected: _statusFilter,
@@ -358,6 +393,67 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                       ),
                     ),
                   ),
+                  if (showAdvancedFilters) ...[
+                    const SizedBox(height: 14),
+                    const Text(
+                      '演员',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: contentWidth,
+                      child: TextField(
+                        controller: _personController,
+                        enabled: !_loading,
+                        textInputAction: TextInputAction.search,
+                        onSubmitted: (_) => _searchPersons(),
+                        decoration: InputDecoration(
+                          isDense: true,
+                          hintText: '输入演员名后回车',
+                          suffixIcon: IconButton(
+                            tooltip: '搜索演员',
+                            onPressed: _loading ? null : _searchPersons,
+                            icon: const Icon(Icons.search, size: 18),
+                          ),
+                          border: const OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
+                    // 已选演员单独展示，便于一眼看出当前筛选并随时取消。
+                    if (_personFilter.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: InputChip(
+                          label: Text('演员：$_personFilterName'),
+                          onDeleted: _loading ? null : _clearPersonFilter,
+                        ),
+                      ),
+                    ],
+                    if (_personOptions.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final person in _personOptions)
+                            ChoiceChip(
+                              label: Text(person.name),
+                              selected: person.id == _personFilter,
+                              onSelected: _loading
+                                  ? null
+                                  : (_) => _selectPersonFilter(
+                                      person.id,
+                                      person.name,
+                                    ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ],
                 ],
               ),
             ),
@@ -373,10 +469,15 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
         onPressed:
         _loading
             ? null
-            : () =>
-        controller.isOpen
-            ? controller.close()
-            : controller.open(),
+            : () {
+              if (controller.isOpen) {
+                controller.close();
+                return;
+              }
+              // 流派候选值只在打开面板时按需拉取，失败也不影响其余筛选。
+              unawaited(_ensureGenreOptions());
+              controller.open();
+            },
       ),
     );
   }

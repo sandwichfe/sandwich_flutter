@@ -36,8 +36,8 @@
 | S1 | 条目身份与扫描增量 | 已完成 |
 | S2 | 性能热点 | 已完成 |
 | S3 | 查询能力与功能接口 | 已完成 |
-| S4 | 运维与测试 | 未开始 |
-| S5 | 前端 | 未开始 |
+| S4 | 运维与测试 | 已完成 |
+| S5 | 前端 | 进行中（仅剩 5.5） |
 
 ---
 
@@ -269,50 +269,85 @@ SELECT je.value, COUNT(*) FROM items i, json_each(i.genres) je GROUP BY je.value
 
 ---
 
-## S4 运维与测试
+## S4 运维与测试（已完成）
 
 ### 4.1 缓存回收
 
+`media/cachegc.go` 新增 `CacheJanitor`，回收两类垃圾：
+
 | 对象 | 策略 |
 |---|---|
-| `data/cache/images/*` | 删 itemId 不存在的目录；目录级 LRU |
-| `data/cache/bif/*` | 删 itemId 不存在或源文件已更新的文件；总量超阈值按旧到新淘汰 |
+| `data/cache/images/{id}/` | 删 ID 不在库里的目录（条目 + 人物 `person_view`）；超上限按目录整体 LRU 淘汰 |
+| `data/cache/bif/*.bif` | 删 ID 不存在、或片源 mtime 已新于缓存的文件；超上限按旧到新淘汰 |
 
-触发：定时任务 + `purgeMissingItems` 时同步删。
+| 项 | 实现 |
+|---|---|
+| 归属来源 | `store.CacheOwners` 一次查出 `items.id → path` 与 `person_view.person_id`（演员头像与条目共用缓存目录） |
+| LRU 依据 | `ImageRenderer` 内存里记最近渲染时间（`LastAccess`），进程重启后回落到目录 mtime |
+| 触发 | 启动先扫一轮，之后按 `cache.sweep_interval` 定时；条目删除时通过 `Scanner.SetItemRemovedHook` 立即清 |
+| 配置 | `cache.image_limit_mb`（默认 2048）、`cache.bif_limit_mb`（默认 1024）、`cache.sweep_interval`（默认 6h）；上限写 0 表示不按容量淘汰 |
 
 ### 4.2 单元测试
 
 | 文件 | 测点 | 状态 |
 |---|---|---|
-| `store/items_test.go` | 内存 SQLite，测 ItemQuery 参数组合、排序白名单、分页边界 | 待补（过滤条件已被 `persons_test.go` 覆盖一部分） |
+| `store/items_test.go` | ItemQuery 参数组合、排序白名单（含注入尝试）、分页边界 | 已完成 |
 | `store/store_test.go` | DSN PRAGMA 生效、版本守卫、并发读 | 已完成 |
 | `store/persons_test.go` | 人物分页/搜索/收藏、关联清理、分类聚合、新增过滤条件 | 已完成（S3） |
 | `media/scan_test.go` | ID 派生、指纹命中/变化 | 已完成 |
 | `media/imagecache_test.go` | 缓存命中、标签随源图变化、缩放数值 | 已完成 |
+| `media/cachegc_test.go` | 孤儿清理、LRU 淘汰、片源更新的 BIF 判定、按条目清理 | 已完成 |
 | `media/scan_status_test.go` | 扫描进度快照与结束态 | 已完成（S3） |
-| `media/bif_test.go` | 打包→解析回环、跨参数复用、陈旧判定 | 待补 |
-| `media/probe_test.go` | 用 `testdata/*.json` 样本测流信息映射（不依赖真 ffprobe） | 待补 |
+| `media/bif_test.go` | 打包→解析回环、跨参数复用、陈旧判定、早期文件改名、按前缀清理 | 已完成 |
+| `media/probe_test.go` | `testdata/*.json` 样本测流信息映射（`parseProbeOutput` 与子进程分离，不依赖 ffprobe） | 已完成 |
 | `httpapi/s3_test.go` | Genres/Studios/Tags、GenreIds + Filters、Items/Latest、ScanStatus 路由 | 已完成（S3） |
-| `httpapi/auth_test.go` | httptest 跑鉴权矩阵：未登录 / 普通用户 / 管理员 × 各路由 | 待补 |
+| `httpapi/auth_test.go` | 鉴权矩阵：公开路由 / 未登录 / 伪造令牌 / 四种令牌来源 / 普通用户 403 / 管理员 200 / 注销后失效 | 已完成 |
 
 ### 4.3 日志轮转
 
-`main.go:103` 只在启动时滚动一次 5MB，长期运行会无限增长。改为按大小定时轮转。
+`main.go` 的日志写入改为 `rotatingWriter`：每次写入前检查大小，超过 5MB 就把当前文件改名为 `.old` 并重开，旧文件只留一份。不再依赖启动时判断，长期运行不会无限增长。
+
+### S4 落地结果
+
+| 项 | 结果 |
+|---|---|
+| `go build ./...` / `go vet ./...` | OK |
+| `go test ./...` | ok store / media / httpapi |
+| 新增文件 | `store/cache.go`、`media/cachegc.go`、`media/cachegc_test.go`、`store/items_test.go`、`media/bif_test.go`、`media/probe_test.go`、`media/testdata/*.json`、`httpapi/auth_test.go` |
+
+> 测试中发现并据实修正的两处预期：`GET /Library/VirtualFolders` 本来就不要求管理员（侧栏渲染要用），`BifCache.Lookup` 的参数顺序是 `(intervalMs, width)`，与 `Path` 的 `(width, intervalMs)` 相反。
 
 ---
 
-## S5 前端
+## S5 前端（进行中）
 
-| # | 任务 | 落点 |
-|---|---|---|
-| 5.1 | 请求层：单例 `http.Client` + 15s timeout + 401 集中拦截 + 修「首个请求失败即 logout」 | `emby_pc_service.dart:867-906`、`emby_pc_page.dart:200-207` |
-| 5.2 | 服务器地址设置项，去掉硬编码 `localhost:8096` | `service:50`、`login:126`、`settings_page.dart` |
-| 5.3 | 扫描进度改读 `/Library/ScanStatus` | `library_admin.dart:286-332` |
-| 5.4 | 全局搜索（限 60）、人物作品（限 100）补分页 | `service:537`、`service:648-668` |
-| 5.5 | 工作台拆分 + Repository 层 TTL 缓存，消掉启动 2N+3 请求与返回全量重拉 | `emby_pc_page.dart` + 5 个 part |
-| 5.6 | 筛选栏接 S3 的流派/年份/评分/演员 | `workspace_toolbar.dart` |
-| 5.7 | 播放器：倍速、音轨/字幕轨切换、设置持久化 | `emby_pc_player_page.dart:131-136` |
-| 5.8 | 图片 URL 带 `v={tag}`，配合 2.3 的缓存失效 | `service:693-760` |
+| # | 任务 | 落点 | 状态 |
+|---|---|---|---|
+| 5.1 | 请求层：单例 `http.Client` + 15s timeout + 401 集中拦截 + 修「首个请求失败即 logout」 | `emby_pc_service.dart`、`emby_pc_page.dart` | 已完成 |
+| 5.2 | 服务器地址设置项，去掉硬编码 `localhost:8096` | `settings_page.dart`、`service`、`login` | 已完成 |
+| 5.3 | 扫描进度改读 `/Library/ScanStatus` | `library_admin.dart` | 已完成 |
+| 5.4 | 全局搜索（限 60）、人物作品（限 100）补分页 | `service`、`global_search`、`person_page` | 已完成 |
+| 5.5 | 工作台拆分 + Repository 层 TTL 缓存，消掉启动 2N+3 请求与返回全量重拉 | `emby_pc_page.dart` + 5 个 part | 未开始 |
+| 5.6 | 筛选栏接 S3 的流派/年份/评分/演员 | `workspace_toolbar.dart`、`service`、`page` | 已完成 |
+| 5.7 | 播放器：倍速、音轨/字幕轨切换、设置持久化 | `emby_pc_player_page.dart` | 已完成 |
+| 5.8 | 图片 URL 带 `v={tag}`，配合 2.3 的缓存失效 | `service`、各图片调用点 | 已完成 |
+
+### S5 已完成部分落地结果
+
+| 项 | 实现 |
+|---|---|
+| 请求层 | 单例 `_client`（`_TimeoutClient` 包一层 `http.Client`，15s 超时 → 中文提示）；`http.get/post/put/delete` 全部改走它，连接可复用 |
+| 401 拦截 | `_ensureSuccess` / `_decodeResponse` 遇到 401 调 `_notifyUnauthorized()`：清会话 + `unauthorizedRevision` 自增；工作台监听后回登录页，多个并发请求只清一次 |
+| 403 | 与 401 拆开，提示「当前账号没有管理权限」，不再误报登录失效 |
+| 首次请求失败 | `_initialize` 只在 `isLoggedIn == false` 时回登录页，网络错误改为展示可重试的错误页 |
+| 服务器地址 | 设置页「账户 → 服务器地址」弹窗修改；保存后 `updateServerUrl` 落盘并注销会话，返回工作台自动回登录页；`readSavedLogin` 不再回落 `localhost:8096` |
+| 扫描进度 | 轮询 `/Library/ScanStatus`（2s），横幅显示 `已扫描/总数`、当前文件、失败数；连续两次 `running=false` 才判定结束，避开刚触发时的空档，结束后自动刷新条目数 |
+| 分页 | `searchItems`/`getPersonItems` 支持 `startIndex`；搜索浮层与人物作品页各加「加载更多」，按 id 去重 |
+| 图片 tag | 新增 `imageUrlForItem` / `imageUrlForPerson`，从 `ImageTags`/`BackdropImageTags`/`PrimaryImageTag` 取 `v`；列表、详情、搜索、人物卡片全部改用它 |
+| 筛选栏（5.6） | 筛选面板新增「流派」（`/Genres` 按当前库懒加载 + 缓存，取条目数前 12）、「最低评分」（7/8/9 分以上）、「演员」（关键词查 `/Persons` 后选人，走 `PersonIds`）；`getItems` 增加 `genreIds`/`personIds`/`minCommunityRating`；切库/切视图时 `_resetQueryControllers` 一并清空 |
+| 播放器（5.7） | 控制栏新增倍速菜单（0.5~2.0）；音轨菜单（>1 条才出现）、字幕菜单（含「关闭字幕」）订阅 `player.stream.tracks/track` 自更新；音量与倍速写入 `SharedPreferences`（音量退出时落盘、倍速改完即存），`PlaybackRate` 按实际倍速上报 |
+
+验证：`dart analyze`（IDE 诊断）无 error、无新增 warning；后端 `go test ./...` 全部通过。
 
 ---
 

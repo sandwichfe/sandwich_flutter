@@ -12,13 +12,13 @@ class _DetailBackdrop extends StatelessWidget {
     final colors = Theme.of(context).colorScheme;
     final url =
         item.hasBackdropImage
-            ? EmbyPcService.instance.imageUrl(
-              item.id,
+            ? EmbyPcService.instance.imageUrlForItem(
+              item,
               type: 'Backdrop',
               maxWidth: 1600,
             )
             : item.hasPrimaryImage
-            ? EmbyPcService.instance.imageUrl(item.id, maxWidth: 1000)
+            ? EmbyPcService.instance.imageUrlForItem(item, maxWidth: 1000)
             : '';
     return ExcludeSemantics(
       child: AnimatedSwitcher(
@@ -96,8 +96,8 @@ class _DetailContent extends StatelessWidget {
             child: EmbyPcNetworkImage(
               url:
                   detail.hasPrimaryImage
-                      ? EmbyPcService.instance.imageUrl(
-                        detail.id,
+                      ? EmbyPcService.instance.imageUrlForItem(
+                        detail,
                         maxWidth: 500,
                       )
                       : '',

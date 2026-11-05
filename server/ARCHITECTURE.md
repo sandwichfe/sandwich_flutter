@@ -11,7 +11,7 @@ cmd/embyx/main.go          进程入口：配置 → 数据库 → 路由 → �
 internal/config            配置加载（YAML + 环境变量）
 internal/dto               与 Emby 协议对齐的 JSON 结构
 internal/httpapi           路由、鉴权中间件、各接口处理器
-internal/store             SQLite 读写（users / items / user_data / libraries）
+internal/store             SQLite 读写（users / items / item_people / person_view / user_data / libraries）
 internal/media             ffprobe 探测、NFO 解析、图片匹配与缩放、BIF
 ```
 
@@ -22,6 +22,7 @@ data/
 ├── embyx.db                        SQLite 主库
 ├── images/{itemId}/{type}/{index}.jpg   条目图片（自管副本）
 ├── users/{userId}/primary.jpg     用户头像
+├── cache/images/{itemId}/{类型}-{序号}-{源图tag}-w{宽}-q{画质}.jpg   缩放结果缓存
 └── cache/bif/{itemId}-w{宽}-i{间隔毫秒}.bif   进度条缩略图缓存（文件名带参数）
 ```
 
@@ -42,7 +43,7 @@ data/
 客户端看到 ImageTags.Primary 非空 → 才去请求图片
    ↓ GET /emby/Items/{id}/Images/Primary?api_key=…&maxWidth=720&quality=82
    ↓
-服务端读本地副本 → 按 maxWidth 缩放 → 编码 JPEG → 返回
+服务端读本地副本 → 按 maxWidth 缩放（命中磁盘缓存则直接读缓存）→ 返回 JPEG + ETag
 ```
 
 关键设计：**数据库里的 tag 是"有没有图"的唯一开关**。客户端 `EmbyPcItem.hasPrimaryImage` 只看 `PrimaryImageTag` / `ImageTags['Primary']`，没有 tag 就显示占位图，连请求都不会发。所以图片文件存在但 tag 没写，客户端就是看不到。
@@ -125,18 +126,30 @@ String imageUrl(String itemId, {String type = 'Primary', int index = 0,
 
 ```go
 // internal/httpapi/images.go
-raw, _ := s.images.LoadItemImage(itemID, imageType, index)   // 读本地副本
-rendered, _ := media.Render(raw, maxWidth, quality)          // 缩放
+raw, _ := s.loadItemImage(r, itemID, imageType, index)   // 目录图 / 生成图按库偏好取，互相兜底
+maxWidth := media.NormalizeRenderWidth(...)              // 0 表示原宽，上限 2000
+quality := media.NormalizeRenderQuality(...)             // 非法值回落 82
+rendered, tag, _ := s.imageRenderer.Render(itemID, imageType, index, raw, maxWidth, quality)
+etag := fmt.Sprintf(`"%s-w%d-q%d"`, tag, maxWidth, quality)
+w.Header().Set("ETag", etag)                              // 与 If-None-Match 相同 → 304
 w.Header().Set("Content-Type", "image/jpeg")
 w.Header().Set("Cache-Control", "public, max-age=86400")
 w.Write(rendered)
 ```
 
-`media.Render`：
+`media.ImageRenderer`（S2 引入，`internal/media/imagecache.go`）：
 
-- `maxWidth <= 0` 或原图不宽于 maxWidth → 不缩放，直接重编码
-- 否则按等比用**纯 Go 双线性插值**缩放（没有引入 libvips，见"已知限制"）
-- `quality` 非法时默认 82
+| 项 | 实现 |
+|---|---|
+| 磁盘缓存 | `data/cache/images/{itemId}/{类型}-{序号}-{源图tag}-w{宽}-q{画质}.jpg`，命中直接读文件 |
+| 回收 | `CacheJanitor`（`media/cachegc.go`）：删孤儿目录/文件，超上限按 LRU（条目目录）与旧到新（BIF）淘汰，间隔取 `cache.sweep_interval` |
+| 失效 | key 里带源图内容 tag，换图后旧文件自然不再命中；上传/删除图片时按 itemId 清整个目录 |
+| ETag | 源图 tag + 宽 + 画质，带 `If-None-Match` 时返回 304 |
+| 并发 | semaphore 按 `runtime.NumCPU()` 限流；自实现 singleflight 合并同 key 请求 |
+| 缩放 | 源图先转 `*image.RGBA`，按像素切片索引 + 整数定点权重做双线性插值 |
+| 宽度上限 | 2000，超出按 2000 处理 |
+
+`maxWidth <= 0` 或原图不宽于 maxWidth 时不缩放，只重编码；`quality` 非法时默认 82。
 
 `handleImage` 同时接受 `maxWidth` 和 `MaxWidth` 两种写法（条目图片用小写，用户头像用大写，不同接口约定不一致）。
 
@@ -157,7 +170,15 @@ w.Write(rendered)
 
 ## 3. 数据库存了什么
 
-SQLite，单文件 `data/embyx.db`，WAL 模式，`SetMaxOpenConns(1)`。
+SQLite，单文件 `data/embyx.db`，WAL 模式。
+
+连接池（S2）：`SetMaxOpenConns(runtime.NumCPU())`（最小 2）。`busy_timeout` / `synchronous` / `foreign_keys` 都是**每连接** PRAGMA，写在 DSN 里由驱动逐连接应用：
+
+```
+file:<path>?_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(1)
+```
+
+`journal_mode=WAL` 是写进数据库文件的持久设置，启动时执行一次即可。
 
 ### 3.1 表清单
 
@@ -176,13 +197,13 @@ SQLite，单文件 `data/embyx.db`，WAL 模式，`SetMaxOpenConns(1)`。
 
 | 字段 | 来源 | 说明 |
 |---|---|---|
-| `id` | `sha1("item:"+绝对路径)` 前 16 字节 | 路径不变就稳定 |
+| `id` | `sha1(种子)` 前 16 字节：NFO 有 TMDB/IMDb 时用 `tmdb:`/`imdb:`，否则 `item:` + 库 ID + 相对库根路径 | 有外部编号时改名、换盘都不变 |
 | `library_id` / `parent_id` | 扫描时传入 | 两者当前都等于所属库 ID |
 | `type` | 固定 `Movie` | 剧集层级未实现 |
 | `name` / `sort_name` | NFO `title`/`sorttitle`，否则文件名 | |
 | `overview` | NFO `plot`（`outline` 兜底） | |
 | `production_year` | NFO `year`，否则文件名里的 `(2023)` | |
-| `premiere_date` / `date_created` | NFO `premiered` / `dateadded` | 统一转 UTC ISO8601 |
+| `premiere_date` / `date_created` | NFO `premiered` / `dateadded` | 统一转 UTC ISO8601；`date_created` 只在首次入库时写入，重扫保留原值 |
 | `community_rating` | NFO `rating` 或 `ratings/rating/value` | |
 | `official_rating` | NFO `mpaa` | |
 | `run_time_ticks` | **优先 ffprobe**，NFO `runtime` 仅兜底 | 1 tick = 100ns |
@@ -198,6 +219,8 @@ SQLite，单文件 `data/embyx.db`，WAL 模式，`SetMaxOpenConns(1)`。
 | `image_tags` | 图片入库 | JSON 对象 |
 | `backdrop_tags` | 图片入库 | JSON 数组 |
 | `screenshot_tags` | 未实现 | 恒为 `[]` |
+| `fingerprint` | 扫描时算 `size:mtime` | 重复扫描命中就跳过 ffprobe 与图片导入 |
+| `nfo_mtime` | NFO 修改时间（纳秒） | 视频没动但 NFO 改了也要重新入库 |
 
 ### 3.3 一条真实记录长什么样
 
@@ -248,7 +271,8 @@ config.Load
   ├─ 数据目录相对→绝对
   └─ 创建 data/ 子目录
       ↓
-store.Open → 建表（IF NOT EXISTS）
+store.Open → 版本守卫：全新库按 schema.sql 建到最新版本并写 user_version，
+             已有库版本不一致直接报错（不提供数据迁移，删库重扫）
       ↓
 store.EnsureAdmin → 账号不存在才创建
       ↓
@@ -267,20 +291,23 @@ ListenAndServe :8096
 扫描目标的媒体库目录（libraries.paths）
    ↓ filepath.WalkDir（递归，跳过 @eaDir / $RECYCLE.BIN 等）
 视频文件（.mkv .mp4 .avi .mov .wmv .ts .m2ts .flv .webm .rmvb）
+   ↓ FindNFO → ParseNFO
+   │    → 标题/简介/流派/演员/外部 ID；NFO 决定条目 ID，必须在探测前解析
+   ↓ deriveItemID（TMDB → IMDb → 库 ID + 相对库根路径）
+   ↓ 比对 fingerprint（size:mtime）与 nfo_mtime
+   │    命中 → 只 UPDATE 路径与库归属，跳过下面全部步骤
    ↓ ffprobe -show_format -show_streams
    │    → 时长、容器、码率、宽高、完整流信息（编码/色彩/声道…）
    ↓ parseFileName（文件名兜底）
    │    → "标题 (2023)" / "标题.2023.1080p" → 标题 + 年份
-   ↓ FindNFO → ParseNFO
-   │    → 标题/简介/流派/演员/外部 ID（覆盖文件名推断，空值不覆盖）
    ↓ FindArtwork + FindActorImages
    │    → 图片转码落盘，得到 tag
-   ↓ store.UpsertItem（INSERT ... ON CONFLICT(id) DO UPDATE）
+   ↓ store.UpsertItem（单事务：items + item_people + person_view）
    ↓
-items 表
+items / item_people / person_view
 ```
 
-**幂等性**：条目 ID 由绝对路径派生，同一路径重复扫描只会 UPDATE，不会插入重复行。改名会导致 ID 变化，旧记录会残留（目前没有清理机制）。
+**幂等性**：条目 ID 有外部编号时由编号派生，没有时由「库 ID + 相对库根路径」派生，重复扫描只会 UPDATE。改名后：ID 不变时只纠正路径；ID 变了则旧条目会在下次扫描时因为源文件不存在被清理（连同图片、BIF 缓存与用户数据）。
 
 ### 4.3 认证
 
@@ -365,11 +392,15 @@ media_kit 打开 GET /Videos/{id}/stream?static=true&api_key=…
 
 ```
 GET /Videos/{id}/index.bif?Width=320
-   ↓ 缓存命中 data/cache/bif/{itemId}-w{宽}-i{间隔}.bif → 直接返回
-   ↓ 该参数的缓存缺失，但条目有其它参数且不比片源旧的缓存 → 直接复用（不为几像素宽度重解全片）
-   ↓ 媒体目录有预生成的 *.bif → 复制进缓存（网络盘上省掉抽帧）
-   ↓ 都没有 → ffmpeg 每 10 秒抽一帧 → 打包成 BIF
+   ↓ Lookup：参数完全一致 → 其它参数 → 早期无参数命名，命中即返回 200
+   ↓ 媒体目录里有预生成的 *.bif → 复制进缓存（网络盘上省掉抽帧）
+   ↓ 都没有 → EnsureAsync 只登记一次后台任务，本次立即返回 202 + Retry-After: 30
+   ↓ 后台任务挂在服务根 context 上：ffmpeg 每 10 秒抽一帧 → 打包 BIF → 下次请求就是 200
 ```
+
+首次播放不再等抽帧：播放器这一轮降级成普通进度条，前端拿到非 200 就不显示预览。
+
+抽帧命令末尾的 `format=yuvj420p` 是必需的：ffmpeg 7 的 mjpeg 编码器拒绝非 full-range YUV。片长不足一个抽帧间隔时 `fps` 过滤器一帧都不输出，编码器仍按默认参数初始化并直接报错，「至少取首帧」的兜底根本走不到——3 秒短片必然失败。
 
 ### 4.7 分类浏览与最新条目
 
@@ -405,12 +436,12 @@ GET /emby/Library/ScanStatus（管理员）
 | 对象 | 种子 | 稳定性 |
 |---|---|---|
 | 媒体库 | 随机 | — |
-| 条目 | `item:` + 视频绝对路径 | 改名/移动会变 |
+| 条目 | `tmdb:` + TMDB 编号 → `imdb:` + IMDb 编号 → `item:` + 库 ID + 相对库根路径（小写、正斜杠） | 有外部编号时改名、换盘都不变 |
 | 人物 | `person:` + 姓名 | 姓名不变就稳定 |
 | 工作室 | `studio:` + 名称 | 稳定 |
 | 用户 / 令牌 | 随机 | — |
 
-路径类 ID 由路径派生，好处是扫描天然幂等；代价是文件改名后会变成新条目，旧记录残留。
+同一影片放 1080p / 4K 两份时，只要 NFO 带同一个 TMDB 编号就会算出同一个 ID，不会重复入库。纯路径派生的条目在改名后会变成新条目，旧记录由扫描后的陈旧条目清理负责回收。
 
 ---
 
@@ -418,13 +449,12 @@ GET /emby/Library/ScanStatus（管理员）
 
 | 项 | 现状 | 影响 |
 |---|---|---|
-| 图片缩放 | 纯 Go 双线性，无缓存 | 1600px 宽约 100–300ms，并发高时 CPU 吃紧 |
-| 图片换新 | URL 里 `v` 参数客户端传空 | 换了海报后客户端可能仍显示旧图，需重启客户端 |
+| 图片缩放 | 纯 Go 双线性 + 磁盘缓存 | 首次 1600px 约 110ms，命中缓存约 13ms |
+| 图片换新 | 客户端图片 URL 已统一带 `v={tag}`（S5.8） | 服务端换图后 URL 变化，Flutter 缓存自动失效 |
 | `extrafanart/` 子目录 | 不支持 | 多背景图只能靠 `fanart1.jpg` 这种命名 |
 | `.webp` | 跳过 | 只处理 jpg/jpeg/png |
 | 章节 | 未实现 | 详情页章节列表为空；`chapters` 恒为 `[]` |
 | 剧集层级 | 未实现 | 视频统一按 `Movie` 入库，没有 Season/Episode |
 | token 过期 | 未实现 | `token_ttl` 配置项目前不生效 |
-| 改名清理 | 未实现 | 文件改名后旧条目残留在库里 |
 | 转码 | 未实现 | 只支持 DirectPlay，编码不被 mpv 支持时播不了 |
-| 人物表 | `item_people` + `person_view` | 人物页与按演员筛选都是索引查询 |
+| 缓存回收 | `CacheJanitor` 定时清理孤儿与超量缓存（S4） | 孤儿/换参数产生的旧文件最多滞留一个巡检周期 |

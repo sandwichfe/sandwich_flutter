@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -15,6 +16,14 @@ class EmbyPcService {
   static final EmbyPcService instance = EmbyPcService._();
 
   EmbyPcService._();
+
+  // 全局复用同一个 Client：默认的 http.get/post 每次都新建连接，
+  // 列表滚动时几十个图片/接口请求反复握手，桌面端体感明显。
+  static final http.Client _client = _TimeoutClient(http.Client());
+
+  // 401 集中拦截：任何请求发现令牌失效都自增这里，工作台监听后回到登录页。
+  final ValueNotifier<int> unauthorizedRevision = ValueNotifier<int>(0);
+  bool _expiringSession = false;
 
   static const _serverKey = 'emby_pc_server';
   static const _userIdKey = 'emby_pc_user_id';
@@ -47,7 +56,8 @@ class EmbyPcService {
   Future<EmbyPcSavedLogin> readSavedLogin() async {
     final prefs = await SharedPreferences.getInstance();
     return EmbyPcSavedLogin(
-      serverUrl: prefs.getString(_serverKey) ?? 'http://localhost:8096',
+      // 不再回落硬编码地址：首次使用时由用户自己填写服务器。
+      serverUrl: prefs.getString(_serverKey) ?? '',
       username: prefs.getString(_loginNameKey) ?? '',
       password: prefs.getString(_passwordKey) ?? '',
       rememberPassword: prefs.getBool(_rememberKey) ?? false,
@@ -61,7 +71,7 @@ class EmbyPcService {
     required bool rememberPassword,
   }) async {
     final normalized = normalizeServerUrl(server);
-    final response = await http.post(
+    final response = await _client.post(
       Uri.parse('$normalized/emby/Users/AuthenticateByName'),
       headers: {
         'X-Emby-Authorization':
@@ -119,7 +129,7 @@ class EmbyPcService {
   }
 
   Future<String> scanLibrary() async {
-    final response = await http.post(
+    final response = await _client.post(
       _uri('/emby/Library/Refresh'),
       headers: _tokenHeader,
     );
@@ -129,7 +139,7 @@ class EmbyPcService {
   // ---- 媒体库（VirtualFolders）管理 ----
 
   Future<List<EmbyPcVirtualFolder>> getVirtualFolders() async {
-    final response = await http.get(
+    final response = await _client.get(
       _uri('/emby/Library/VirtualFolders'),
       headers: _tokenHeader,
     );
@@ -151,7 +161,7 @@ class EmbyPcService {
     bool preferLocalArtwork = true,
     bool refreshLibrary = true,
   }) async {
-    final response = await http.post(
+    final response = await _client.post(
       // paths 允许重复出现，Uri 的 queryParameters 支持可迭代值。
       _uri('/emby/Library/VirtualFolders', {
         'name': name.trim(),
@@ -172,7 +182,7 @@ class EmbyPcService {
     required List<String> paths,
     bool? preferLocalArtwork,
   }) async {
-    final response = await http.put(
+    final response = await _client.put(
       _uri('/emby/Library/VirtualFolders/$libraryId'),
       headers: {..._tokenHeader, 'Content-Type': 'application/json'},
       body: jsonEncode({
@@ -190,7 +200,7 @@ class EmbyPcService {
     String libraryId,
     bool preferLocal,
   ) async {
-    final response = await http.put(
+    final response = await _client.put(
       _uri('/emby/Library/VirtualFolders/$libraryId'),
       headers: {..._tokenHeader, 'Content-Type': 'application/json'},
       body: jsonEncode({'PreferLocalArtwork': preferLocal}),
@@ -202,7 +212,7 @@ class EmbyPcService {
     required String name,
     required String newName,
   }) async {
-    final response = await http.post(
+    final response = await _client.post(
       _uri('/emby/Library/VirtualFolders/Name', {
         'name': name,
         'newName': newName.trim(),
@@ -213,7 +223,7 @@ class EmbyPcService {
   }
 
   Future<void> deleteVirtualFolder(String libraryId) async {
-    final response = await http.delete(
+    final response = await _client.delete(
       _uri('/emby/Library/VirtualFolders', {'id': libraryId}),
       headers: _tokenHeader,
     );
@@ -230,7 +240,7 @@ class EmbyPcService {
     List<String> types = const ['Primary', 'Backdrop'],
     double positionRatio = 0,
   }) async {
-    final response = await http.post(
+    final response = await _client.post(
       _uri('/emby/ArtworkJobs'),
       headers: {..._tokenHeader, 'Content-Type': 'application/json'},
       body: jsonEncode({
@@ -263,7 +273,7 @@ class EmbyPcService {
       EmbyPcArtworkJob.fromJson(await _get('/emby/ArtworkJobs/$jobId'));
 
   Future<EmbyPcArtworkJob> cancelArtworkJob(String jobId) async {
-    final response = await http.post(
+    final response = await _client.post(
       _uri('/emby/ArtworkJobs/$jobId/Cancel'),
       headers: _tokenHeader,
     );
@@ -281,7 +291,7 @@ class EmbyPcService {
     int width = 320,
     bool force = false,
   }) async {
-    final response = await http.post(
+    final response = await _client.post(
       _uri('/emby/ThumbnailJobs'),
       headers: {..._tokenHeader, 'Content-Type': 'application/json'},
       body: jsonEncode({
@@ -310,7 +320,7 @@ class EmbyPcService {
   }
 
   Future<List<EmbyPcThumbnailJob>> getThumbnailJobs() async {
-    final response = await http.get(
+    final response = await _client.get(
       _uri('/emby/ThumbnailJobs'),
       headers: _tokenHeader,
     );
@@ -330,7 +340,7 @@ class EmbyPcService {
   }
 
   Future<EmbyPcThumbnailJob> cancelThumbnailJob(String jobId) async {
-    final response = await http.post(
+    final response = await _client.post(
       _uri('/emby/ThumbnailJobs/$jobId/Cancel'),
       headers: _tokenHeader,
     );
@@ -340,7 +350,7 @@ class EmbyPcService {
 
   // 条目级刷新：后端发现 id 属于媒体库时直接触发该库扫描。
   Future<String> scanLibraryItem(String libraryId) async {
-    final response = await http.post(
+    final response = await _client.post(
       _uri('/emby/Items/$libraryId/Refresh', {'Recursive': 'true'}),
       headers: _tokenHeader,
     );
@@ -354,7 +364,7 @@ class EmbyPcService {
     required bool replaceThumbnailImages,
   }) async {
     final replaceMetadata = mode == 'FullRefresh';
-    final response = await http.post(
+    final response = await _client.post(
       _uri('/emby/Items/$itemId/Refresh', {
         'Recursive': 'true',
         'MetadataRefreshMode': mode,
@@ -370,7 +380,7 @@ class EmbyPcService {
   }
 
   Future<List<EmbyPcImageInfo>> getItemImages(String itemId) async {
-    final response = await http.get(
+    final response = await _client.get(
       _uri('/emby/Items/$itemId/Images'),
       headers: _tokenHeader,
     );
@@ -394,7 +404,7 @@ class EmbyPcService {
     final path = index == null
         ? '/emby/Items/$itemId/Images/$type'
         : '/emby/Items/$itemId/Images/$type/$index';
-    final response = await http.post(
+    final response = await _client.post(
       _uri(path),
       headers: {..._tokenHeader, 'Content-Type': contentType},
       // Emby 图像接口接收以 Base64 编码后的文件内容。
@@ -407,7 +417,7 @@ class EmbyPcService {
     required Uint8List bytes,
     required String contentType,
   }) async {
-    final response = await http.post(
+    final response = await _client.post(
       _uri('/emby/Users/$userId/Images/Primary'),
       headers: {..._tokenHeader, 'Content-Type': contentType},
       // Swagger 要求用户图像正文使用 Base64 编码，和媒体图像上传规则一致。
@@ -423,7 +433,7 @@ class EmbyPcService {
     required int index,
     String source = 'local',
   }) async {
-    final response = await http.delete(
+    final response = await _client.delete(
       _uri('/emby/Items/$itemId/Images/$type/$index', {'Source': source}),
       headers: _tokenHeader,
     );
@@ -440,6 +450,10 @@ class EmbyPcService {
     String videoType = '',
     String searchTerm = '',
     int? productionYear,
+    // S3 新增的筛选条件：流派/演员按 ID 精确过滤，评分取“不低于”。
+    List<String> genreIds = const [],
+    List<String> personIds = const [],
+    double? minCommunityRating,
     String sortBy = 'PremiereDate',
     String sortOrder = 'Descending',
   }) async {
@@ -468,6 +482,11 @@ class EmbyPcService {
     if (videoType.isNotEmpty) query['VideoTypes'] = videoType;
     if (searchTerm.trim().isNotEmpty) query['SearchTerm'] = searchTerm.trim();
     if (productionYear != null) query['Years'] = '$productionYear';
+    if (genreIds.isNotEmpty) query['GenreIds'] = genreIds.join(',');
+    if (personIds.isNotEmpty) query['PersonIds'] = personIds.join(',');
+    if (minCommunityRating != null) {
+      query['MinCommunityRating'] = '$minCommunityRating';
+    }
     return EmbyPcPage.fromJson(
       await _get('/emby/Users/$userId/Items', query: query),
     );
@@ -495,6 +514,16 @@ class EmbyPcService {
     };
     if (searchTerm.trim().isNotEmpty) query['SearchTerm'] = searchTerm.trim();
     return EmbyPcPage.fromJson(await _get('/emby/Persons', query: query));
+  }
+
+  // 流派候选值：S3 新增的聚合接口，Id 即名称，ChildCount 是条目数。
+  // parentId 留空时统计全库，筛选栏默认按当前媒体库取。
+  Future<List<EmbyPcItem>> getGenres({String parentId = ''}) async {
+    final data = await _get(
+      '/emby/Genres',
+      query: {if (parentId.isNotEmpty) 'ParentId': parentId},
+    );
+    return EmbyPcPage.fromJson(data).items;
   }
 
   // Keep the continue-watching request aligned with Emby Web's Items/Resume endpoint.
@@ -532,7 +561,11 @@ class EmbyPcService {
     );
   }
 
-  Future<EmbyPcPage> searchItems(String searchTerm, {int limit = 60}) async {
+  Future<EmbyPcPage> searchItems(
+    String searchTerm, {
+    int limit = 60,
+    int startIndex = 0,
+  }) async {
     final queryText = searchTerm.trim();
     if (queryText.isEmpty) {
       return const EmbyPcPage(items: [], total: 0);
@@ -549,7 +582,7 @@ class EmbyPcService {
               'ProductionYear,PremiereDate,CommunityRating,RunTimeTicks,Width,Height',
           'EnableUserData': 'true',
           'EnableImageTypes': 'Primary,Backdrop',
-          'StartIndex': '0',
+          'StartIndex': '$startIndex',
           'Limit': '${limit.clamp(1, 100)}',
         },
       ),
@@ -574,7 +607,7 @@ class EmbyPcService {
     required String itemId,
     required String mediaSourceId,
   }) async {
-    final response = await http.post(
+    final response = await _client.post(
       _uri('/emby/Items/$itemId/PlaybackInfo'),
       headers: {..._tokenHeader, 'Content-Type': 'application/json'},
       body: jsonEncode({
@@ -622,7 +655,7 @@ class EmbyPcService {
     String itemId,
     Map<String, dynamic> item,
   ) async {
-    final response = await http.post(
+    final response = await _client.post(
       _uri('/emby/Items/$itemId'),
       headers: {..._tokenHeader, 'Content-Type': 'application/json'},
       body: jsonEncode(item),
@@ -646,6 +679,7 @@ class EmbyPcService {
   Future<EmbyPcPage> getPersonItems(
     String personId, {
     int startIndex = 0,
+    int limit = 100,
   }) async {
     return EmbyPcPage.fromJson(
       await _get(
@@ -659,7 +693,7 @@ class EmbyPcService {
           'SortBy': 'PremiereDate,SortName',
           'SortOrder': 'Descending',
           'StartIndex': '$startIndex',
-          'Limit': '100',
+          'Limit': '${limit.clamp(1, 100)}',
         },
       ),
     );
@@ -680,8 +714,8 @@ class EmbyPcService {
   Future<bool> setFavorite(String itemId, bool favorite) async {
     final path = '/emby/Users/$userId/FavoriteItems/$itemId';
     final response = favorite
-        ? await http.post(_uri(path), headers: _tokenHeader)
-        : await http.delete(_uri(path), headers: _tokenHeader);
+        ? await _client.post(_uri(path), headers: _tokenHeader)
+        : await _client.delete(_uri(path), headers: _tokenHeader);
     final data = _decodeResponse(response, '更新收藏状态失败');
     return data['IsFavorite'] is bool ? data['IsFavorite'] as bool : favorite;
   }
@@ -708,6 +742,43 @@ class EmbyPcService {
     }).toString();
   }
 
+  // 带内容标签的条目图片地址：服务端换图后 tag 变化 → URL 变化 →
+  // Flutter 的图片缓存自然失效，不需要重启客户端（S5.8）。
+  String imageUrlForItem(
+    EmbyPcItem item, {
+    String type = 'Primary',
+    int index = 0,
+    int maxWidth = 720,
+  }) {
+    final tag = switch (type) {
+      'Primary' =>
+        item.primaryImageTag.isNotEmpty
+            ? item.primaryImageTag
+            : item.imageTags['Primary']?.toString() ?? '',
+      'Backdrop' =>
+        index < item.backdropImageTags.length
+            ? item.backdropImageTags[index]
+            : '',
+      _ => item.imageTags[type]?.toString() ?? '',
+    };
+    return imageUrl(
+      item.id,
+      type: type,
+      index: index,
+      maxWidth: maxWidth,
+      cacheKey: tag,
+    );
+  }
+
+  // 人物头像同样带标签：演员头像被替换后，卡片地址随之变化。
+  String imageUrlForPerson(EmbyPcPerson person, {int maxWidth = 520}) => imageUrl(
+    person.id,
+    maxWidth: maxWidth,
+    cacheKey: person.primaryImageTag.isNotEmpty
+        ? person.primaryImageTag
+        : person.imageTags['Primary']?.toString() ?? '',
+  );
+
   // 从视频画面生成海报/封面：positionTicks 为 0 时由服务端自动嗅探画面。
   Future<EmbyPcArtworkGeneration> generateArtwork(
     String itemId, {
@@ -716,7 +787,7 @@ class EmbyPcService {
     List<String> types = const ['Primary', 'Backdrop'],
     int width = 0,
   }) async {
-    final response = await http.post(
+    final response = await _client.post(
       _uri('/emby/Items/$itemId/Images/Generate'),
       headers: {..._tokenHeader, 'Content-Type': 'application/json'},
       body: jsonEncode({
@@ -762,7 +833,7 @@ class EmbyPcService {
   // Emby 预先生成的 BIF 文件包含进度条缩略图，加载失败时由播放器降级为普通进度条。
   Future<Uint8List?> getBifPreview(String itemId, {int width = 320}) async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         _uri('/emby/Videos/$itemId/index.bif', {
           'api_key': accessToken,
           'Width': '$width',
@@ -788,6 +859,8 @@ class EmbyPcService {
     required int volumeLevel,
     required bool canSeek,
     String progressEventName = 'TimeUpdate',
+    // 播放倍速：服务端据此统计实际观看时长（S5.7）。
+    double playbackRate = 1,
   }) async {
     final eventPath = switch (event) {
       EmbyPcPlaybackEvent.started => '/emby/Sessions/Playing',
@@ -805,13 +878,13 @@ class EmbyPcService {
       'VolumeLevel': volumeLevel,
       'CanSeek': canSeek,
       'PlayMethod': 'DirectPlay',
-      'PlaybackRate': 1,
+      'PlaybackRate': playbackRate,
       // 只有停止接口使用 Failed；开始和进度接口不发送无关字段。
       if (event == EmbyPcPlaybackEvent.stopped) 'Failed': false,
       // EventName 属于进度请求，开始和停止请求不再固定伪装成 TimeUpdate。
       if (event == EmbyPcPlaybackEvent.progress) 'EventName': progressEventName,
     };
-    final response = await http.post(
+    final response = await _client.post(
       _uri(eventPath),
       headers: {..._tokenHeader, 'Content-Type': 'application/json'},
       body: jsonEncode(body),
@@ -860,11 +933,24 @@ class EmbyPcService {
     await prefs.setStringList(_libraryOrderKey, ids);
   }
 
+  // 设置页修改服务器地址：旧令牌属于旧服务器，保存后立即清掉会话回到登录页。
+  Future<void> updateServerUrl(String server) async {
+    final normalized = normalizeServerUrl(server);
+    serverUrl = normalized;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_serverKey, normalized);
+    if (isLoggedIn) await logout();
+  }
+
+  // 媒体库扫描的实时进度（管理员）：服务端维护计数，客户端不再靠条目数猜测。
+  Future<EmbyPcScanStatus> getScanStatus() async =>
+      EmbyPcScanStatus.fromJson(await _get('/emby/Library/ScanStatus'));
+
   Future<Map<String, dynamic>> _get(
     String path, {
     Map<String, String>? query,
   }) async {
-    final response = await http.get(_uri(path, query), headers: _tokenHeader);
+    final response = await _client.get(_uri(path, query), headers: _tokenHeader);
     return _decodeResponse(response, 'Emby 请求失败');
   }
 
@@ -897,10 +983,26 @@ class EmbyPcService {
         : utf8.decode(response.bodyBytes).trim();
   }
 
+  // 令牌失效统一处理：清会话并通知界面，多个并发请求只触发一次。
+  void _notifyUnauthorized() {
+    if (_expiringSession || !isLoggedIn) return;
+    _expiringSession = true;
+    unawaited(
+      logout().whenComplete(() {
+        _expiringSession = false;
+        unauthorizedRevision.value++;
+      }),
+    );
+  }
+
   void _ensureSuccess(http.Response response, String action) {
     if (response.statusCode >= 200 && response.statusCode < 300) return;
-    if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const EmbyPcException('登录已失效或当前账号没有管理权限');
+    if (response.statusCode == 401) {
+      _notifyUnauthorized();
+      throw const EmbyPcException('登录已失效，请重新登录');
+    }
+    if (response.statusCode == 403) {
+      throw const EmbyPcException('当前账号没有管理权限');
     }
     final message = _responseError(response);
     throw EmbyPcException(
@@ -910,8 +1012,12 @@ class EmbyPcService {
 
   Map<String, dynamic> _decodeResponse(http.Response response, String action) {
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      if (response.statusCode == 401 || response.statusCode == 403) {
+      if (response.statusCode == 401) {
+        _notifyUnauthorized();
         throw const EmbyPcException('登录已失效，请重新登录');
+      }
+      if (response.statusCode == 403) {
+        throw const EmbyPcException('当前账号没有管理权限');
       }
       throw EmbyPcException('$action：HTTP ${response.statusCode}');
     }
@@ -971,6 +1077,21 @@ class EmbyPcException implements Exception {
 
   @override
   String toString() => message;
+}
+
+// 所有请求共用同一份超时策略：服务器离线或网络盘卡住时不再无限等待。
+class _TimeoutClient extends http.BaseClient {
+  _TimeoutClient(this._inner);
+
+  final http.Client _inner;
+  static const Duration _timeout = Duration(seconds: 15);
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) =>
+      _inner.send(request).timeout(
+        _timeout,
+        onTimeout: () => throw const EmbyPcException('请求超时，请检查服务器连接'),
+      );
 }
 
 Map<String, dynamic> _asMap(dynamic value) =>

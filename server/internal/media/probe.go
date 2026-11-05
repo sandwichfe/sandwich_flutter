@@ -93,6 +93,12 @@ func (p *Prober) Probe(ctx context.Context, filePath string) (*MediaInfo, error)
 		return nil, fmt.Errorf("ffprobe 执行失败: %w", err)
 	}
 
+	return parseProbeOutput(output)
+}
+
+// parseProbeOutput 把 ffprobe 的 JSON 输出映射成 MediaInfo。
+// 与执行子进程分离，测试可以直接喂 testdata 里的样本，不依赖机器上装了 ffprobe。
+func parseProbeOutput(output []byte) (*MediaInfo, error) {
 	var parsed probeOutput
 	if err := json.Unmarshal(output, &parsed); err != nil {
 		return nil, fmt.Errorf("解析 ffprobe 输出失败: %w", err)

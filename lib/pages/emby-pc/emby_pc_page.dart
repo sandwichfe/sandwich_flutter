@@ -113,6 +113,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   final _workspaceScaffoldKey = GlobalKey<ScaffoldState>();
   final _searchController = TextEditingController();
   final _yearController = TextEditingController();
+  // 演员筛选的搜索框独立于顶部标题搜索，二者互不影响。
+  final _personController = TextEditingController();
   final _scrollController = ScrollController();
   List<EmbyPcItem> _libraries = const [];
   List<EmbyPcItem> _items = const [];
@@ -127,6 +129,15 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   String _statusFilter = '';
   String _markFilter = '';
   String _videoType = '';
+  // S5.6 筛选：流派、演员（PersonIds）与最低评分，候选值按媒体库懒加载后缓存。
+  String _genreFilter = '';
+  String _personFilter = '';
+  String _personFilterName = '';
+  double? _minRating;
+  List<EmbyPcItem> _genreOptions = const [];
+  List<EmbyPcItem> _personOptions = const [];
+  String _genreOptionsLibrary = '';
+  bool _facetLoading = false;
   String _sortBy = 'PremiereDate';
   String _sortOrder = 'Descending';
   String _imageStyle = 'backdrop';
@@ -154,7 +165,14 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
+    // 401 集中拦截：任何请求发现令牌失效都由服务层通知一次，这里统一回登录页。
+    EmbyPcService.instance.unauthorizedRevision.addListener(_handleSessionExpired);
     _initialize();
+  }
+
+  void _handleSessionExpired() {
+    if (!mounted) return;
+    widget.onLogout();
   }
 
   // 移动端专用布局与桌面端分离，避免窄窗口影响 Windows 原有样式。
@@ -197,13 +215,19 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       });
       _loadCounts(ordered);
       await _loadHome();
-    } catch (_) {
-      // 恢复的会话无法完成首次请求时视为失效，返回登录页重新连接。
-      try {
-        await EmbyPcService.instance.logout();
-      } finally {
-        if (mounted) widget.onLogout();
+    } catch (error) {
+      if (!mounted) return;
+      // 只有令牌被服务端判定失效才回登录页：服务层已清空会话。
+      // 网络抖动、服务器没起来这类失败保留登录状态，改为展示可重试的错误页，
+      // 否则首个请求失败就会把用户踢下线。
+      if (!EmbyPcService.instance.isLoggedIn) {
+        widget.onLogout();
+        return;
       }
+      setState(() {
+        _loading = false;
+        _error = '加载媒体库失败：$error';
+      });
     }
   }
 
@@ -312,6 +336,84 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     }
   }
 
+  // 收藏视图（影片/演员）沿用原有的 favoriteOnly 查询，不接新增筛选条件。
+  bool get _favoriteView =>
+      _view == 'favorite-movies' || _view == 'favorite-people';
+
+  // 以下三个筛选写入集中在这里，工具栏只负责展示选项。
+  void _selectGenre(String genreId) {
+    if (genreId == _genreFilter) return;
+    setState(() => _genreFilter = genreId);
+    unawaited(_applyQuery());
+  }
+
+  void _selectMinRating(double? rating) {
+    if (rating == _minRating) return;
+    setState(() => _minRating = rating);
+    unawaited(_applyQuery());
+  }
+
+  void _selectPersonFilter(String personId, String personName) {
+    setState(() {
+      _personFilter = personId;
+      _personFilterName = personName;
+    });
+    unawaited(_applyQuery());
+  }
+
+  void _clearPersonFilter() {
+    if (_personFilter.isEmpty) return;
+    setState(() {
+      _personFilter = '';
+      _personFilterName = '';
+    });
+    unawaited(_applyQuery());
+  }
+
+  // 流派候选值按当前媒体库加载一次并缓存；切库后重新拉取。
+  // 失败时只清空候选值，不影响其它筛选项继续使用。
+  Future<void> _ensureGenreOptions() async {
+    final parentId = _view == 'library' ? _activeId : '';
+    if (_facetLoading || _genreOptionsLibrary == parentId) return;
+    setState(() => _facetLoading = true);
+    try {
+      final genres = await EmbyPcService.instance.getGenres(
+        parentId: parentId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _genreOptions = genres;
+        _genreOptionsLibrary = parentId;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _genreOptions = const []);
+    } finally {
+      if (mounted) setState(() => _facetLoading = false);
+    }
+  }
+
+  // 演员筛选按关键词查人物，结果作为 PersonIds 候选。
+  Future<void> _searchPersons() async {
+    final keyword = _personController.text.trim();
+    if (keyword.isEmpty) {
+      setState(() => _personOptions = const []);
+      return;
+    }
+    setState(() => _facetLoading = true);
+    try {
+      final page = await EmbyPcService.instance.getPersons(
+        searchTerm: keyword,
+        limit: 12,
+      );
+      if (!mounted) return;
+      setState(() => _personOptions = page.items);
+    } catch (_) {
+      if (mounted) setState(() => _personOptions = const []);
+    } finally {
+      if (mounted) setState(() => _facetLoading = false);
+    }
+  }
+
   Future<void> _loadItems({required bool reset}) async {
     if ((!reset && _loadingMore) ||
         (!reset && _items.length >= _total && _total > 0))
@@ -363,6 +465,14 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
               videoType: _videoType,
               searchTerm: _searchController.text,
               productionYear: int.tryParse(_yearController.text.trim()),
+              // 收藏列表不接流派/演员/评分筛选，保持原有查询语义。
+              genreIds: _favoriteView ? const [] : <String>[
+                if (_genreFilter.isNotEmpty) _genreFilter,
+              ],
+              personIds: _favoriteView ? const [] : <String>[
+                if (_personFilter.isNotEmpty) _personFilter,
+              ],
+              minCommunityRating: _favoriteView ? null : _minRating,
               sortBy: _sortBy,
               sortOrder: _sortOrder,
             );
@@ -483,6 +593,13 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     _statusFilter = '';
     _markFilter = '';
     _videoType = '';
+    // 切换视图时清空新筛选条件，避免串到其它媒体库。
+    _genreFilter = '';
+    _personFilter = '';
+    _personFilterName = '';
+    _personController.clear();
+    _personOptions = const [];
+    _minRating = null;
   }
 
   Future<void> _applyQuery() async {
@@ -870,9 +987,13 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
 
   @override
   void dispose() {
+    EmbyPcService.instance.unauthorizedRevision.removeListener(
+      _handleSessionExpired,
+    );
     _searchDebounceTimer?.cancel();
     _searchController.dispose();
     _yearController.dispose();
+    _personController.dispose();
     _scrollController.dispose();
     _loadMoreDebounceTimer?.cancel();
     super.dispose();

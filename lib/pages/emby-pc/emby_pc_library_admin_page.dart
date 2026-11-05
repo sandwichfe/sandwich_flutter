@@ -42,14 +42,15 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
   bool _scanningAll = false;
   final Set<String> _busyIds = {};
 
-  // 扫描是后端的异步任务，接口返回时条目还没入库，
-  // 所以触发扫描后要轮询列表，否则条目数一直停在扫描前的值。
+  // 扫描是后端的异步任务，接口返回时条目还没入库：
+  // 触发后轮询 /Library/ScanStatus 读服务端维护的实时计数（S5.3），
+  // 扫描结束再刷一次列表拿最新条目数。
   Timer? _scanPollTimer;
   bool _scanPolling = false;
-  int _scanPollStableRounds = 0;
-  String _scanPollSnapshot = '';
+  EmbyPcScanStatus? _scanStatus;
+  // 触发扫描后服务端要过一会儿才置 running，连续两次空闲才算真正结束。
+  int _scanIdleRounds = 0;
   static const _scanPollInterval = Duration(seconds: 2);
-  static const _scanPollStableLimit = 5;
 
   @override
   void initState() {
@@ -278,14 +279,17 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
     }
   }
 
-  // 扫描进度只能靠条目数间接观察：每隔 2 秒拉一次列表，
-  // 条目数连续 5 次（约 10 秒）没有变化就认为扫描结束并停止轮询。
+  // 先立即拉一次，避免第一帧还显示上一次的状态，然后再按固定间隔轮询。
   void _startScanPolling() {
     if (!mounted) return;
     _scanPollTimer?.cancel();
-    _scanPollSnapshot = _foldersSnapshot(_folders);
-    _scanPollStableRounds = 0;
-    setState(() => _scanPolling = true);
+    _scanIdleRounds = 0;
+    setState(() {
+      _scanPolling = true;
+      // 清掉上一轮的统计，避免新扫描开始时还显示旧进度。
+      _scanStatus = null;
+    });
+    _pollScanProgress();
     _scanPollTimer = Timer.periodic(_scanPollInterval, (_) {
       _pollScanProgress();
     });
@@ -303,31 +307,23 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
 
   Future<void> _pollScanProgress() async {
     try {
-      final folders = await EmbyPcService.instance.getVirtualFolders();
+      final status = await EmbyPcService.instance.getScanStatus();
       if (!mounted) return;
-      final snapshot = _foldersSnapshot(folders);
-      setState(() {
-        _folders = folders;
-        _error = '';
-        _loading = false;
-        if (snapshot == _scanPollSnapshot) {
-          _scanPollStableRounds++;
-        } else {
-          _scanPollStableRounds = 0;
-          _scanPollSnapshot = snapshot;
-        }
-      });
-      if (_scanPollStableRounds >= _scanPollStableLimit) {
-        _stopScanPolling();
+      setState(() => _scanStatus = status);
+      if (status.running) {
+        _scanIdleRounds = 0;
+        return;
       }
+
+      // 服务端报告扫描结束：连续两次空闲才停，避开刚触发扫描时的空档。
+      _scanIdleRounds++;
+      if (_scanIdleRounds < 2) return;
+      _stopScanPolling();
+      await _load(silent: true);
     } catch (_) {
       // 扫描期间偶发请求失败不打断页面，下一轮继续尝试。
     }
   }
-
-  String _foldersSnapshot(List<EmbyPcVirtualFolder> folders) => folders
-      .map((folder) => '${folder.id}:${folder.itemCount}')
-      .join('|');
 
   @override
   Widget build(BuildContext context) {
@@ -415,11 +411,18 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
       );
     }
 
-    return ListView.separated(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      itemCount: _folders.length,
-      separatorBuilder: (_, _) => const Divider(height: 1, indent: 72),
-      itemBuilder: (context, index) => _buildTile(_folders[index]),
+    return Column(
+      children: [
+        if (_scanPolling) _ScanStatusBanner(status: _scanStatus),
+        Expanded(
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            itemCount: _folders.length,
+            separatorBuilder: (_, _) => const Divider(height: 1, indent: 72),
+            itemBuilder: (context, index) => _buildTile(_folders[index]),
+          ),
+        ),
+      ],
     );
   }
 
@@ -922,6 +925,57 @@ class _ArtworkJobDialogState extends State<_ArtworkJobDialog> {
           child: Text(_job.isRunning ? '后台运行' : '关闭'),
         ),
       ],
+    );
+  }
+}
+
+// 扫描进度横幅：数据来自 /Library/ScanStatus，包含当前文件与失败数量。
+class _ScanStatusBanner extends StatelessWidget {
+  final EmbyPcScanStatus? status;
+
+  const _ScanStatusBanner({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final value = status;
+    final scanned = value?.scanned ?? 0;
+    final total = value?.total ?? 0;
+    final libraryName = value?.libraryName ?? '';
+    final title = total > 0
+        ? '正在扫描${libraryName.isEmpty ? '' : '「$libraryName」'}：$scanned / $total'
+        : '正在扫描：已处理 $scanned 个文件';
+
+    return Material(
+      color: colors.surfaceContainerHighest,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: textTheme.bodyMedium),
+            const SizedBox(height: 6),
+            LinearProgressIndicator(value: value?.ratio),
+            if (value != null && value.currentPath.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                value.currentPath,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: textTheme.bodySmall,
+              ),
+            ],
+            if (value != null && value.failures.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                '失败 ${value.failures.length} 个（详见服务端日志）',
+                style: textTheme.bodySmall?.copyWith(color: colors.error),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }

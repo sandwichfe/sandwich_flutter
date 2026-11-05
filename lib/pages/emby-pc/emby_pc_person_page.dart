@@ -27,6 +27,9 @@ class EmbyPcPersonPage extends StatefulWidget {
 class _EmbyPcPersonPageState extends State<EmbyPcPersonPage> {
   EmbyPcItem? _person;
   List<EmbyPcItem> _items = const [];
+  // 作品列表按需分页：接口上限 100，超出后由“加载更多”继续追加。
+  int _total = 0;
+  bool _loadingMore = false;
   bool _loading = true;
   bool _favoriteBusy = false;
   bool _actionBusy = false;
@@ -49,14 +52,47 @@ class _EmbyPcPersonPageState extends State<EmbyPcPersonPage> {
         EmbyPcService.instance.getPersonItems(widget.personId),
       ]);
       if (!mounted) return;
+      final page = results[1] as EmbyPcPage;
       setState(() {
         _person = results[0] as EmbyPcItem;
-        _items = (results[1] as EmbyPcPage).items;
+        _items = page.items;
+        _total = page.total;
       });
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  // 追加下一页作品：按已有条数作为 StartIndex，并按 id 去重防止重复渲染。
+  Future<void> _loadMoreItems() async {
+    if (_loadingMore || _items.length >= _total) return;
+    setState(() => _loadingMore = true);
+    try {
+      final page = await EmbyPcService.instance.getPersonItems(
+        widget.personId,
+        startIndex: _items.length,
+      );
+      if (!mounted) return;
+      final existing = _items.map((item) => item.id).toSet();
+      setState(() {
+        _items = [
+          ..._items,
+          ...page.items.where((item) => !existing.contains(item.id)),
+        ];
+        _total = page.total;
+      });
+    } catch (error) {
+      if (mounted) {
+        EmbyPcToast.show(
+          context,
+          error.toString(),
+          type: EmbyPcToastType.error,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loadingMore = false);
     }
   }
 
@@ -185,6 +221,9 @@ class _EmbyPcPersonPageState extends State<EmbyPcPersonPage> {
                   child: _PersonContent(
                     person: person,
                     items: _items,
+                    total: _total,
+                    loadingMore: _loadingMore,
+                    onLoadMore: _loadMoreItems,
                     favoriteBusy: _favoriteBusy,
                     onFavorite: _toggleFavorite,
                     actionBusy: _actionBusy,
@@ -263,7 +302,7 @@ class _PersonBackdrop extends StatelessWidget {
     final colors = Theme.of(context).colorScheme;
     final currentPerson = person;
     final url = currentPerson?.hasPrimaryImage == true
-        ? EmbyPcService.instance.imageUrl(currentPerson!.id, maxWidth: 1200)
+        ? EmbyPcService.instance.imageUrlForItem(currentPerson!, maxWidth: 1200)
         : '';
     return ExcludeSemantics(
       child: AnimatedSwitcher(
@@ -287,6 +326,9 @@ class _PersonBackdrop extends StatelessWidget {
 class _PersonContent extends StatelessWidget {
   final EmbyPcItem person;
   final List<EmbyPcItem> items;
+  final int total;
+  final bool loadingMore;
+  final VoidCallback onLoadMore;
   final bool favoriteBusy;
   final VoidCallback onFavorite;
   final bool actionBusy;
@@ -296,6 +338,9 @@ class _PersonContent extends StatelessWidget {
   const _PersonContent({
     required this.person,
     required this.items,
+    required this.total,
+    required this.loadingMore,
+    required this.onLoadMore,
     required this.favoriteBusy,
     required this.onFavorite,
     required this.actionBusy,
@@ -333,7 +378,10 @@ class _PersonContent extends StatelessWidget {
               borderRadius: BorderRadius.circular(8),
               child: EmbyPcNetworkImage(
                 url: person.hasPrimaryImage
-                    ? EmbyPcService.instance.imageUrl(person.id, maxWidth: 520)
+                    ? EmbyPcService.instance.imageUrlForItem(
+                        person,
+                        maxWidth: 520,
+                      )
                     : '',
               ),
             ),
@@ -519,7 +567,10 @@ class _PersonContent extends StatelessWidget {
           _SectionTitle(
             icon: Icons.movie_outlined,
             title: '参演作品',
-            trailing: '${items.length}',
+            // 分母用服务端总数：列表只加载了一页时也能看出还有多少作品。
+            trailing: total > items.length
+                ? '${items.length}/$total'
+                : '${items.length}',
           ),
           const SizedBox(height: 14),
           if (items.isEmpty)
@@ -542,6 +593,22 @@ class _PersonContent extends StatelessWidget {
                 item: items[index],
                 imageStyle: 'poster',
                 onOpen: () => onOpenItem(items[index]),
+              ),
+            ),
+          if (items.length < total)
+            Padding(
+              padding: const EdgeInsets.only(top: 18),
+              child: Center(
+                child: OutlinedButton.icon(
+                  onPressed: loadingMore ? null : onLoadMore,
+                  icon: loadingMore
+                      ? const SizedBox.square(
+                          dimension: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.expand_more),
+                  label: const Text('加载更多作品'),
+                ),
               ),
             ),
         ],

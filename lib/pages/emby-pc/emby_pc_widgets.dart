@@ -215,8 +215,9 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
     final backdrop = widget.imageStyle == 'backdrop';
     final hasImage =
         backdrop ? widget.item.hasBackdropImage : widget.item.hasPrimaryImage;
-    final imageUrl = EmbyPcService.instance.imageUrl(
-      widget.item.id,
+    // 带上条目图片标签，服务端换图后 URL 变化，客户端缓存才会失效。
+    final imageUrl = EmbyPcService.instance.imageUrlForItem(
+      widget.item,
       type: backdrop ? 'Backdrop' : 'Primary',
       maxWidth: backdrop ? 720 : 420,
     );
@@ -558,8 +559,8 @@ class EmbyPcFeatureBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final imageUrl = EmbyPcService.instance.imageUrl(
-      item.id,
+    final imageUrl = EmbyPcService.instance.imageUrlForItem(
+      item,
       type: 'Backdrop',
       maxWidth: 1280,
     );

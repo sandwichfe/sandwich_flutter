@@ -107,8 +107,13 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
               (_) => SettingsPage(onAdjustLibraryOrder: _openOrderDialog),
             ),
           );
-          // 设置页可能修改用户头像或媒体库，返回后同步刷新侧边栏与头像地址。
           if (!mounted) return;
+          // 设置页可以改服务器地址，改完当前会话立即作废，直接回登录页。
+          if (!EmbyPcService.instance.isLoggedIn) {
+            widget.onLogout();
+            return;
+          }
+          // 设置页可能修改用户头像或媒体库，返回后同步刷新侧边栏与头像地址。
           setState(() {});
           await _reloadLibraries();
           // 媒体库管理页可能批量生成过海报/封面，返回后刷新当前列表的图片标记。

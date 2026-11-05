@@ -55,6 +55,53 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  // 服务器地址不再写死在代码里：这里修改后会清除会话，返回工作台自动回登录页。
+  Future<void> _editServerUrl() async {
+    final controller = TextEditingController(
+      text: EmbyPcService.instance.serverUrl,
+    );
+    final value = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('服务器地址'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'http://192.168.1.10:8096',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (text) => Navigator.pop(dialogContext, text),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, controller.text),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (value == null || !mounted) return;
+
+    try {
+      await EmbyPcService.instance.updateServerUrl(value);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(error.toString())));
+      return;
+    }
+    if (!mounted) return;
+    // 地址已变，当前登录状态作废，直接退出设置页由工作台切回登录界面。
+    Navigator.of(context).pop();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -65,6 +112,19 @@ class _SettingsPageState extends State<SettingsPage> {
           padding: const EdgeInsets.symmetric(vertical: 8),
           children: [
             const _SettingsSectionTitle('账户'),
+            ListTile(
+              leading: const Icon(Icons.dns_outlined),
+              title: const Text('服务器地址'),
+              subtitle: Text(
+                EmbyPcService.instance.serverUrl.isEmpty
+                    ? '未设置'
+                    : EmbyPcService.instance.serverUrl,
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              // 地址只存本地；改动后旧令牌不再适用，保存时直接注销当前会话。
+              onTap: _editServerUrl,
+            ),
+            const Divider(height: 1, indent: 72),
             ListTile(
               leading: CircleAvatar(
                 radius: 20,

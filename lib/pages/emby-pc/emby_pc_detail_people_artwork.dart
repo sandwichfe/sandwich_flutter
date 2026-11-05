@@ -177,8 +177,8 @@ class _CastCard extends StatelessWidget {
                   child: EmbyPcNetworkImage(
                     url:
                         person.id.isNotEmpty && person.hasPrimaryImage
-                            ? EmbyPcService.instance.imageUrl(
-                              person.id,
+                            ? EmbyPcService.instance.imageUrlForPerson(
+                              person,
                               maxWidth: 260,
                             )
                             : '',

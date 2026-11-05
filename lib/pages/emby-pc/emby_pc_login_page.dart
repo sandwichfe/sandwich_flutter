@@ -123,7 +123,7 @@ class _EmbyPcLoginPageState extends State<EmbyPcLoginPage> {
                               autofillHints: const [AutofillHints.url],
                               decoration: const InputDecoration(
                                 labelText: '服务器地址',
-                                hintText: 'http://localhost:8096',
+                                hintText: 'http://192.168.1.10:8096',
                                 prefixIcon: Icon(Icons.dns_outlined),
                                 border: OutlineInputBorder(),
                               ),

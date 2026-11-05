@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -60,6 +61,19 @@ func main() {
 	api := httpapi.New(cfg, st, images, bifCache, scanner, thumbs)
 	api.SetBaseContext(rootCtx)
 
+	// 缓存回收（S4.1）：启动先跑一轮，之后按 cache.sweep_interval 巡检。
+	// 条目删除时通过扫描器回调立即清，其余残留交给定时任务。
+	janitor := media.NewCacheJanitor(
+		filepath.Join(cfg.DataDir, "cache", "images"),
+		filepath.Join(cfg.DataDir, "cache", "bif"),
+		int64(cfg.CacheImageLimitMB)<<20,
+		int64(cfg.CacheBifLimitMB)<<20,
+		st.CacheOwners,
+		api.ImageRenderer(),
+	)
+	scanner.SetItemRemovedHook(janitor.RemoveItem)
+	go janitor.Run(rootCtx, cfg.CacheSweepInterval)
+
 	server := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           api.Handler(),
@@ -104,14 +118,70 @@ func setupLogging() {
 	}
 	logPath := filepath.Join(filepath.Dir(executable), "embyx.log")
 
-	// 超过 5MB 滚动一次，避免长期运行把磁盘写满。
-	if info, statErr := os.Stat(logPath); statErr == nil && info.Size() > 5<<20 {
-		_ = os.Rename(logPath, logPath+".old")
-	}
-
-	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	// 按大小轮转（S4.3）：长期运行只靠启动时判断会让日志无限增长。
+	writer, err := newRotatingWriter(logPath, 5<<20)
 	if err != nil {
 		return
 	}
-	log.SetOutput(io.MultiWriter(os.Stderr, file))
+	log.SetOutput(io.MultiWriter(os.Stderr, writer))
+}
+
+// rotatingWriter 按大小轮转日志文件：写满 maxSize 后把当前文件改名为 .old 再重新打开。
+// 轮转在写入时判断，不需要额外的定时协程；旧文件只留一份。
+type rotatingWriter struct {
+	mu      sync.Mutex
+	path    string
+	maxSize int64
+	file    *os.File
+	size    int64
+}
+
+func newRotatingWriter(path string, maxSize int64) (*rotatingWriter, error) {
+	writer := &rotatingWriter{path: path, maxSize: maxSize}
+	if err := writer.open(); err != nil {
+		return nil, err
+	}
+	return writer, nil
+}
+
+// open 以追加方式打开日志，并记下当前长度（重启后继续按总量判断）。
+func (w *rotatingWriter) open() error {
+	file, err := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return err
+	}
+	w.file = file
+	w.size = info.Size()
+	return nil
+}
+
+func (w *rotatingWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.file == nil {
+		return 0, os.ErrClosed
+	}
+	if w.size+int64(len(p)) > w.maxSize {
+		w.rotate()
+	}
+	n, err := w.file.Write(p)
+	w.size += int64(n)
+	return n, err
+}
+
+// rotate 关闭当前文件、覆盖旧备份并重新打开。任何一步失败都尽量保住可用性：
+// 即使改名失败也继续往原文件写，日志丢失比进程崩溃更容易接受。
+func (w *rotatingWriter) rotate() {
+	_ = w.file.Close()
+	_ = os.Remove(w.path + ".old")
+	_ = os.Rename(w.path, w.path+".old")
+	if err := w.open(); err != nil {
+		w.file = nil
+	}
 }

@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 )
 
 // maxRenderWidth 是缩放宽度的上限：客户端传什么都不能让服务端去解一张超大图。
@@ -25,17 +26,39 @@ type ImageRenderer struct {
 	sem chan struct{}
 	// group 合并同一张图的并发请求：列表重建时同一 URL 常被连发两次。
 	group flightGroup
+
+	// access 记录每个条目最近一次渲染时间，供缓存回收按 LRU 淘汰（S4.1）。
+	// 只在内存里保存：进程重启后重新从目录 mtime 起算，够用且不需要额外落盘。
+	accessMu sync.Mutex
+	access   map[string]time.Time
 }
 
 func NewImageRenderer(dir string) *ImageRenderer {
 	return &ImageRenderer{
-		dir: dir,
-		sem: make(chan struct{}, runtime.NumCPU()),
+		dir:    dir,
+		sem:    make(chan struct{}, runtime.NumCPU()),
+		access: make(map[string]time.Time),
 	}
+}
+
+// touch 记录条目最近访问时间，缓存回收据此判断哪些目录最久没用过。
+func (p *ImageRenderer) touch(itemID string) {
+	key := sanitizeID(itemID)
+	p.accessMu.Lock()
+	p.access[key] = time.Now()
+	p.accessMu.Unlock()
+}
+
+// LastAccess 返回条目最近一次渲染的时间，未访问过时返回零值。
+func (p *ImageRenderer) LastAccess(itemID string) time.Time {
+	p.accessMu.Lock()
+	defer p.accessMu.Unlock()
+	return p.access[sanitizeID(itemID)]
 }
 
 // Render 返回按 maxWidth / quality 缩放后的 JPEG，并返回源图内容标签（供 ETag 使用）。
 func (p *ImageRenderer) Render(itemID, imageType string, index int, raw []byte, maxWidth, quality int) ([]byte, string, error) {
+	p.touch(itemID)
 	tag := hashTag(raw)
 	maxWidth = NormalizeRenderWidth(maxWidth)
 	quality = NormalizeRenderQuality(quality)
@@ -71,7 +94,12 @@ func (p *ImageRenderer) Render(itemID, imageType string, index int, raw []byte, 
 
 // RemoveItem 删除条目全部缩放缓存。条目被删除或图片被替换时调用，回收磁盘。
 func (p *ImageRenderer) RemoveItem(itemID string) {
-	_ = os.RemoveAll(filepath.Join(p.dir, sanitizeID(itemID)))
+	key := sanitizeID(itemID)
+	_ = os.RemoveAll(filepath.Join(p.dir, key))
+
+	p.accessMu.Lock()
+	delete(p.access, key)
+	p.accessMu.Unlock()
 }
 
 // cachePath 按「条目/类型-序号-源图标签-宽度-画质」组织缓存文件。

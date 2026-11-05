@@ -343,8 +343,8 @@ List<_DetailImageRef> _buildArtworkImages(EmbyPcItem detail) {
     images.add(
       _DetailImageRef(
         label: label,
-        url: EmbyPcService.instance.imageUrl(
-          detail.id,
+        url: EmbyPcService.instance.imageUrlForItem(
+          detail,
           type: type,
           index: index,
           maxWidth: 1280,

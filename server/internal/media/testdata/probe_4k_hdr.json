@@ -1,0 +1,59 @@
+{
+  "format": {
+    "filename": "SNOS-131.mp4",
+    "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+    "duration": "7200.500000",
+    "size": "9000000000",
+    "bit_rate": "10000000"
+  },
+  "streams": [
+    {
+      "index": 0,
+      "codec_name": "hevc",
+      "codec_tag_string": "hvc1",
+      "codec_type": "video",
+      "profile": "Main 10",
+      "level": 153,
+      "width": 3840,
+      "height": 2160,
+      "display_aspect_ratio": "16:9",
+      "pix_fmt": "yuv420p10le",
+      "refs": 4,
+      "color_primaries": "bt2020",
+      "color_space": "bt2020nc",
+      "color_transfer": "smpte2084",
+      "field_order": "progressive",
+      "r_frame_rate": "24000/1001",
+      "avg_frame_rate": "24000/1001",
+      "bit_rate": "9000000",
+      "bits_per_raw_sample": "10",
+      "disposition": { "default": 1, "forced": 0 },
+      "tags": { "language": "jpn", "title": "主视频" }
+    },
+    {
+      "index": 1,
+      "codec_name": "eac3",
+      "codec_type": "audio",
+      "channels": 6,
+      "channel_layout": "5.1(side)",
+      "sample_rate": "48000",
+      "bit_rate": "640000",
+      "disposition": { "default": 1, "forced": 0 },
+      "tags": { "language": "jpn" }
+    },
+    {
+      "index": 2,
+      "codec_name": "subrip",
+      "codec_type": "subtitle",
+      "disposition": { "default": 0, "forced": 0 },
+      "tags": { "language": "chi", "title": "简体中文" }
+    },
+    {
+      "index": 3,
+      "codec_name": "hdmv_pgs_subtitle",
+      "codec_type": "subtitle",
+      "disposition": { "default": 0, "forced": 0 },
+      "tags": { "language": "eng" }
+    }
+  ]
+}

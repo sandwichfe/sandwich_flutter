@@ -16,6 +16,7 @@ class _GlobalSearchDialogState extends State<_GlobalSearchDialog> {
   int _total = 0;
   int _requestVersion = 0;
   bool _loading = false;
+  bool _loadingMore = false;
   String _error = '';
 
   @override
@@ -69,6 +70,37 @@ class _GlobalSearchDialogState extends State<_GlobalSearchDialog> {
         _loading = false;
         _error = error.toString();
       });
+    }
+  }
+
+  // 追加下一页结果：StartIndex 取已加载条数，按 id 去重避免并发修改后重复。
+  Future<void> _loadMore() async {
+    final query = _controller.text.trim();
+    if (query.isEmpty || _loadingMore || _items.length >= _total) return;
+    final version = _requestVersion;
+    setState(() => _loadingMore = true);
+    try {
+      final page = await EmbyPcService.instance.searchItems(
+        query,
+        startIndex: _items.length,
+      );
+      if (!mounted || version != _requestVersion) return;
+      final existing = _items.map((item) => item.id).toSet();
+      setState(() {
+        _items = [
+          ..._items,
+          ...page.items.where((item) => !existing.contains(item.id)),
+        ];
+        _total = page.total;
+      });
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(content: Text(error.toString())));
+      }
+    } finally {
+      if (mounted) setState(() => _loadingMore = false);
     }
   }
 
@@ -212,13 +244,28 @@ class _GlobalSearchDialogState extends State<_GlobalSearchDialog> {
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
-              child: Text(
-                '共 $_total 项，当前展示前 ${_items.length} 项',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  fontSize: 12,
-                ),
+              child: Column(
+                children: [
+                  Text(
+                    '共 $_total 项，已加载 ${_items.length} 项',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: _loadingMore ? null : _loadMore,
+                    icon: _loadingMore
+                        ? const SizedBox.square(
+                            dimension: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.expand_more, size: 18),
+                    label: const Text('加载更多'),
+                  ),
+                ],
               ),
             ),
           )
@@ -321,8 +368,8 @@ class _GlobalSearchListTile extends StatelessWidget {
     final hasImage = useBackdrop ? item.hasBackdropImage : item.hasPrimaryImage;
     final imageUrl =
         hasImage
-            ? EmbyPcService.instance.imageUrl(
-              item.id,
+            ? EmbyPcService.instance.imageUrlForItem(
+              item,
               type: useBackdrop ? 'Backdrop' : 'Primary',
               maxWidth: useBackdrop ? 260 : 140,
             )

@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'emby_pc_models.dart';
@@ -131,9 +132,15 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
   static const double _defaultVolume = 5.0;
   // 关闭窗口时网络异常不能无限期阻塞返回上一页。
   static const Duration _windowCloseReportTimeout = Duration(seconds: 3);
-  // 只在当前应用进程内保存音量；应用重启后静态值会重新回到默认音量。
+  // 音量在进程内共享，并从本地偏好恢复，应用重启后保持上次设置。
   static double _sessionVolume = _defaultVolume;
   static double _sessionVolumeBeforeMute = _defaultVolume;
+  // 播放偏好键：音量 + 倍速（S5.7）。
+  static const _volumePrefsKey = 'emby_pc_player_volume';
+  static const _ratePrefsKey = 'emby_pc_player_rate';
+  static bool _preferencesLoaded = false;
+  // 倍速由播放器页面统一持有，全屏控制层只是订阅者。
+  double _playbackRate = 1.0;
 
   late final Player _player;
   late final VideoController _videoController;
@@ -200,7 +207,52 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
     if (_usesAndroidSystemVolume) {
       unawaited(_initializeAndroidSystemVolume());
     }
-    _initializePlayer();
+    // 先恢复音量/倍速偏好再起播，避免开头几秒用默认值播放。
+    unawaited(_bootstrapPlayer());
+  }
+
+  Future<void> _bootstrapPlayer() async {
+    await _restorePlaybackPreferences();
+    if (!mounted || _windowClosing) return;
+    await _initializePlayer();
+  }
+
+  // 偏好只在进程内读取一次；读失败时保持默认音量与 1.0 倍速。
+  Future<void> _restorePlaybackPreferences() async {
+    if (_preferencesLoaded) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final volume = prefs.getDouble(_volumePrefsKey);
+      if (volume != null) {
+        final safeVolume = volume.clamp(0.0, 100.0).toDouble();
+        _sessionVolume = safeVolume;
+        _sessionVolumeBeforeMute = safeVolume > 0 ? safeVolume : _defaultVolume;
+        _volume = safeVolume;
+        _muted = safeVolume <= 0;
+      }
+      _playbackRate = prefs.getDouble(_ratePrefsKey) ?? 1.0;
+    } catch (error) {
+      debugPrint('读取播放偏好失败：$error');
+    } finally {
+      _preferencesLoaded = true;
+    }
+  }
+
+  Future<void> _savePlayerPreference(String key, double value) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble(key, value);
+    } catch (error) {
+      // 写偏好失败不影响播放，只是下次启动回到默认值。
+      debugPrint('保存播放偏好失败：$error');
+    }
+  }
+
+  Future<void> _setPlaybackRate(double rate) async {
+    if ((_playbackRate - rate).abs() < 0.001) return;
+    setState(() => _playbackRate = rate);
+    await _player.setRate(rate);
+    await _savePlayerPreference(_ratePrefsKey, rate);
   }
 
   bool get _usesAndroidSystemVolume =>
@@ -343,6 +395,10 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
         return;
       }
       if (_error.isNotEmpty) return;
+      // 倍速必须在 open 之后设置，否则会被新媒体的默认值覆盖。
+      if ((_playbackRate - 1.0).abs() > 0.001) {
+        await _player.setRate(_playbackRate);
+      }
       _progressTimer = Timer.periodic(
         const Duration(seconds: 10),
         (_) => _reportPlayback(EmbyPcPlaybackEvent.progress),
@@ -402,6 +458,7 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
         volumeLevel: volumeLevel,
         canSeek: _duration > Duration.zero || widget.item.runTimeTicks > 0,
         progressEventName: progressEventName,
+        playbackRate: _playbackRate,
       ),
     );
     // 上报失败不打断本地播放，但必须保留状态码或网络异常供诊断。
@@ -551,6 +608,8 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
   @override
   void dispose() {
     _progressTimer?.cancel();
+    // 音量用会话值落盘：滑条拖动过程中不写磁盘，退出时保存一次。
+    unawaited(_savePlayerPreference(_volumePrefsKey, _sessionVolume));
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
       // 播放器离开后不保留窗口级亮度覆盖，重新跟随 Android 系统设置。
       unawaited(_AndroidWindowBrightness.resetBrightness());
@@ -656,6 +715,7 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
                         muted: _muted,
                         volume: _volume,
                         videoFit: _videoFit,
+                        speed: _playbackRate,
                         // media_kit 全屏时会保留原页面并新建 Video，两个控制层必须使用不同 Key。
                         volumeControlKey: isFullscreen(videoState.context)
                             ? _fullscreenVolumeControlKey
@@ -665,6 +725,8 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
                         onVideoFitChanged: _setVideoFit,
                         onVolumeChanged:
                             (value) => unawaited(_setVolume(value)),
+                        onSpeedChanged:
+                            (rate) => unawaited(_setPlaybackRate(rate)),
                       ),
                 ),
               ),
@@ -820,11 +882,14 @@ class _PlayerControls extends StatefulWidget {
   final bool muted;
   final double volume;
   final BoxFit videoFit;
+  // 倍速由页面统一持有，控制层只负责展示与回传选择。
+  final double speed;
   final GlobalKey<_VolumeControlState> volumeControlKey;
   final VoidCallback onTogglePlay;
   final VoidCallback onToggleMute;
   final ValueChanged<BoxFit> onVideoFitChanged;
   final ValueChanged<double> onVolumeChanged;
+  final ValueChanged<double> onSpeedChanged;
 
   const _PlayerControls({
     required this.player,
@@ -837,11 +902,13 @@ class _PlayerControls extends StatefulWidget {
     required this.muted,
     required this.volume,
     required this.videoFit,
+    required this.speed,
     required this.volumeControlKey,
     required this.onTogglePlay,
     required this.onToggleMute,
     required this.onVideoFitChanged,
     required this.onVolumeChanged,
+    required this.onSpeedChanged,
   });
 
   @override
@@ -859,6 +926,27 @@ class _PlayerControlsState extends State<_PlayerControls> {
 
   Timer? _controlsHideTimer;
   bool _controlsVisible = true;
+  // 音轨/字幕轨来自 media_kit 的轨道事件，控制层自己订阅，页面无需转发。
+  final List<StreamSubscription<dynamic>> _trackSubscriptions = [];
+  Tracks? _tracks;
+  Track? _currentTrack;
+
+  @override
+  void initState() {
+    super.initState();
+    _tracks = player.state.tracks;
+    _currentTrack = player.state.track;
+    _trackSubscriptions.add(
+      player.stream.tracks.listen((tracks) {
+        if (mounted) setState(() => _tracks = tracks);
+      }),
+    );
+    _trackSubscriptions.add(
+      player.stream.track.listen((track) {
+        if (mounted) setState(() => _currentTrack = track);
+      }),
+    );
+  }
 
   Player get player => widget.player;
   Duration get position => widget.position;
@@ -872,6 +960,7 @@ class _PlayerControlsState extends State<_PlayerControls> {
   bool get muted => widget.muted;
   double get volume => widget.volume;
   BoxFit get videoFit => widget.videoFit;
+  double get speed => widget.speed;
   GlobalKey<_VolumeControlState> get volumeControlKey =>
       widget.volumeControlKey;
   VoidCallback get onTogglePlay => widget.onTogglePlay;
@@ -1002,6 +1091,9 @@ class _PlayerControlsState extends State<_PlayerControls> {
   @override
   void dispose() {
     _controlsHideTimer?.cancel();
+    for (final subscription in _trackSubscriptions) {
+      unawaited(subscription.cancel());
+    }
     super.dispose();
   }
 
@@ -1267,6 +1359,12 @@ class _PlayerControlsState extends State<_PlayerControls> {
                                     Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
+                                        // 音轨/字幕轨按容器实际提供的轨道动态出现。
+                                        if ((_tracks?.audio.length ?? 0) > 1)
+                                          _buildAudioMenu(_tracks!.audio),
+                                        if ((_tracks?.subtitle.length ?? 0) > 0)
+                                          _buildSubtitleMenu(_tracks!.subtitle),
+                                        _buildSpeedMenu(),
                                         // 使用简洁的调节图标区分画面模式菜单与旁边的全屏按钮。
                                         PopupMenuButton<BoxFit>(
                                           tooltip:
@@ -1347,6 +1445,109 @@ class _PlayerControlsState extends State<_PlayerControls> {
     final minutes = value.inMinutes.remainder(60).toString().padLeft(2, '0');
     final seconds = value.inSeconds.remainder(60).toString().padLeft(2, '0');
     return hours > 0 ? '$hours:$minutes:$seconds' : '$minutes:$seconds';
+  }
+
+  // ---- 倍速与轨道切换（S5.7）----
+
+  String _formatRate(double rate) {
+    final text = rate == rate.roundToDouble()
+        ? rate.toStringAsFixed(0)
+        : rate.toStringAsFixed(2).replaceFirst(RegExp(r'0+$'), '');
+    return '$text×';
+  }
+
+  // 轨道标题优先用容器提供的 title，其次语言，最后才退化到 id。
+  String _trackLabel(String id, String? title, String? language) {
+    final label = (title ?? '').trim();
+    final lang = (language ?? '').trim();
+    if (label.isNotEmpty && lang.isNotEmpty && label != lang) {
+      return '$label ($lang)';
+    }
+    if (label.isNotEmpty) return label;
+    if (lang.isNotEmpty) return lang;
+    return id;
+  }
+
+  Widget _buildSpeedMenu() {
+    const rates = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+    return PopupMenuButton<double>(
+      tooltip: '倍速 ${_formatRate(speed)}',
+      color: const Color(0xFF202020),
+      icon: const Icon(Icons.speed_rounded, color: Colors.white),
+      onSelected: (rate) => widget.onSpeedChanged(rate),
+      itemBuilder:
+          (context) => [
+            for (final rate in rates)
+              CheckedPopupMenuItem<double>(
+                value: rate,
+                checked: (speed - rate).abs() < 0.01,
+                child: Text(_formatRate(rate)),
+              ),
+          ],
+    );
+  }
+
+  Widget _buildAudioMenu(List<AudioTrack> tracks) {
+    return PopupMenuButton<String>(
+      tooltip: '音轨',
+      color: const Color(0xFF202020),
+      icon: const Icon(Icons.audiotrack_rounded, color: Colors.white),
+      onSelected: (id) {
+        for (final track in tracks) {
+          if (track.id == id) {
+            unawaited(player.setAudioTrack(track));
+            return;
+          }
+        }
+      },
+      itemBuilder:
+          (context) => [
+            for (final track in tracks)
+              CheckedPopupMenuItem<String>(
+                value: track.id,
+                checked: track.id == _currentTrack?.audio.id,
+                child: Text(_trackLabel(track.id, track.title, track.language)),
+              ),
+          ],
+    );
+  }
+
+  Widget _buildSubtitleMenu(List<SubtitleTrack> tracks) {
+    final subtitlesOff = _currentTrack?.subtitle.id == 'no';
+    return PopupMenuButton<String>(
+      tooltip: '字幕',
+      color: const Color(0xFF202020),
+      icon: Icon(
+        subtitlesOff ? Icons.subtitles_off_rounded : Icons.subtitles_rounded,
+        color: Colors.white,
+      ),
+      onSelected: (id) {
+        if (id == 'no') {
+          unawaited(player.setSubtitleTrack(SubtitleTrack.no()));
+          return;
+        }
+        for (final track in tracks) {
+          if (track.id == id) {
+            unawaited(player.setSubtitleTrack(track));
+            return;
+          }
+        }
+      },
+      itemBuilder:
+          (context) => [
+            CheckedPopupMenuItem<String>(
+              value: 'no',
+              checked: subtitlesOff,
+              child: const Text('关闭字幕'),
+            ),
+            for (final track in tracks)
+              CheckedPopupMenuItem<String>(
+                value: track.id,
+                checked: track.id == _currentTrack?.subtitle.id,
+                child: Text(_trackLabel(track.id, track.title, track.language)),
+              ),
+          ],
+    );
   }
 }
 
