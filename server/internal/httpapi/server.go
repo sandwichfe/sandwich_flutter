@@ -23,7 +23,7 @@ type Server struct {
 	artworkJobs *media.ArtworkJobManager
 	// imageRenderer 负责按宽度/画质缩放图片并做磁盘缓存。
 	imageRenderer *media.ImageRenderer
-	// libraryCovers 生成媒体库默认拼图封面（最近加入的 4 张条目海报拼成 2×2）。
+	// libraryCovers 生成媒体库默认拼图封面（最近加入的条目海报竖切成最多 3 列拼成横屏）。
 	libraryCovers *media.LibraryCoverBuilder
 
 	// baseCtx 是后台任务（扫描、图片生成）的父 context，进程退出时取消。

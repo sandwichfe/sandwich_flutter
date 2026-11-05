@@ -17,22 +17,26 @@ import (
 	"embyx/internal/store"
 )
 
-// 媒体库默认封面：取库内最近加入的条目海报拼成一张图。
+// 媒体库默认封面：取库内最近加入的条目海报，竖切成 count 列拼成一张横屏封面。
 //
-// 布局随可用张数变化：4 张 2×2 均分、3 张左侧竖图 + 右侧上下两张、
-// 2 张左右各半、1 张铺满并压暗四角。凑不满 4 张时先确认片子是不是本来就少：
-// 只有库里确实没有更多条目才按少数布局拼，否则等海报生成完再拼。
+// 每列铺满画布高度、宽度均分，所以 3 张时每列 426×720：条目海报本身是 2:3 竖图，
+// 铺进这样的瘦长列只需横向裁掉一点，人物和标题都还在，比均分 16:9 格子（2×2）
+// 上下各裁掉三分之一要稳得多。张数上限是 3；不足 3 张时有几张拼几张。
+//
+// 凑不满 3 张时先确认片子是不是本来就少：只有库里确实没有更多条目才按少数布局拼，
+// 否则等海报生成完再拼。
 //
 // 结果写在 generated/primary/0.jpg，而目录导入与手动上传的封面在 primary/0.jpg。
 // 读图链路对媒体库先读 primary、缺失才回退 generated，所以拼图只作兜底：
 // 用户一上传封面，拼图自动让位；删掉手动图后又回退到拼图。
 const (
-	// libraryCoverCount 是一屏放满的张数，也是优先取材的上限。
-	libraryCoverCount = 4
-	libraryCoverCellW = 640
-	libraryCoverCellH = 360
+	// libraryCoverCount 是拼图的列数上限，取最近的这么多张海报。
+	libraryCoverCount = 3
+	// coverCanvasW/H 是画布尺寸（16:9），与客户端媒体库卡片的展示比例一致。
+	coverCanvasW = 1280
+	coverCanvasH = 720
 	// libraryCoverSignatureVersion 在布局或尺寸调整时递增，旧签名随之失效并触发重拼。
-	libraryCoverSignatureVersion = "v1"
+	libraryCoverSignatureVersion = "v5"
 )
 
 // LibraryCoverBuilder 负责生成并登记媒体库拼图封面。
@@ -54,7 +58,7 @@ func (b *LibraryCoverBuilder) Rebuild(ctx context.Context, lib store.Library) (b
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// 多取一些候选：条目海报可能还没生成，需要往后找够 4 张有图的。
+	// 多取一些候选：条目海报可能还没生成，需要往后找够 3 张有图的。
 	ids, err := b.store.RecentLibraryItemIDs(ctx, lib.ID, libraryCoverCount*5)
 	if err != nil {
 		return false, err
@@ -70,7 +74,7 @@ func (b *LibraryCoverBuilder) Rebuild(ctx context.Context, lib store.Library) (b
 		return false, nil
 	}
 	if len(sources) < libraryCoverCount {
-		// 凑不满 4 张时先确认片子是不是本来就少：库里还有条目没出图，
+		// 凑不满 3 张时先确认片子是不是本来就少：库里还有条目没出图，
 		// 说明海报正在陆续生成，此刻拼会拼出半空的封面，等下次扫描再拼。
 		candidates, err := b.store.CountCoverCandidates(ctx, lib.ID)
 		if err != nil {
@@ -167,9 +171,9 @@ func coverSignature(sources []coverSource) string {
 	return hashTag([]byte(builder.String()))
 }
 
-// composeCover 按可用张数选择布局，把海报裁进各自的格子拼成一张封面。
+// composeCover 把海报竖切成 count 列拼成一张封面。
 func composeCover(sources []coverSource) ([]byte, error) {
-	canvas := image.NewRGBA(image.Rect(0, 0, libraryCoverCellW*2, libraryCoverCellH*2))
+	canvas := image.NewRGBA(image.Rect(0, 0, coverCanvasW, coverCanvasH))
 	layout := coverLayout(len(sources))
 	for index, source := range sources {
 		raw, err := os.ReadFile(source.path)
@@ -181,10 +185,9 @@ func composeCover(sources []coverSource) ([]byte, error) {
 			return nil, err
 		}
 		rect := layout[index]
-		cell := cropToCover(src, rect.Dx(), rect.Dy())
-		draw.Draw(canvas, rect, cell, image.Point{}, draw.Src)
+		draw.Draw(canvas, rect, cropToCover(src, rect.Dx(), rect.Dy()), image.Point{}, draw.Src)
 	}
-	// 单张铺满时没有格子接缝做分隔，压暗四角让边缘不那么生硬。
+	// 单张铺满时没有列缝做分隔，压暗四角让边缘不那么生硬。
 	if len(sources) == 1 {
 		applyVignette(canvas)
 	}
@@ -196,35 +199,21 @@ func composeCover(sources []coverSource) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// coverLayout 返回每张海报的目标格子，画布固定 1280×720。
-// 张数少时格子跟着放大，不留空白块。
+// coverLayout 把画布横向均分成 count 列，每列铺满整个高度：
+// 3 张时每列 426×720，2:3 的海报只需要横向裁掉一点，纵向几乎无损；
+// 2 张时每列 640×720，裁切仍集中在纵向，人物主体基本保留。
+// 用整数除法切分，列宽最多差 1px，且最后一列正好落在画布右边界。
 func coverLayout(count int) []image.Rectangle {
-	width, height := libraryCoverCellW*2, libraryCoverCellH*2
-	halfW, halfH := width/2, height/2
-	switch count {
-	case 1:
-		return []image.Rectangle{image.Rect(0, 0, width, height)}
-	case 2:
-		return []image.Rectangle{
-			image.Rect(0, 0, halfW, height),
-			image.Rect(halfW, 0, width, height),
-		}
-	case 3:
-		// 左侧一张竖图占半宽，右侧上下各一张。
-		return []image.Rectangle{
-			image.Rect(0, 0, halfW, height),
-			image.Rect(halfW, 0, width, halfH),
-			image.Rect(halfW, halfH, width, height),
-		}
-	default:
-		// 4 张 2×2 均分。
-		return []image.Rectangle{
-			image.Rect(0, 0, halfW, halfH),
-			image.Rect(halfW, 0, width, halfH),
-			image.Rect(0, halfH, halfW, height),
-			image.Rect(halfW, halfH, width, height),
-		}
+	if count <= 1 {
+		return []image.Rectangle{image.Rect(0, 0, coverCanvasW, coverCanvasH)}
 	}
+	rects := make([]image.Rectangle, count)
+	for index := range rects {
+		left := coverCanvasW * index / count
+		right := coverCanvasW * (index + 1) / count
+		rects[index] = image.Rect(left, 0, right, coverCanvasH)
+	}
+	return rects
 }
 
 // applyVignette 把画面四角压暗、中心保持原样，用于单图铺满的场景。
