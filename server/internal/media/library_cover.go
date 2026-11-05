@@ -55,6 +55,16 @@ func NewLibraryCoverBuilder(images *ImageStore, st *store.Store) *LibraryCoverBu
 // 触发点在每次扫描结束，重复调用很常见，所以先用候选图的 size+mtime 生成签名，
 // 与上次一致时直接跳过，不会反复解码重编码。
 func (b *LibraryCoverBuilder) Rebuild(ctx context.Context, lib store.Library) (bool, error) {
+	return b.rebuild(ctx, lib, false)
+}
+
+// RebuildForce 忽略签名直接重拼，供管理页手动"刷新媒体库图片"使用。
+// 签名没变时也重写一次，让用户在换过手动封面或想重新取图时有明确反馈。
+func (b *LibraryCoverBuilder) RebuildForce(ctx context.Context, lib store.Library) (bool, error) {
+	return b.rebuild(ctx, lib, true)
+}
+
+func (b *LibraryCoverBuilder) rebuild(ctx context.Context, lib store.Library, force bool) (bool, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -86,7 +96,7 @@ func (b *LibraryCoverBuilder) Rebuild(ctx context.Context, lib store.Library) (b
 	}
 
 	signature := coverSignature(sources)
-	if b.readMeta(lib.ID, "sig") == signature {
+	if !force && b.readMeta(lib.ID, "sig") == signature {
 		return false, nil
 	}
 

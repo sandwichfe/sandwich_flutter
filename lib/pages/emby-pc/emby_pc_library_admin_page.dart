@@ -13,8 +13,7 @@ class EmbyPcLibraryAdminPage extends StatefulWidget {
   const EmbyPcLibraryAdminPage({super.key});
 
   @override
-  State<EmbyPcLibraryAdminPage> createState() =>
-      _EmbyPcLibraryAdminPageState();
+  State<EmbyPcLibraryAdminPage> createState() => _EmbyPcLibraryAdminPageState();
 }
 
 // collectionType 与后端 CollectionType 字段一致，界面只做中文展示。
@@ -28,6 +27,7 @@ const _collectionTypeLabels = <String, String>{
 
 enum _LibraryAdminAction {
   scan,
+  refreshCover,
   generateArtwork,
   edit,
   toggleArtworkSource,
@@ -198,13 +198,9 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
   }
 
   Future<void> _scanLibrary(EmbyPcVirtualFolder folder) async {
-    final started = await _runForLibrary(
-      folder,
-      () async {
-        await EmbyPcService.instance.scanLibraryItem(folder.id);
-      },
-      '已开始扫描「${folder.name}」，列表会自动刷新',
-    );
+    final started = await _runForLibrary(folder, () async {
+      await EmbyPcService.instance.scanLibraryItem(folder.id);
+    }, '已开始扫描「${folder.name}」，列表会自动刷新');
     if (started && mounted) _startScanPolling();
   }
 
@@ -219,6 +215,26 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
       ),
       preferLocal ? '「${folder.name}」改用目录内的海报' : '「${folder.name}」改用生成的封面',
     );
+  }
+
+  // 刷新媒体库图片：只重拼库封面（取库内最近条目的海报），不重新扫描条目。
+  Future<void> _refreshLibraryCover(EmbyPcVirtualFolder folder) async {
+    if (_busyIds.contains(folder.id)) return;
+    setState(() => _busyIds.add(folder.id));
+    try {
+      final updated = await EmbyPcService.instance.refreshLibraryCover(
+        folder.id,
+      );
+      if (!mounted) return;
+      _toast(
+        updated ? '已刷新「${folder.name}」的封面' : '「${folder.name}」暂无可用海报，封面未更新',
+        type: updated ? EmbyPcToastType.success : EmbyPcToastType.info,
+      );
+    } catch (error) {
+      if (mounted) _toast(error.toString(), type: EmbyPcToastType.error);
+    } finally {
+      if (mounted) setState(() => _busyIds.remove(folder.id));
+    }
   }
 
   // 整库批量生成：后端只处理缺图的条目，任务在后台跑，弹窗轮询进度。
@@ -419,26 +435,42 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
             padding: const EdgeInsets.symmetric(vertical: 8),
             itemCount: _folders.length,
             separatorBuilder: (_, _) => const Divider(height: 1, indent: 72),
-            itemBuilder: (context, index) => _buildTile(_folders[index]),
+            itemBuilder: (context, index) =>
+                _buildTile(context, _folders[index]),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildTile(EmbyPcVirtualFolder folder) {
+  Widget _buildTile(BuildContext context, EmbyPcVirtualFolder folder) {
     final busy = _busyIds.contains(folder.id);
     final locations = folder.locations;
+    final theme = Theme.of(context);
     return ListTile(
       leading: Icon(_iconFor(folder.collectionType)),
       title: Text(folder.name),
-      subtitle: Text(
-        '${locations.isEmpty ? '未配置目录' : locations.join(' · ')}'
-        ' · ${folder.itemCount} 个条目'
-        ' · ${folder.preferLocalArtwork ? '海报取目录图' : '海报取生成图'}',
-        // 目录可能很长，固定两行避免撑破 ListTile 高度。
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
+      // 目录与统计信息分两行：目录可能很长，混在一行会把条目数和封面来源挤掉。
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            locations.isEmpty ? '未配置目录' : locations.join(' · '),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '${folder.itemCount} 个条目'
+            ' · ${folder.preferLocalArtwork ? '海报取目录图' : '海报取生成图'}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
       ),
       isThreeLine: true,
       trailing: busy
@@ -453,6 +485,8 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
                 switch (action) {
                   case _LibraryAdminAction.scan:
                     _scanLibrary(folder);
+                  case _LibraryAdminAction.refreshCover:
+                    _refreshLibraryCover(folder);
                   case _LibraryAdminAction.generateArtwork:
                     _generateLibraryArtwork(folder);
                   case _LibraryAdminAction.edit:
@@ -469,6 +503,13 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
                   child: ListTile(
                     leading: Icon(Icons.refresh),
                     title: Text('扫描媒体库'),
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: _LibraryAdminAction.refreshCover,
+                  child: ListTile(
+                    leading: Icon(Icons.wallpaper_outlined),
+                    title: Text('刷新媒体库图片'),
                   ),
                 ),
                 const PopupMenuItem(
@@ -544,8 +585,10 @@ class _LibraryEditorDialogState extends State<_LibraryEditorDialog> {
   late final TextEditingController _nameController = TextEditingController(
     text: widget.folder?.name ?? '',
   );
-  late final TextEditingController _pathsController = TextEditingController(
-    text: widget.folder?.locations.join('\n') ?? '',
+  // 输入框只负责新增一条目录，已添加的目录逐项展示在下方列表里。
+  final _pathController = TextEditingController();
+  late final List<String> _paths = List<String>.of(
+    widget.folder?.locations ?? const <String>[],
   );
   late String _collectionType = widget.folder?.collectionType ?? 'movies';
   // 每个库单独决定封面来源，默认与升级前一致：读取目录内的海报/封面。
@@ -554,36 +597,79 @@ class _LibraryEditorDialogState extends State<_LibraryEditorDialog> {
   @override
   void dispose() {
     _nameController.dispose();
-    _pathsController.dispose();
+    _pathController.dispose();
     super.dispose();
   }
 
-  // 目录以换行分隔，既方便手工粘贴多个路径，也便于目录选择器追加。
-  List<String> get _paths => _pathsController.text
-      .split('\n')
-      .map((value) => value.trim())
-      .where((value) => value.isNotEmpty)
-      .toList();
+  // 回车、"添加"和目录选择器都走这里，重复路径直接忽略。
+  void _addPath(String value) {
+    final path = value.trim();
+    if (path.isEmpty) return;
+    if (_paths.contains(path)) {
+      _pathController.clear();
+      return;
+    }
+    setState(() {
+      _paths.add(path);
+      _pathController.clear();
+    });
+    // 加入目录后重新校验，让"至少需要一个目录"的报错及时消失。
+    _formKey.currentState?.validate();
+  }
+
+  void _removePath(String path) {
+    setState(() => _paths.remove(path));
+    _formKey.currentState?.validate();
+  }
 
   Future<void> _pickDirectory() async {
     try {
       final path = await FilePicker.platform.getDirectoryPath(
         dialogTitle: '选择媒体目录',
       );
-      if (path == null || path.trim().isEmpty || !mounted) return;
-      final current = _paths;
-      if (current.contains(path)) return;
-      current.add(path);
-      setState(() => _pathsController.text = current.join('\n'));
+      if (path == null || !mounted) return;
+      _addPath(path);
     } catch (error) {
       if (mounted) {
-        EmbyPcToast.show(
-          context,
-          '选择目录失败：$error',
-          type: EmbyPcToastType.error,
-        );
+        EmbyPcToast.show(context, '选择目录失败：$error', type: EmbyPcToastType.error);
       }
     }
+  }
+
+  // 一个目录一行，长路径省略显示，悬停可看到完整路径，右侧单独移除。
+  Widget _buildPathRow(BuildContext context, String path) {
+    final theme = Theme.of(context);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.only(left: 10, right: 2),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.folder_outlined,
+            size: 18,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Tooltip(
+              message: path,
+              waitDuration: const Duration(milliseconds: 500),
+              child: Text(path, maxLines: 1, overflow: TextOverflow.ellipsis),
+            ),
+          ),
+          IconButton(
+            tooltip: '移除',
+            visualDensity: VisualDensity.compact,
+            onPressed: () => _removePath(path),
+            icon: const Icon(Icons.close, size: 18),
+          ),
+        ],
+      ),
+    );
   }
 
   void _submit() {
@@ -593,7 +679,7 @@ class _LibraryEditorDialogState extends State<_LibraryEditorDialog> {
       _LibraryDraft(
         name: _nameController.text.trim(),
         collectionType: _collectionType,
-        paths: _paths,
+        paths: List<String>.of(_paths),
         preferLocalArtwork: _preferLocalArtwork,
       ),
     );
@@ -641,24 +727,52 @@ class _LibraryEditorDialogState extends State<_LibraryEditorDialog> {
                   },
                 ),
                 const SizedBox(height: 16),
-                TextFormField(
-                  controller: _pathsController,
-                  minLines: 3,
-                  maxLines: 6,
-                  decoration: InputDecoration(
-                    labelText: '目录',
-                    hintText: '每行一个服务器可访问的绝对路径',
-                    border: const OutlineInputBorder(),
-                    alignLabelWithHint: true,
-                    suffixIcon: IconButton(
-                      tooltip: '选择目录',
-                      onPressed: _pickDirectory,
-                      icon: const Icon(Icons.folder_open),
+                // 目录逐条添加：输入框只填一条，回车或"添加"后进入下方列表。
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _pathController,
+                        decoration: InputDecoration(
+                          labelText: '目录',
+                          hintText: '服务器可访问的绝对路径',
+                          border: const OutlineInputBorder(),
+                          suffixIcon: IconButton(
+                            tooltip: '选择目录',
+                            onPressed: _pickDirectory,
+                            icon: const Icon(Icons.folder_open),
+                          ),
+                        ),
+                        onFieldSubmitted: _addPath,
+                        // 目录列表不在表单值里，校验直接看当前条目数。
+                        validator: (_) => _paths.isEmpty ? '至少需要一个目录' : null,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton.tonal(
+                      onPressed: () => _addPath(_pathController.text),
+                      child: const Text('添加'),
+                    ),
+                  ],
+                ),
+                if (_paths.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.center,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 168),
+                      child: SingleChildScrollView(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            for (final path in _paths)
+                              _buildPathRow(context, path),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
-                  // 目录不在表单值里，校验直接读当前解析结果。
-                  validator: (_) => _paths.isEmpty ? '至少需要一个目录' : null,
-                ),
+                ],
                 const SizedBox(height: 8),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -820,10 +934,7 @@ class _ArtworkJobDialogState extends State<_ArtworkJobDialog> {
   void _startPolling() {
     _timer?.cancel();
     if (!_job.isRunning) return;
-    _timer = Timer.periodic(
-      const Duration(milliseconds: 1500),
-      (_) => _poll(),
-    );
+    _timer = Timer.periodic(const Duration(milliseconds: 1500), (_) => _poll());
   }
 
   Future<void> _poll() async {
@@ -848,7 +959,11 @@ class _ArtworkJobDialogState extends State<_ArtworkJobDialog> {
       if (mounted) setState(() => _job = job);
     } catch (error) {
       if (mounted) {
-        EmbyPcToast.show(context, error.toString(), type: EmbyPcToastType.error);
+        EmbyPcToast.show(
+          context,
+          error.toString(),
+          type: EmbyPcToastType.error,
+        );
       }
     } finally {
       if (mounted) setState(() => _canceling = false);

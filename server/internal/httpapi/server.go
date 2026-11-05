@@ -114,6 +114,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /emby/Library/VirtualFolders", s.handleDeleteVirtualFolder)
 	s.mux.HandleFunc("POST /emby/Library/VirtualFolders/Name", s.handleRenameVirtualFolder)
 	s.mux.HandleFunc("PUT /emby/Library/VirtualFolders/{libraryId}", s.handleUpdateVirtualFolder)
+	// 手动重拼媒体库拼图封面（媒体库管理页）
+	s.mux.HandleFunc("POST /emby/Library/VirtualFolders/{libraryId}/RefreshCover", s.handleRefreshLibraryCover)
 
 	// 条目查询
 	s.mux.HandleFunc("GET /emby/Users/{userId}/Items", s.handleItems)

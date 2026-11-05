@@ -216,6 +216,36 @@ func (s *Server) handleUpdateVirtualFolder(w http.ResponseWriter, r *http.Reques
 	writeNoContent(w)
 }
 
+// handleRefreshLibraryCover POST /Library/VirtualFolders/{libraryId}/RefreshCover
+// 管理页"刷新媒体库图片"用：忽略签名强制重拼库封面，返回是否真的重写了图片。
+// 拼图只有解码和 JPEG 编码，耗时在几十毫秒量级，直接同步执行，客户端可用返回值提示结果。
+func (s *Server) handleRefreshLibraryCover(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	lib, err := s.store.LibraryByID(r.Context(), r.PathValue("libraryId"))
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "媒体库不存在")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "查询媒体库失败")
+		return
+	}
+	if s.libraryCovers == nil {
+		writeError(w, http.StatusServiceUnavailable, "当前服务器未启用媒体库封面生成")
+		return
+	}
+
+	updated, err := s.libraryCovers.RebuildForce(r.Context(), *lib)
+	if err != nil {
+		log.Printf("[library-cover] 手动刷新媒体库封面失败 library=%s: %v", lib.ID, err)
+		writeError(w, http.StatusInternalServerError, "刷新媒体库图片失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"Updated": updated})
+}
+
 // handleRenameVirtualFolder POST /Library/VirtualFolders/Name?name=&newName=
 func (s *Server) handleRenameVirtualFolder(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdmin(w, r) {

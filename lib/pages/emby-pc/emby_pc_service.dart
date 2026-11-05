@@ -246,6 +246,31 @@ class EmbyPcService {
     _ensureSuccess(response, '重命名媒体库失败');
   }
 
+  // 手动重拼媒体库拼图封面（取自库内最近条目的海报），返回是否真的重写了图片。
+  Future<bool> refreshLibraryCover(String libraryId) async {
+    final response = await _client.post(
+      _uri('/emby/Library/VirtualFolders/$libraryId/RefreshCover'),
+      headers: _tokenHeader,
+    );
+    if (response.statusCode == 401) {
+      _notifyUnauthorized();
+      throw const EmbyPcException('登录已失效，请重新登录');
+    }
+    if (response.statusCode == 403) {
+      throw const EmbyPcException('当前账号没有管理权限');
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      // 库里没有可用海报、未启用封面生成等场景由服务端返回中文原因。
+      final message = _responseError(response);
+      throw EmbyPcException(
+        message.isEmpty ? '刷新媒体库图片失败：HTTP ${response.statusCode}' : message,
+      );
+    }
+    if (response.bodyBytes.isEmpty) return true;
+    final data = _asMap(jsonDecode(utf8.decode(response.bodyBytes)));
+    return data['Updated'] != false;
+  }
+
   Future<void> deleteVirtualFolder(String libraryId) async {
     final response = await _client.delete(
       _uri('/emby/Library/VirtualFolders', {'id': libraryId}),
@@ -288,9 +313,7 @@ class EmbyPcService {
         message.isEmpty ? '启动生成任务失败：HTTP ${response.statusCode}' : message,
       );
     }
-    return EmbyPcArtworkJob.fromJson(
-      _decodeResponse(response, '启动生成任务失败'),
-    );
+    return EmbyPcArtworkJob.fromJson(_decodeResponse(response, '启动生成任务失败'));
   }
 
   Future<EmbyPcArtworkJob> getArtworkJob(String jobId) async =>
@@ -847,13 +870,14 @@ class EmbyPcService {
   }
 
   // 人物头像同样带标签：演员头像被替换后，卡片地址随之变化。
-  String imageUrlForPerson(EmbyPcPerson person, {int maxWidth = 520}) => imageUrl(
-    person.id,
-    maxWidth: maxWidth,
-    cacheKey: person.primaryImageTag.isNotEmpty
-        ? person.primaryImageTag
-        : person.imageTags['Primary']?.toString() ?? '',
-  );
+  String imageUrlForPerson(EmbyPcPerson person, {int maxWidth = 520}) =>
+      imageUrl(
+        person.id,
+        maxWidth: maxWidth,
+        cacheKey: person.primaryImageTag.isNotEmpty
+            ? person.primaryImageTag
+            : person.imageTags['Primary']?.toString() ?? '',
+      );
 
   // 从视频画面生成海报/封面：positionTicks 为 0 时由服务端自动嗅探画面。
   Future<EmbyPcArtworkGeneration> generateArtwork(
@@ -1037,7 +1061,10 @@ class EmbyPcService {
     String path, {
     Map<String, String>? query,
   }) async {
-    final response = await _client.get(_uri(path, query), headers: _tokenHeader);
+    final response = await _client.get(
+      _uri(path, query),
+      headers: _tokenHeader,
+    );
     return _decodeResponse(response, 'Emby 请求失败');
   }
 
@@ -1174,8 +1201,9 @@ class _TimeoutClient extends http.BaseClient {
   static const Duration _timeout = Duration(seconds: 15);
 
   @override
-  Future<http.StreamedResponse> send(http.BaseRequest request) =>
-      _inner.send(request).timeout(
+  Future<http.StreamedResponse> send(http.BaseRequest request) => _inner
+      .send(request)
+      .timeout(
         _timeout,
         onTimeout: () => throw const EmbyPcException('请求超时，请检查服务器连接'),
       );
