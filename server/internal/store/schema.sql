@@ -109,6 +109,13 @@ CREATE TABLE IF NOT EXISTS item_people (
 CREATE INDEX IF NOT EXISTS idx_item_people_item ON item_people(item_id);
 CREATE INDEX IF NOT EXISTS idx_item_people_person ON item_people(person_id);
 
+-- 图片锁：锁上的条目/人物/媒体库，扫描导入与自动重拼封面都不会覆盖其图片。
+-- 单独一张表而不是 items 加列，因为锁要覆盖三类实体（items / person_view / libraries）。
+CREATE TABLE IF NOT EXISTS image_locks (
+    entity_id  TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL
+);
+
 -- 人物汇总表：/Persons 直接分页查它，不再读全表 people JSON 再在内存里排序。
 CREATE TABLE IF NOT EXISTS person_view (
     person_id  TEXT PRIMARY KEY,

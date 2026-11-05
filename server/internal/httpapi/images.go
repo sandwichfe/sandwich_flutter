@@ -81,9 +81,14 @@ func (s *Server) handleListImages(w http.ResponseWriter, r *http.Request) {
 // handleImageLock GET /emby/Items/{itemId}/Images/Lock
 // 读取图片锁状态：锁定后扫描导入、扫描结束的自动重拼都不会覆盖现有图片。
 func (s *Server) handleImageLock(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]bool{
-		"Locked": s.images.ItemLocked(r.PathValue("itemId")),
-	})
+	itemID := r.PathValue("itemId")
+	locked, err := s.store.ImageLocked(r.Context(), itemID)
+	if err != nil {
+		log.Printf("[image] 读取图片锁失败 item=%s: %v", itemID, err)
+		writeError(w, http.StatusInternalServerError, "读取图片锁失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"Locked": locked})
 }
 
 // handleSetImageLock POST /emby/Items/{itemId}/Images/Lock
@@ -113,7 +118,7 @@ func (s *Server) handleSetImageLock(w http.ResponseWriter, r *http.Request) {
 		locked = &parsed
 	}
 
-	if err := s.images.SetItemLocked(r.PathValue("itemId"), *locked); err != nil {
+	if err := s.store.SetImageLocked(r.Context(), r.PathValue("itemId"), *locked); err != nil {
 		log.Printf("[image] 更新图片锁失败 item=%s: %v", r.PathValue("itemId"), err)
 		writeError(w, http.StatusInternalServerError, "更新图片锁失败")
 		return

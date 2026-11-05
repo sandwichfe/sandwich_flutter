@@ -143,6 +143,13 @@ func refreshPersonCounts(ctx context.Context, tx *sql.Tx, personIDs []string) er
 			`DELETE FROM person_view WHERE person_id = ? AND item_count <= 0`, personID); err != nil {
 			return fmt.Errorf("清理空人物失败: %w", err)
 		}
+		// 人物被回收后它的图片锁也该跟着清，避免同名人物重新出现时意外继承旧锁。
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM image_locks WHERE entity_id = ?
+			 AND NOT EXISTS (SELECT 1 FROM person_view WHERE person_id = ?)`,
+			personID, personID); err != nil {
+			return fmt.Errorf("清理人物图片锁失败: %w", err)
+		}
 	}
 	return nil
 }

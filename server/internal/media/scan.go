@@ -48,6 +48,9 @@ type Scanner struct {
 	// scanStates 是本次扫描开始时一次性读入的条目指纹。
 	// worker 只读这张表，不必为每个文件查一次库。
 	scanStates map[string]store.ItemScanState
+	// lockedEntities 是本次扫描开始时一次性读入的图片锁（条目 / 人物 / 媒体库）。
+	// 锁只挡自动流程，手动上传、生成、删除不受影响。
+	lockedEntities map[string]bool
 	// dirCache 缓存本次扫描内的目录枚举结果：一个目录 100 部片原本要 ReadDir 200 次。
 	dirMu    sync.Mutex
 	dirCache map[string]*dirSnapshot
@@ -225,6 +228,21 @@ func (s *Scanner) prepareScanCache(ctx context.Context, logf func(string, ...any
 		return
 	}
 	s.scanStates = states
+
+	if locked, lockErr := s.store.ImageLockedEntities(ctx); lockErr == nil {
+		s.lockedEntities = locked
+	} else {
+		// 读不到锁时按未锁定处理：宁可让目录图更新，也不能把误锁当成保护。
+		logf("读取图片锁失败，本次扫描按未锁定处理: %v", lockErr)
+	}
+}
+
+// entityLocked 查询本次扫描的图片锁集合，未加载时按未锁定处理。
+func (s *Scanner) entityLocked(entityID string) bool {
+	if s.lockedEntities == nil {
+		return false
+	}
+	return s.lockedEntities[entityID]
 }
 
 // clearScanCache 丢弃本次扫描的快照，避免长期持有大库的内存副本。
@@ -234,6 +252,7 @@ func (s *Scanner) clearScanCache() {
 	s.dirCache = nil
 	s.dirMu.Unlock()
 	s.scanStates = nil
+	s.lockedEntities = nil
 }
 
 // snapshotDir 返回目录快照，同一次扫描内复用。

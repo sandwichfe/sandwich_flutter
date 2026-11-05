@@ -34,7 +34,7 @@ type Store struct {
 
 // schemaVersion 对应 schema.sql 的表结构版本号。
 // 改表结构时递增，并在 schemaMigrations 里补上「上一版 → 这一版」的语句。
-const schemaVersion = 4
+const schemaVersion = 5
 
 // schemaMigrations 是「版本 N → N+1」的升级语句。
 // 新库按 schema.sql 一次建到最新；老库按 PRAGMA user_version 逐级补齐，
@@ -44,6 +44,13 @@ var schemaMigrations = map[int][]string{
 	3: {
 		`CREATE INDEX IF NOT EXISTS idx_items_library_created ON items(library_id, date_created)`,
 		`CREATE INDEX IF NOT EXISTS idx_user_data_resume ON user_data(user_id, played, last_played_date)`,
+	},
+	// 4 → 5：图片锁入库（条目 / 人物 / 媒体库共用一张表）。
+	4: {
+		`CREATE TABLE IF NOT EXISTS image_locks (
+			entity_id  TEXT PRIMARY KEY,
+			created_at TEXT NOT NULL
+		)`,
 	},
 }
 

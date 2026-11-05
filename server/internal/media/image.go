@@ -95,36 +95,6 @@ func (s *ImageStore) RemoveOrigin(itemID, imageType string, index int) error {
 	return nil
 }
 
-// ItemLockedPath 是条目图片锁的标记文件。锁跟图片目录走，不需要新增数据库列，
-// 和 .origin / .disabled 一样属于条目的派生状态。
-func (s *ImageStore) ItemLockedPath(itemID string) string {
-	return filepath.Join(s.root, sanitizeID(itemID), "locked")
-}
-
-// SetItemLocked 设置图片锁：锁定后扫描导入与自动重建封面都不会覆盖这个条目的图片。
-// 手动上传、手动生成、手动删除仍然允许，锁只挡自动流程。
-func (s *ImageStore) SetItemLocked(itemID string, locked bool) error {
-	path := s.ItemLockedPath(itemID)
-	if !locked {
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	if err := writeFileAtomic(path, []byte("1")); err != nil {
-		return fmt.Errorf("写入图片锁失败: %w", err)
-	}
-	return nil
-}
-
-// ItemLocked 表示这个条目的图片被用户锁定了，自动流程不能覆盖。
-func (s *ImageStore) ItemLocked(itemID string) bool {
-	return fileExists(s.ItemLockedPath(itemID))
-}
-
 // HasItemImage 只判断文件是否存在且非空。
 // 批量检查缺图时用它，避免为了确认存在就读整张图。
 func (s *ImageStore) HasItemImage(itemID, imageType string, index int) bool {

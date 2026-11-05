@@ -83,7 +83,11 @@ func (b *LibraryCoverBuilder) rebuild(ctx context.Context, lib store.Library, fo
 			return false, nil
 		}
 		// 库封面被锁定：扫描结束的自动重拼不再覆盖；手动刷新不受锁限制。
-		if b.images.ItemLocked(lib.ID) {
+		locked, err := b.store.ImageLocked(ctx, lib.ID)
+		if err != nil {
+			return false, err
+		}
+		if locked {
 			return false, nil
 		}
 	}

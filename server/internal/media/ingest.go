@@ -138,7 +138,7 @@ func (s *Scanner) importArtwork(item *store.Item, videoPath string, logf func(st
 	snapshot := s.snapshotDir(dir)
 	art := findArtworkIn(dir, filepath.Base(videoPath), snapshot.images)
 
-	if s.images.ItemLocked(item.ID) {
+	if s.entityLocked(item.ID) {
 		// 用户锁定了这个条目的图片：扫描不再用目录图覆盖。
 		logf("图片已锁定，跳过目录图 %s", videoPath)
 	} else if !s.libraryPreferLocal(item.LibraryID) {
@@ -195,7 +195,7 @@ func (s *Scanner) importArtwork(item *store.Item, videoPath string, logf func(st
 	for name, path := range snapshot.actors {
 		personID := store.StableID("person:" + name)
 		// 人物头像可能有自己的锁（人物不受条目锁影响）。
-		if s.images.ItemLocked(personID) {
+		if s.entityLocked(personID) {
 			continue
 		}
 		tag, err := s.saveArtwork(personID, "Primary", 0, path)

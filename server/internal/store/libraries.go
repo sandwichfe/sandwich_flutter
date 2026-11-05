@@ -177,6 +177,17 @@ func (s *Store) DeleteLibrary(ctx context.Context, id string) ([]string, error) 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM libraries WHERE id = ?`, id); err != nil {
 		return nil, fmt.Errorf("删除媒体库失败: %w", err)
 	}
+	// 图片锁跟着实体走：库本身与库内条目的锁一起清，避免留下永远查不到的孤儿行。
+	if _, err := tx.ExecContext(ctx, `DELETE FROM image_locks WHERE entity_id = ?`, id); err != nil {
+		return nil, fmt.Errorf("清理媒体库图片锁失败: %w", err)
+	}
+	if len(itemIDs) > 0 {
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM image_locks WHERE entity_id IN (`+placeholders(len(itemIDs))+`)`,
+			toAny(itemIDs)...); err != nil {
+			return nil, fmt.Errorf("清理条目图片锁失败: %w", err)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -234,6 +245,7 @@ func (s *Store) DeleteItems(ctx context.Context, ids []string) error {
 	}{
 		{"DELETE FROM user_data WHERE item_id IN " + list, "清理条目用户数据失败"},
 		{"DELETE FROM play_sessions WHERE item_id IN " + list, "清理条目播放会话失败"},
+		{"DELETE FROM image_locks WHERE entity_id IN " + list, "清理条目图片锁失败"},
 		{"DELETE FROM items WHERE id IN " + list, "删除条目失败"},
 	}
 	for _, statement := range statements {
