@@ -23,15 +23,15 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
     final loadStatus = Transform.translate(
       offset: const Offset(0, 2),
       child: Text(
-        _loading && _items.isEmpty
+        _c.loading && _c.items.isEmpty
             ? '加载中'
-            : '已加载 ${_items.length} 条 /  $_total 条',
+            : '已加载 ${_c.items.length} 条 /  $_c.total 条',
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
       ),
     );
-    if (stackedMobileHeader && _view != 'home') {
+    if (stackedMobileHeader && _c.view != 'home') {
       return Material(
         color: colors.surfaceContainerLowest,
         child: Container(
@@ -79,7 +79,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
               _buildCompactLibraryMenu(),
               const SizedBox(width: 8),
             ],
-            if (_view == 'home') ...[
+            if (_c.view == 'home') ...[
               Expanded(child: pageTitle),
               const SizedBox(width: 8),
               _buildGlobalSearchButton(context, compact: compact),
@@ -171,7 +171,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
               child: Text('播放记录'),
             ),
             const PopupMenuDivider(),
-            ..._libraries.map(
+            ..._c.libraries.map(
               (library) =>
                   PopupMenuItem(value: library.id, child: Text(library.name)),
             ),
@@ -197,7 +197,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
       MediaQuery.sizeOf(context).width,
     );
     // 人物接口没有视频筛选和布局参数，避免展示不会影响请求的控件。
-    final peopleList = _view == 'people' || _view == 'favorite-people';
+    final peopleList = _c.view == 'people' || _c.view == 'favorite-people';
     return Material(
       color: colors.surfaceContainerLowest,
       child: Container(
@@ -247,14 +247,14 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
 
   int get _activeFilterCount =>
       [
-        _itemType,
-        _statusFilter,
-        _markFilter,
-        _videoType,
+        _c.itemType,
+        _c.statusFilter,
+        _c.markFilter,
+        _c.videoType,
         _yearController.text.trim(),
-        _genreFilter,
-        _personFilter,
-        _minRating?.toString() ?? '',
+        _c.genreFilter,
+        _c.personFilter,
+        _c.minRating?.toString() ?? '',
       ].where((value) => value.isNotEmpty).length;
 
   Widget _buildFilterMenu(
@@ -285,9 +285,9 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
     // 菜单内容左右各保留 14 像素内边距，选项宽度直接使用剩余空间计算。
     final contentWidth = panelWidth - 28;
     final showAdvancedFilters =
-        _view != 'favorite-movies' &&
-            _view != 'favorite-people' &&
-            _view != 'recently-played';
+        _c.view != 'favorite-movies' &&
+            _c.view != 'favorite-people' &&
+            _c.view != 'recently-played';
 
     // 多组低频筛选集中放入弹出面板，选中后仍按原逻辑立即刷新列表。
     return MenuAnchor(
@@ -312,29 +312,29 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                   _buildQueryGroup(
                     title: '类型',
                     options: itemTypes,
-                    selected: _itemType,
+                    selected: _c.itemType,
                     availableWidth: contentWidth,
                     onSelected: (value) {
-                      if (value == _itemType) return;
-                      setState(() => _itemType = value);
+                      if (value == _c.itemType) return;
+                      setState(() => _c.itemType = value);
                       _applyQuery();
                     },
                   ),
                   if (showAdvancedFilters) ...[
                     _buildQueryGroup(
-                      title: _genreOptions.isEmpty
+                      title: _c.genreOptions.isEmpty
                           ? '流派（加载中…）'
                           : '流派',
                       // 流派可能很多，只展示条目最多的前 12 个，避免面板过长。
                       options: {
                         '': '全部流派',
-                        for (final genre in _genreOptions.take(12))
+                        for (final genre in _c.genreOptions.take(12))
                           genre.id:
                               genre.childCount == null
                                   ? genre.name
                                   : '${genre.name} ${genre.childCount}',
                       },
-                      selected: _genreFilter,
+                      selected: _c.genreFilter,
                       availableWidth: contentWidth,
                       onSelected: _selectGenre,
                     ),
@@ -346,7 +346,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                         '8': '8 分以上',
                         '9': '9 分以上',
                       },
-                      selected: _minRating?.toInt().toString() ?? '',
+                      selected: _c.minRating?.toInt().toString() ?? '',
                       availableWidth: contentWidth,
                       onSelected: (value) =>
                           _selectMinRating(double.tryParse(value)),
@@ -356,11 +356,11 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                     _buildQueryGroup(
                       title: '播放状态',
                       options: statuses,
-                      selected: _statusFilter,
+                      selected: _c.statusFilter,
                       availableWidth: contentWidth,
                       onSelected: (value) {
-                        if (value == _statusFilter) return;
-                        setState(() => _statusFilter = value);
+                        if (value == _c.statusFilter) return;
+                        setState(() => _c.statusFilter = value);
                         _applyQuery();
                       },
                     ),
@@ -376,7 +376,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                       width: 160,
                       child: TextField(
                         controller: _yearController,
-                        enabled: !_loading,
+                        enabled: !_c.loading,
                         keyboardType: TextInputType.number,
                         onChanged: (_) => setState(() {}),
                         onSubmitted: (_) => _applyQuery(),
@@ -385,7 +385,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                           hintText: '年份',
                           suffixIcon: IconButton(
                             tooltip: '应用年份',
-                            onPressed: _loading ? null : _applyQuery,
+                            onPressed: _c.loading ? null : _applyQuery,
                             icon: const Icon(Icons.check, size: 18),
                           ),
                           border: const OutlineInputBorder(),
@@ -407,7 +407,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                       width: contentWidth,
                       child: TextField(
                         controller: _personController,
-                        enabled: !_loading,
+                        enabled: !_c.loading,
                         textInputAction: TextInputAction.search,
                         onSubmitted: (_) => _searchPersons(),
                         decoration: InputDecoration(
@@ -415,7 +415,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                           hintText: '输入演员名后回车',
                           suffixIcon: IconButton(
                             tooltip: '搜索演员',
-                            onPressed: _loading ? null : _searchPersons,
+                            onPressed: _c.loading ? null : _searchPersons,
                             icon: const Icon(Icons.search, size: 18),
                           ),
                           border: const OutlineInputBorder(),
@@ -423,27 +423,27 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                       ),
                     ),
                     // 已选演员单独展示，便于一眼看出当前筛选并随时取消。
-                    if (_personFilter.isNotEmpty) ...[
+                    if (_c.personFilter.isNotEmpty) ...[
                       const SizedBox(height: 8),
                       Align(
                         alignment: Alignment.centerLeft,
                         child: InputChip(
-                          label: Text('演员：$_personFilterName'),
-                          onDeleted: _loading ? null : _clearPersonFilter,
+                          label: Text('演员：$_c.personFilterName'),
+                          onDeleted: _c.loading ? null : _clearPersonFilter,
                         ),
                       ),
                     ],
-                    if (_personOptions.isNotEmpty) ...[
+                    if (_c.personOptions.isNotEmpty) ...[
                       const SizedBox(height: 8),
                       Wrap(
                         spacing: 8,
                         runSpacing: 8,
                         children: [
-                          for (final person in _personOptions)
+                          for (final person in _c.personOptions)
                             ChoiceChip(
                               label: Text(person.name),
-                              selected: person.id == _personFilter,
-                              onSelected: _loading
+                              selected: person.id == _c.personFilter,
+                              onSelected: _c.loading
                                   ? null
                                   : (_) => _selectPersonFilter(
                                       person.id,
@@ -467,7 +467,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
         active: _activeFilterCount > 0,
         compact: compact,
         onPressed:
-        _loading
+        _c.loading
             ? null
             : () {
               if (controller.isOpen) {
@@ -475,7 +475,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                 return;
               }
               // 流派候选值只在打开面板时按需拉取，失败也不影响其余筛选。
-              unawaited(_ensureGenreOptions());
+              unawaited(_c.ensureGenreOptions());
               controller.open();
             },
       ),
@@ -520,8 +520,8 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                 const SizedBox(height: 8),
                 // 当前字段再次点击时切换方向，其他字段沿用当前排序方向。
                 ...sortOptions.entries.map((entry) {
-                  final active = entry.key == _sortBy;
-                  final ascending = _sortOrder == 'Ascending';
+                  final active = entry.key == _c.sortBy;
+                  final ascending = _c.sortOrder == 'Ascending';
                   final currentOrder = ascending ? '升序' : '降序';
                   final nextOrder = ascending ? '降序' : '升序';
                   return Padding(
@@ -543,17 +543,17 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                         clipBehavior: Clip.antiAlias,
                         child: InkWell(
                           onTap:
-                          _loading
+                          _c.loading
                               ? null
                               : () {
                             setState(() {
                               if (active) {
-                                _sortOrder =
+                                _c.sortOrder =
                                 ascending
                                     ? 'Descending'
                                     : 'Ascending';
                               } else {
-                                _sortBy = entry.key;
+                                _c.sortBy = entry.key;
                               }
                             });
                             _applyQuery();
@@ -617,7 +617,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
         icon: Icons.swap_vert,
         compact: compact,
         onPressed:
-        _loading
+        _c.loading
             ? null
             : () =>
         controller.isOpen
@@ -670,9 +670,9 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                   label: Text('海报'),
                 ),
               ],
-      selected: {_imageStyle},
+      selected: {_c.imageStyle},
       onSelectionChanged:
-      _loading ? null : (selection) => _updateImageStyle(selection.first),
+      _c.loading ? null : (selection) => _updateImageStyle(selection.first),
       style: ButtonStyle(
         visualDensity: VisualDensity.compact,
         minimumSize: const WidgetStatePropertyAll(Size(0, 38)),
@@ -705,12 +705,12 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
   }
 
   Future<void> _updateImageStyle(String value) async {
-    if (value == _imageStyle) return;
-    setState(() => _imageStyle = value);
+    if (value == _c.imageStyle) return;
+    setState(() => _c.imageStyle = value);
     await EmbyPcService.instance.saveListPreferences(
-      sortBy: _sortBy,
-      sortOrder: _sortOrder,
-      imageStyle: _imageStyle,
+      sortBy: _c.sortBy,
+      sortOrder: _c.sortOrder,
+      imageStyle: _c.imageStyle,
     );
   }
 
@@ -762,7 +762,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
         return SizedBox(
           width: itemWidth,
           child: OutlinedButton(
-            onPressed: _loading ? null : () => onSelected(entry.key),
+            onPressed: _c.loading ? null : () => onSelected(entry.key),
             style: OutlinedButton.styleFrom(
               minimumSize: const Size(0, 36),
               padding: const EdgeInsets.symmetric(

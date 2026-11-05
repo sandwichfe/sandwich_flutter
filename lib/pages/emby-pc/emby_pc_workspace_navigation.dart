@@ -3,13 +3,13 @@ part of 'emby_pc_page.dart';
 // 工作台导航区域集中处理标题、账号菜单和桌面侧栏。
 extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
   String get _pageTitle {
-    if (_view == 'home') return '首页';
-    if (_view == 'recently-played') return '继续观看';
-    if (_view == 'people') return '演员列表';
-    if (_view == 'favorite-movies') return '收藏影片';
-    if (_view == 'favorite-people') return '收藏演员';
-    for (final library in _libraries) {
-      if (library.id == _activeId) return library.name;
+    if (_c.view == 'home') return '首页';
+    if (_c.view == 'recently-played') return '继续观看';
+    if (_c.view == 'people') return '演员列表';
+    if (_c.view == 'favorite-movies') return '收藏影片';
+    if (_c.view == 'favorite-people') return '收藏演员';
+    for (final library in _c.libraries) {
+      if (library.id == _c.activeId) return library.name;
     }
     return '媒体库';
   }
@@ -34,12 +34,12 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
               _searchController.text.isEmpty
                   ? IconButton(
                     tooltip: '搜索',
-                    onPressed: _loading ? null : _applyQuery,
+                    onPressed: _c.loading ? null : _applyQuery,
                     icon: const Icon(Icons.arrow_forward, size: 18),
                   )
                   : IconButton(
                     tooltip: '清除搜索',
-                    onPressed: _loading ? null : _clearSearch,
+                    onPressed: _c.loading ? null : _clearSearch,
                     icon: const Icon(Icons.clear, size: 18),
                   ),
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
@@ -302,7 +302,7 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
                     title: '首页',
                     count: null,
                     showCount: false,
-                    active: _view == 'home',
+                    active: _c.view == 'home',
                     collapsed: _sidebarCollapsed,
                     onPressed: _selectHome,
                   ),
@@ -311,18 +311,18 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
                     title: '继续观看',
                     count: null,
                     showCount: false,
-                    active: _view == 'recently-played',
+                    active: _c.view == 'recently-played',
                     collapsed: _sidebarCollapsed,
                     onPressed: _selectRecentlyPlayed,
                   ),
                   Divider(height: _sidebarCollapsed ? 18 : 28),
                   if (!_sidebarCollapsed) const _SidebarSectionTitle('媒体库'),
-                  ..._libraries.map(
+                  ..._c.libraries.map(
                     (library) => _SidebarButton(
                       icon: Icons.video_library_outlined,
                       title: library.name,
-                      count: _libraryCounts[library.id],
-                      active: _view == 'library' && library.id == _activeId,
+                      count: _c.libraryCounts[library.id],
+                      active: _c.view == 'library' && library.id == _c.activeId,
                       collapsed: _sidebarCollapsed,
                       onPressed: () => _selectLibrary(library.id),
                     ),
@@ -334,7 +334,7 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
                     title: '演员列表',
                     count: null,
                     showCount: false,
-                    active: _view == 'people',
+                    active: _c.view == 'people',
                     collapsed: _sidebarCollapsed,
                     onPressed: _selectPeople,
                   ),
@@ -343,18 +343,18 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
                   _SidebarButton(
                     icon: Icons.movie_outlined,
                     title: '影片',
-                    count: _favoriteMovieCount,
-                    active: _view == 'favorite-movies',
-                    loading: _favoriteMovieLoading,
+                    count: _c.favoriteMovieCount,
+                    active: _c.view == 'favorite-movies',
+                    loading: _c.favoriteMovieLoading,
                     collapsed: _sidebarCollapsed,
                     onPressed: () => _selectFavorites('favorite-movies'),
                   ),
                   _SidebarButton(
                     icon: Icons.person_outline,
                     title: '演员',
-                    count: _favoritePeopleCount,
-                    active: _view == 'favorite-people',
-                    loading: _favoritePeopleLoading,
+                    count: _c.favoritePeopleCount,
+                    active: _c.view == 'favorite-people',
+                    loading: _c.favoritePeopleLoading,
                     collapsed: _sidebarCollapsed,
                     onPressed: () => _selectFavorites('favorite-people'),
                   ),
@@ -420,7 +420,7 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
                     title: '首页',
                     count: null,
                     showCount: false,
-                    active: _view == 'home',
+                    active: _c.view == 'home',
                     onPressed:
                         () => _selectFromMobileNavigation(_selectHome),
                   ),
@@ -429,7 +429,7 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
                     title: '播放记录',
                     count: null,
                     showCount: false,
-                    active: _view == 'recently-played',
+                    active: _c.view == 'recently-played',
                     onPressed:
                         () => _selectFromMobileNavigation(
                           _selectRecentlyPlayed,
@@ -437,13 +437,13 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
                   ),
                   const Divider(height: 28),
                   const _SidebarSectionTitle('媒体库'),
-                  ..._libraries.map(
+                  ..._c.libraries.map(
                     (library) => _SidebarButton(
                       icon: Icons.video_library_outlined,
                       title: library.name,
-                      count: _libraryCounts[library.id],
+                      count: _c.libraryCounts[library.id],
                       active:
-                          _view == 'library' && library.id == _activeId,
+                          _c.view == 'library' && library.id == _c.activeId,
                       onPressed:
                           () => _selectFromMobileNavigation(
                             () => _selectLibrary(library.id),
@@ -457,7 +457,7 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
                     title: '演员列表',
                     count: null,
                     showCount: false,
-                    active: _view == 'people',
+                    active: _c.view == 'people',
                     onPressed:
                         () => _selectFromMobileNavigation(_selectPeople),
                   ),
@@ -466,9 +466,9 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
                   _SidebarButton(
                     icon: Icons.movie_outlined,
                     title: '影片',
-                    count: _favoriteMovieCount,
-                    active: _view == 'favorite-movies',
-                    loading: _favoriteMovieLoading,
+                    count: _c.favoriteMovieCount,
+                    active: _c.view == 'favorite-movies',
+                    loading: _c.favoriteMovieLoading,
                     onPressed:
                         () => _selectFromMobileNavigation(
                           () => _selectFavorites('favorite-movies'),
@@ -477,9 +477,9 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
                   _SidebarButton(
                     icon: Icons.person_outline,
                     title: '演员',
-                    count: _favoritePeopleCount,
-                    active: _view == 'favorite-people',
-                    loading: _favoritePeopleLoading,
+                    count: _c.favoritePeopleCount,
+                    active: _c.view == 'favorite-people',
+                    loading: _c.favoritePeopleLoading,
                     onPressed:
                         () => _selectFromMobileNavigation(
                           () => _selectFavorites('favorite-people'),

@@ -37,7 +37,7 @@
 | S2 | 性能热点 | 已完成 |
 | S3 | 查询能力与功能接口 | 已完成 |
 | S4 | 运维与测试 | 已完成 |
-| S5 | 前端 | 进行中（仅剩 5.5） |
+| S5 | 前端 | 已完成（5.5 的 TTL 缓存层暂不做） |
 
 ---
 
@@ -327,7 +327,7 @@ SELECT je.value, COUNT(*) FROM items i, json_each(i.genres) je GROUP BY je.value
 | 5.2 | 服务器地址设置项，去掉硬编码 `localhost:8096` | `settings_page.dart`、`service`、`login` | 已完成 |
 | 5.3 | 扫描进度改读 `/Library/ScanStatus` | `library_admin.dart` | 已完成 |
 | 5.4 | 全局搜索（限 60）、人物作品（限 100）补分页 | `service`、`global_search`、`person_page` | 已完成 |
-| 5.5 | 工作台拆分 + Repository 层 TTL 缓存，消掉启动 2N+3 请求与返回全量重拉 | `emby_pc_page.dart` + 5 个 part | 未开始 |
+| 5.5 | 工作台拆分（状态与数据加载抽到 controller）；Repository 层 TTL 缓存暂缓 | `emby_pc_page.dart`、`emby_pc_workspace_controller.dart` | 拆分已完成 / 缓存未做 |
 | 5.6 | 筛选栏接 S3 的流派/年份/评分/演员 | `workspace_toolbar.dart`、`service`、`page` | 已完成 |
 | 5.7 | 播放器：倍速、音轨/字幕轨切换、设置持久化 | `emby_pc_player_page.dart` | 已完成 |
 | 5.8 | 图片 URL 带 `v={tag}`，配合 2.3 的缓存失效 | `service`、各图片调用点 | 已完成 |
@@ -346,6 +346,7 @@ SELECT je.value, COUNT(*) FROM items i, json_each(i.genres) je GROUP BY je.value
 | 图片 tag | 新增 `imageUrlForItem` / `imageUrlForPerson`，从 `ImageTags`/`BackdropImageTags`/`PrimaryImageTag` 取 `v`；列表、详情、搜索、人物卡片全部改用它 |
 | 筛选栏（5.6） | 筛选面板新增「流派」（`/Genres` 按当前库懒加载 + 缓存，取条目数前 12）、「最低评分」（7/8/9 分以上）、「演员」（关键词查 `/Persons` 后选人，走 `PersonIds`）；`getItems` 增加 `genreIds`/`personIds`/`minCommunityRating`；切库/切视图时 `_resetQueryControllers` 一并清空 |
 | 播放器（5.7） | 控制栏新增倍速菜单（0.5~2.0）；音轨菜单（>1 条才出现）、字幕菜单（含「关闭字幕」）订阅 `player.stream.tracks/track` 自更新；音量与倍速写入 `SharedPreferences`（音量退出时落盘、倍速改完即存），`PlaybackRate` 按实际倍速上报 |
+| 工作台拆分（5.5） | 新增 `EmbyPcWorkspaceController`（`ChangeNotifier`）：媒体库、列表、首页摘要、侧栏计数、筛选条件、分页状态与全部加载方法（`initialize`/`loadHome`/`loadItems`/`loadCounts`/`ensureGenreOptions`/`searchPersons`/`applyQuery`）集中在此；页面只留文本与滚动控制器、Busy 集合、防抖定时器，以及依赖 `context` 的弹窗/提示/导航。`emby_pc_page.dart` 从 1037 行降到 716 行 |
 
 验证：`dart analyze`（IDE 诊断）无 error、无新增 warning；后端 `go test ./...` 全部通过。
 

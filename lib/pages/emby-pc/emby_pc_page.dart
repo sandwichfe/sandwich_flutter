@@ -15,6 +15,7 @@ import 'emby_pc_player_page.dart';
 import 'emby_pc_service.dart';
 import 'emby_pc_toast.dart';
 import 'emby_pc_widgets.dart';
+import 'emby_pc_workspace_controller.dart';
 
 part 'emby_pc_workspace_navigation.dart';
 part 'emby_pc_workspace_content.dart';
@@ -109,6 +110,8 @@ class EmbyPcWorkspace extends StatefulWidget {
 }
 
 class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
+  // 数据与查询状态由 controller 承载，页面只保留纯 UI 状态。
+  final _c = EmbyPcWorkspaceController();
   // 页面级 Scaffold key 仅用于控制移动端导航抽屉的打开与关闭。
   final _workspaceScaffoldKey = GlobalKey<ScaffoldState>();
   final _searchController = TextEditingController();
@@ -116,43 +119,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   // 演员筛选的搜索框独立于顶部标题搜索，二者互不影响。
   final _personController = TextEditingController();
   final _scrollController = ScrollController();
-  List<EmbyPcItem> _libraries = const [];
-  List<EmbyPcItem> _items = const [];
-  List<EmbyPcItem> _recentlyPlayed = const [];
-  Map<String, List<EmbyPcItem>> _homeLibraryItems = const {};
-  final Map<String, int?> _libraryCounts = {};
-  int? _favoriteMovieCount;
-  int? _favoritePeopleCount;
-  String _activeId = '';
-  String _view = 'home';
-  String _itemType = '';
-  String _statusFilter = '';
-  String _markFilter = '';
-  String _videoType = '';
-  // S5.6 筛选：流派、演员（PersonIds）与最低评分，候选值按媒体库懒加载后缓存。
-  String _genreFilter = '';
-  String _personFilter = '';
-  String _personFilterName = '';
-  double? _minRating;
-  List<EmbyPcItem> _genreOptions = const [];
-  List<EmbyPcItem> _personOptions = const [];
-  String _genreOptionsLibrary = '';
-  bool _facetLoading = false;
-  String _sortBy = 'PremiereDate';
-  String _sortOrder = 'Descending';
-  String _imageStyle = 'backdrop';
-  int _total = 0;
-  bool _loading = true;
-  bool _loadingMore = false;
-  bool _homeLoading = false;
-  bool _homeLoaded = false;
-  bool _countsLoading = true;
-  bool _favoritePeopleLoading = false;
-  bool _favoriteMovieLoading = false;
   bool _sidebarCollapsed = false;
-  String _error = '';
-  String _homeError = '';
-  int _queryVersion = 0;
   final Set<String> _favoriteBusyIds = {};
   final Set<String> _libraryActionBusyIds = {};
   final Set<String> _mediaActionBusyIds = {};
@@ -165,9 +132,15 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
+    // 数据变化统一由 controller 通知，页面只在这里同步一次重建。
+    _c.addListener(_onWorkspaceChanged);
     // 401 集中拦截：任何请求发现令牌失效都由服务层通知一次，这里统一回登录页。
     EmbyPcService.instance.unauthorizedRevision.addListener(_handleSessionExpired);
     _initialize();
+  }
+
+  void _onWorkspaceChanged() {
+    if (mounted) setState(() {});
   }
 
   void _handleSessionExpired() {
@@ -194,27 +167,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
 
   Future<void> _initialize() async {
     try {
-      final results = await Future.wait<dynamic>([
-        EmbyPcService.instance.getLibraries(),
-        EmbyPcService.instance.readPreferences(),
-      ]);
-      final libraries = results[0] as List<EmbyPcItem>;
-      final preferences = results[1] as EmbyPcPreferences;
-      final ordered = _applyLibraryOrder(libraries, preferences.libraryOrder);
-      if (!mounted) return;
-      setState(() {
-        _libraries = ordered;
-        _sortBy = preferences.sortBy;
-        _sortOrder = preferences.sortOrder;
-        _imageStyle = preferences.imageStyle == 'poster'
-            ? 'poster'
-            : 'backdrop';
-        // 工作台默认进入首页，媒体库详情仅在用户选择后再按需加载。
-        _activeId = '';
-        _loading = false;
-      });
-      _loadCounts(ordered);
-      await _loadHome();
+      await _c.initialize();
     } catch (error) {
       if (!mounted) return;
       // 只有令牌被服务端判定失效才回登录页：服务层已清空会话。
@@ -224,280 +177,48 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         widget.onLogout();
         return;
       }
-      setState(() {
-        _loading = false;
-        _error = '加载媒体库失败：$error';
-      });
+      _c.markInitializeFailed('加载媒体库失败：$error');
     }
   }
-
-  Future<void> _loadHome({bool force = false}) async {
-    if (_homeLoading || (_homeLoaded && !force)) return;
-    final libraries = List<EmbyPcItem>.of(_libraries);
-    setState(() {
-      _homeLoading = true;
-      _homeError = '';
-    });
-    try {
-      // 首页数据彼此独立，首次进入时并行获取继续观看和各媒体库前十条。
-      final results = await Future.wait<EmbyPcPage>([
-        EmbyPcService.instance.getResumeItems(),
-        ...libraries.map(
-          (library) =>
-              EmbyPcService.instance.getItems(libraryId: library.id, limit: 10),
-        ),
-      ]);
-      if (!mounted) return;
-      setState(() {
-        _recentlyPlayed = results.first.items;
-        _homeLibraryItems = {
-          for (var index = 0; index < libraries.length; index++)
-            libraries[index].id: results[index + 1].items,
-        };
-        _homeLoading = false;
-        _homeLoaded = true;
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _homeLoading = false;
-        _homeError = error.toString();
-      });
-    }
-  }
-
-  List<EmbyPcItem> _applyLibraryOrder(
-    List<EmbyPcItem> libraries,
-    List<String> savedOrder,
-  ) {
-    if (savedOrder.isEmpty) return libraries;
-    final byId = {for (final item in libraries) item.id: item};
-    final ordered = <EmbyPcItem>[];
-    for (final id in savedOrder) {
-      final item = byId.remove(id);
-      if (item != null) ordered.add(item);
-    }
-    ordered.addAll(byId.values);
-    return ordered;
-  }
-
-  void _loadCounts(List<EmbyPcItem> libraries) {
-    setState(() => _countsLoading = true);
-    for (final library in libraries) {
-      _loadLibraryCount(library.id);
-    }
-    setState(() {
-      _favoriteMovieLoading = true;
-      _favoritePeopleLoading = true;
-    });
-    _loadFavoriteCounts();
-  }
-
-  Future<void> _loadLibraryCount(String libraryId) async {
-    try {
-      final page = await EmbyPcService.instance.getItems(
-        libraryId: libraryId,
-        limit: 1,
-      );
-      if (mounted) setState(() => _libraryCounts[libraryId] = page.total);
-    } catch (_) {
-      if (mounted) setState(() => _libraryCounts[libraryId] = null);
-    }
-  }
-
-  Future<void> _loadFavoriteCounts() async {
-    try {
-      final results = await Future.wait<dynamic>([
-        EmbyPcService.instance.getItems(favoriteOnly: true, limit: 1),
-        EmbyPcService.instance.getItems(
-          favoriteOnly: true,
-          itemType: 'Person',
-          limit: 1,
-        ),
-      ]);
-      if (!mounted) return;
-      setState(() {
-        _favoriteMovieCount = (results[0] as EmbyPcPage).total;
-        _favoritePeopleCount = (results[1] as EmbyPcPage).total;
-        _favoriteMovieLoading = false;
-        _favoritePeopleLoading = false;
-        _countsLoading = false;
-      });
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _favoriteMovieCount = null;
-          _favoritePeopleCount = null;
-          _favoriteMovieLoading = false;
-          _favoritePeopleLoading = false;
-          _countsLoading = false;
-        });
-      }
-    }
-  }
-
-  // 收藏视图（影片/演员）沿用原有的 favoriteOnly 查询，不接新增筛选条件。
-  bool get _favoriteView =>
-      _view == 'favorite-movies' || _view == 'favorite-people';
 
   // 以下三个筛选写入集中在这里，工具栏只负责展示选项。
   void _selectGenre(String genreId) {
-    if (genreId == _genreFilter) return;
-    setState(() => _genreFilter = genreId);
+    if (genreId == _c.genreFilter) return;
+    setState(() => _c.genreFilter = genreId);
     unawaited(_applyQuery());
   }
 
   void _selectMinRating(double? rating) {
-    if (rating == _minRating) return;
-    setState(() => _minRating = rating);
+    if (rating == _c.minRating) return;
+    setState(() => _c.minRating = rating);
     unawaited(_applyQuery());
   }
 
   void _selectPersonFilter(String personId, String personName) {
     setState(() {
-      _personFilter = personId;
-      _personFilterName = personName;
+      _c.personFilter = personId;
+      _c.personFilterName = personName;
     });
     unawaited(_applyQuery());
   }
 
   void _clearPersonFilter() {
-    if (_personFilter.isEmpty) return;
+    if (_c.personFilter.isEmpty) return;
     setState(() {
-      _personFilter = '';
-      _personFilterName = '';
+      _c.personFilter = '';
+      _c.personFilterName = '';
     });
     unawaited(_applyQuery());
   }
 
-  // 流派候选值按当前媒体库加载一次并缓存；切库后重新拉取。
-  // 失败时只清空候选值，不影响其它筛选项继续使用。
-  Future<void> _ensureGenreOptions() async {
-    final parentId = _view == 'library' ? _activeId : '';
-    if (_facetLoading || _genreOptionsLibrary == parentId) return;
-    setState(() => _facetLoading = true);
-    try {
-      final genres = await EmbyPcService.instance.getGenres(
-        parentId: parentId,
-      );
-      if (!mounted) return;
-      setState(() {
-        _genreOptions = genres;
-        _genreOptionsLibrary = parentId;
-      });
-    } catch (_) {
-      if (mounted) setState(() => _genreOptions = const []);
-    } finally {
-      if (mounted) setState(() => _facetLoading = false);
-    }
-  }
-
   // 演员筛选按关键词查人物，结果作为 PersonIds 候选。
-  Future<void> _searchPersons() async {
-    final keyword = _personController.text.trim();
-    if (keyword.isEmpty) {
-      setState(() => _personOptions = const []);
-      return;
-    }
-    setState(() => _facetLoading = true);
-    try {
-      final page = await EmbyPcService.instance.getPersons(
-        searchTerm: keyword,
-        limit: 12,
-      );
-      if (!mounted) return;
-      setState(() => _personOptions = page.items);
-    } catch (_) {
-      if (mounted) setState(() => _personOptions = const []);
-    } finally {
-      if (mounted) setState(() => _facetLoading = false);
-    }
-  }
-
-  Future<void> _loadItems({required bool reset}) async {
-    if ((!reset && _loadingMore) ||
-        (!reset && _items.length >= _total && _total > 0))
-      return;
-    final requestVersion = reset ? ++_queryVersion : _queryVersion;
-    if (reset) {
-      setState(() {
-        _loading = true;
-        _loadingMore = false;
-        _error = '';
-        _items = const [];
-        _total = 0;
-      });
-    } else {
-      setState(() => _loadingMore = true);
-    }
-    try {
-      final page = _view == 'people'
-          // 演员列表走 Persons 专用接口，返回整个服务器可见范围内的人物。
-          ? await EmbyPcService.instance.getPersons(
-              startIndex: reset ? 0 : _items.length,
-              searchTerm: _searchController.text,
-              sortBy: _sortBy,
-              sortOrder: _sortOrder,
-            )
-          : _view == 'recently-played'
-          ? await EmbyPcService.instance.getResumeItems(
-              startIndex: reset ? 0 : _items.length,
-              limit: 100,
-              itemType: _itemType,
-              searchTerm: _searchController.text,
-              productionYear: int.tryParse(_yearController.text.trim()),
-              sortBy: _sortBy,
-              sortOrder: _sortOrder,
-            )
-          : await EmbyPcService.instance.getItems(
-              libraryId: _view == 'library' ? _activeId : '',
-              favoriteOnly:
-                  _view == 'favorite-movies' || _view == 'favorite-people',
-              startIndex: reset ? 0 : _items.length,
-              itemType: _view == 'favorite-people' ? 'Person' : _itemType,
-              filters: _view == 'favorite-movies' || _view == 'favorite-people'
-                  ? ''
-                  : <String>[
-                      // 非继续观看列表保留原有的状态和标记筛选。
-                      _statusFilter,
-                      _markFilter,
-                    ].where((value) => value.isNotEmpty).join(','),
-              videoType: _videoType,
-              searchTerm: _searchController.text,
-              productionYear: int.tryParse(_yearController.text.trim()),
-              // 收藏列表不接流派/演员/评分筛选，保持原有查询语义。
-              genreIds: _favoriteView ? const [] : <String>[
-                if (_genreFilter.isNotEmpty) _genreFilter,
-              ],
-              personIds: _favoriteView ? const [] : <String>[
-                if (_personFilter.isNotEmpty) _personFilter,
-              ],
-              minCommunityRating: _favoriteView ? null : _minRating,
-              sortBy: _sortBy,
-              sortOrder: _sortOrder,
-            );
-      if (!mounted || requestVersion != _queryVersion) return;
-      setState(() {
-        _items = reset ? page.items : [..._items, ...page.items];
-        _total = page.total;
-        _loading = false;
-        _loadingMore = false;
-      });
-    } catch (error) {
-      if (mounted && requestVersion == _queryVersion) {
-        setState(() {
-          _loading = false;
-          _loadingMore = false;
-          _error = error.toString();
-        });
-      }
-    }
-  }
+  Future<void> _searchPersons() =>
+      _c.searchPersons(_personController.text.trim());
 
   void _onScroll() {
-    if (_view == 'home') return;
+    if (_c.view == 'home') return;
     // 正在加载时不处理滚动事件，避免创建无用的定时器
-    if (_loading || _loadingMore) return;
+    if (_c.loading || _c.loadingMore) return;
 
     if (_scrollController.position.extentAfter < 700) {
       final now = DateTime.now();
@@ -512,9 +233,10 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
           Duration(milliseconds: remainingTime + 100),
           () {
             // 定时器触发时再次检查状态，避免在加载过程中重复触发
-            if (!_loading && !_loadingMore) {
+            if (!_c.loading && !_c.loadingMore) {
               _lastLoadMoreTime = DateTime.now();
-              _loadItems(reset: false);
+              _syncQueryInput();
+              _c.loadItems(reset: false);
             }
           },
         );
@@ -522,100 +244,95 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         // 节流间隔已过，立即执行并记录时间
         _loadMoreDebounceTimer?.cancel();
         _lastLoadMoreTime = now;
-        _loadItems(reset: false);
+        _syncQueryInput();
+        _c.loadItems(reset: false);
       }
     }
   }
 
+  // 搜索词与年份由输入框持有，查询前统一同步到 controller。
+  void _syncQueryInput() {
+    _c.searchTerm = _searchController.text;
+    _c.productionYear = int.tryParse(_yearController.text.trim());
+  }
+
   Future<void> _selectHome() async {
-    if (_view == 'home') return;
+    if (_c.view == 'home') return;
     // 切换首页时使正在进行的媒体库分页请求失效，避免旧结果覆盖当前状态。
-    _queryVersion++;
+    _c.queryVersion++;
     setState(() {
-      _view = 'home';
-      _activeId = '';
+      _c.view = 'home';
+      _c.activeId = '';
       _resetQueryControllers();
     });
-    await _loadHome();
+    await _c.loadHome();
   }
 
   Future<void> _selectLibrary(String id) async {
-    if (id.isEmpty || (_view == 'library' && id == _activeId)) return;
+    if (id.isEmpty || (_c.view == 'library' && id == _c.activeId)) return;
     setState(() {
-      _view = 'library';
-      _activeId = id;
+      _c.view = 'library';
+      _c.activeId = id;
       _resetQueryControllers();
     });
-    await _loadItems(reset: true);
+    await _c.loadItems(reset: true);
   }
 
   Future<void> _selectFavorites(String view) async {
-    if (_view == view) return;
+    if (_c.view == view) return;
     setState(() {
-      _view = view;
-      _activeId = '';
+      _c.view = view;
+      _c.activeId = '';
       _resetQueryControllers();
     });
-    await _loadItems(reset: true);
+    await _c.loadItems(reset: true);
   }
 
   Future<void> _selectPeople() async {
-    if (_view == 'people') return;
+    if (_c.view == 'people') return;
     setState(() {
-      _view = 'people';
-      _activeId = '';
+      _c.view = 'people';
+      _c.activeId = '';
       _resetQueryControllers();
       // 人物按名称展示，避免沿用影片默认的上映日期排序。
-      _sortBy = 'SortName';
-      _sortOrder = 'Ascending';
+      _c.sortBy = 'SortName';
+      _c.sortOrder = 'Ascending';
     });
-    await _loadItems(reset: true);
+    await _c.loadItems(reset: true);
   }
 
   Future<void> _selectRecentlyPlayed() async {
-    if (_view == 'recently-played') return;
+    if (_c.view == 'recently-played') return;
     setState(() {
-      _view = 'recently-played';
-      _activeId = '';
+      _c.view = 'recently-played';
+      _c.activeId = '';
       _resetQueryControllers();
       // Resume uses Emby Web's default DatePlayed descending order.
-      _sortBy = 'DatePlayed';
-      _sortOrder = 'Descending';
+      _c.sortBy = 'DatePlayed';
+      _c.sortOrder = 'Descending';
     });
-    await _loadItems(reset: true);
+    await _c.loadItems(reset: true);
   }
 
   void _resetQueryControllers() {
     _searchDebounceTimer?.cancel();
     _searchController.clear();
     _yearController.clear();
-    _itemType = '';
-    _statusFilter = '';
-    _markFilter = '';
-    _videoType = '';
-    // 切换视图时清空新筛选条件，避免串到其它媒体库。
-    _genreFilter = '';
-    _personFilter = '';
-    _personFilterName = '';
     _personController.clear();
-    _personOptions = const [];
-    _minRating = null;
+    // 查询条件统一由 controller 清理，避免遗漏新增筛选项。
+    _c.resetFilters();
   }
 
   Future<void> _applyQuery() async {
     _searchDebounceTimer?.cancel();
-    await EmbyPcService.instance.saveListPreferences(
-      sortBy: _sortBy,
-      sortOrder: _sortOrder,
-      imageStyle: _imageStyle,
-    );
-    await _loadItems(reset: true);
+    _syncQueryInput();
+    await _c.applyQuery();
   }
 
   void _scheduleSearch(String value) {
     _searchDebounceTimer?.cancel();
     // 输入变化时立即让旧请求失效，避免旧关键词结果覆盖新输入。
-    _queryVersion++;
+    _c.queryVersion++;
     setState(() {});
     if (value.trim().isEmpty) {
       unawaited(_applyQuery());
@@ -629,13 +346,13 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
 
   void _submitSearch(String _) {
     // 回车提交时跳过等待，并取消尚未执行的防抖查询。
-    _queryVersion++;
+    _c.queryVersion++;
     unawaited(_applyQuery());
   }
 
   Future<void> _clearSearch() async {
     if (_searchController.text.isEmpty) return;
-    _queryVersion++;
+    _c.queryVersion++;
     setState(_searchController.clear);
     await _applyQuery();
   }
@@ -698,46 +415,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
         !item.isFavorite,
       );
       if (!mounted) return;
-      final updated = item.copyWith(isFavorite: value);
-      setState(() {
-        _items = _items
-            .map((entry) => entry.id == item.id ? updated : entry)
-            .toList();
-        // 首页横向列表持有独立快照，收藏完成后同步状态以立即刷新图标。
-        _recentlyPlayed = _recentlyPlayed
-            .map(
-              (entry) => entry.id == item.id
-                  ? entry.copyWith(isFavorite: value)
-                  : entry,
-            )
-            .toList();
-        _homeLibraryItems = {
-          for (final library in _homeLibraryItems.entries)
-            library.key: library.value
-                .map(
-                  (entry) => entry.id == item.id
-                      ? entry.copyWith(isFavorite: value)
-                      : entry,
-                )
-                .toList(),
-        };
-        if (!value && _view == 'favorite-movies') {
-          _items = _items.where((entry) => entry.id != item.id).toList();
-          _total = (_total - 1).clamp(0, 1 << 30).toInt();
-        }
-        if (_view == 'favorite-movies' && _favoriteMovieCount != null) {
-          _favoriteMovieCount = (_favoriteMovieCount! + (value ? 1 : -1))
-              .clamp(0, 1 << 30)
-              .toInt();
-        }
-        // 从演员列表修改收藏时，同步侧栏的收藏演员数量。
-        if ((_view == 'favorite-people' || _view == 'people') &&
-            _favoritePeopleCount != null) {
-          _favoritePeopleCount = (_favoritePeopleCount! + (value ? 1 : -1))
-              .clamp(0, 1 << 30)
-              .toInt();
-        }
-      });
+      // 列表、首页快照与侧栏计数由 controller 一次性同步。
+      _c.applyFavoriteResult(item, value);
     } catch (error) {
       if (mounted) {
         EmbyPcToast.show(
@@ -806,10 +485,11 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   }
 
   Future<void> _reloadMediaAfterChange() async {
-    if (_view == 'home') {
-      await _loadHome(force: true);
+    if (_c.view == 'home') {
+      await _c.loadHome(force: true);
     } else {
-      await _loadItems(reset: true);
+      _syncQueryInput();
+      await _c.loadItems(reset: true);
     }
   }
 
@@ -889,8 +569,10 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
     try {
       final libraries = await EmbyPcService.instance.getLibraries();
       if (!mounted) return;
-      final currentOrder = _libraries.map((item) => item.id).toList();
-      setState(() => _libraries = _applyLibraryOrder(libraries, currentOrder));
+      final currentOrder = _c.libraries.map((item) => item.id).toList();
+      setState(
+        () => _c.libraries = _c.applyLibraryOrder(libraries, currentOrder),
+      );
     } catch (error) {
       if (mounted) {
         EmbyPcToast.show(
@@ -903,7 +585,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   }
 
   Future<void> _openOrderDialog() async {
-    final draft = List<EmbyPcItem>.of(_libraries);
+    final draft = List<EmbyPcItem>.of(_c.libraries);
     final saved = await showDialog<List<EmbyPcItem>>(
       context: context,
       builder: (context) => _LibraryOrderDialog(libraries: draft),
@@ -913,10 +595,10 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
       saved.map((item) => item.id).toList(),
     );
     setState(() {
-      _libraries = saved;
-      if (_view == 'library' &&
-          !_libraries.any((item) => item.id == _activeId)) {
-        _activeId = _libraries.isEmpty ? '' : _libraries.first.id;
+      _c.libraries = saved;
+      if (_c.view == 'library' &&
+          !_c.libraries.any((item) => item.id == _c.activeId)) {
+        _c.activeId = _c.libraries.isEmpty ? '' : _c.libraries.first.id;
       }
     });
   }
@@ -929,8 +611,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
   void _openItem(EmbyPcItem item) {
     // 人物接口通常返回 Person 类型；视图条件同时兼容缺失类型字段的服务端响应。
     if (item.type == 'Person' ||
-        _view == 'favorite-people' ||
-        _view == 'people') {
+        _c.view == 'favorite-people' ||
+        _c.view == 'people') {
       Navigator.of(context).push(
         embyPcFadeRoute(
           context,
@@ -987,6 +669,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
 
   @override
   void dispose() {
+    _c.removeListener(_onWorkspaceChanged);
+    _c.dispose();
     EmbyPcService.instance.unauthorizedRevision.removeListener(
       _handleSessionExpired,
     );
@@ -1015,8 +699,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace> {
                     this,
                   )._buildMobileNavigationDrawer(context)
                   : null,
-          body: _error.isNotEmpty && _libraries.isEmpty
-              ? _WorkspaceError(message: _error, onRetry: _initialize)
+          body: _c.error.isNotEmpty && _c.libraries.isEmpty
+              ? _WorkspaceError(message: _c.error, onRetry: _initialize)
               : Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [

@@ -5,8 +5,8 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
   Widget _buildContent(BuildContext context, {required bool compact}) {
     final colors = Theme.of(context).colorScheme;
     // 人物没有背景图，演员列表和收藏演员均固定使用主图卡片。
-    final peopleList = _view == 'people' || _view == 'favorite-people';
-    final imageStyle = peopleList ? 'poster' : _imageStyle;
+    final peopleList = _c.view == 'people' || _c.view == 'favorite-people';
+    final imageStyle = peopleList ? 'poster' : _c.imageStyle;
     // 背景图卡片沿用首页约 270 x 205 的视觉比例，并放宽列宽阈值，
     // 避免临界宽度下过早增加列数。
     final mediaGridMaxExtent = imageStyle == 'backdrop' ? 336.0 : 214.0;
@@ -18,24 +18,24 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
           _EmbyPcWorkspaceToolbar(
             this,
           )._buildWorkspaceHeader(context, compact: compact),
-          if (_view != 'home')
+          if (_c.view != 'home')
             _EmbyPcWorkspaceToolbar(this)._buildToolbar(context),
-          if (_view != 'home' && _error.isNotEmpty)
+          if (_c.view != 'home' && _c.error.isNotEmpty)
             MaterialBanner(
-              content: Text(_error),
+              content: Text(_c.error),
               actions: [
                 TextButton(
-                  onPressed: () => _loadItems(reset: true),
+                  onPressed: () => _c.loadItems(reset: true),
                   child: const Text('重试'),
                 ),
               ],
             ),
           Expanded(
-            child: _view == 'home'
+            child: _c.view == 'home'
                 ? _buildHomeContent(context)
-                : _loading && _items.isEmpty
+                : _c.loading && _c.items.isEmpty
                 ? const Center(child: CircularProgressIndicator())
-                : _items.isEmpty
+                : _c.items.isEmpty
                 ? const _EmptyState()
                 : CustomScrollView(
                     controller: _scrollController,
@@ -51,15 +51,15 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
                                 mainAxisSpacing: 22,
                                 childAspectRatio: mediaGridAspectRatio,
                               ),
-                          itemCount: _items.length,
+                          itemCount: _c.items.length,
                           itemBuilder: (context, index) {
-                            final item = _items[index];
+                            final item = _c.items[index];
                             return EmbyPcMediaTile(
                               item: item,
                               imageStyle: imageStyle,
                               secondaryLabel: peopleList
                                   ? _personBirthYear(item)
-                                  : _view == 'recently-played'
+                                  : _c.view == 'recently-played'
                                   ? item.lastPlayedLabel
                                   : '',
                               hideDefaultMetadata: peopleList,
@@ -76,7 +76,7 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
                           },
                         ),
                       ),
-                      if (_loadingMore)
+                      if (_c.loadingMore)
                         SliverPadding(
                           padding: const EdgeInsets.fromLTRB(26, 0, 26, 30),
                           sliver: SliverGrid.builder(
@@ -112,25 +112,25 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
   }
 
   Widget _buildHomeContent(BuildContext context) {
-    if (_homeLoading && !_homeLoaded) {
+    if (_c.homeLoading && !_c.homeLoaded) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_homeError.isNotEmpty && !_homeLoaded) {
+    if (_c.homeError.isNotEmpty && !_c.homeLoaded) {
       return _WorkspaceError(
-        message: _homeError,
-        onRetry: () => _loadHome(force: true),
+        message: _c.homeError,
+        onRetry: () => _c.loadHome(force: true),
       );
     }
     return CustomScrollView(
       controller: _scrollController,
       slivers: [
-        if (_homeError.isNotEmpty)
+        if (_c.homeError.isNotEmpty)
           SliverToBoxAdapter(
             child: MaterialBanner(
-              content: Text(_homeError),
+              content: Text(_c.homeError),
               actions: [
                 TextButton(
-                  onPressed: () => _loadHome(force: true),
+                  onPressed: () => _c.loadHome(force: true),
                   child: const Text('重试'),
                 ),
               ],
@@ -141,17 +141,17 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
           child: _buildHomeMediaSection(
             context,
             title: '继续观看',
-            items: _recentlyPlayed,
+            items: _c.recentlyPlayed,
             showLastPlayedTime: true,
             onOpenSection: _selectRecentlyPlayed,
           ),
         ),
-        ..._libraries.map(
+        ..._c.libraries.map(
           (library) => SliverToBoxAdapter(
             child: _buildHomeMediaSection(
               context,
               title: library.name,
-              items: _homeLibraryItems[library.id] ?? const [],
+              items: _c.homeLibraryItems[library.id] ?? const [],
               onOpenSection: () => _selectLibrary(library.id),
             ),
           ),
@@ -169,18 +169,18 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
         children: [
           Text('媒体库', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 12),
-          if (_libraries.isEmpty)
+          if (_c.libraries.isEmpty)
             const SizedBox(height: 80, child: Center(child: Text('暂无媒体库')))
           else
             EmbyPcHorizontalCarousel(
               height: 164,
               itemWidth: 246,
-              itemCount: _libraries.length,
+              itemCount: _c.libraries.length,
               spacing: 16,
               navigationLabel: '媒体库',
               padding: EdgeInsets.zero,
               itemBuilder: (context, index) {
-                final library = _libraries[index];
+                final library = _c.libraries[index];
                 return _HomeLibraryTile(
                   library: library,
                   busy: _libraryActionBusyIds.contains(library.id),
