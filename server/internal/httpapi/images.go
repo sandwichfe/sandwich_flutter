@@ -96,6 +96,13 @@ func (s *Server) handleListImages(w http.ResponseWriter, r *http.Request) {
 // loadItemImage 决定优先读目录图还是服务端生成图。
 // 两种图互相兜底：优先的那种不存在时自动回退另一种，避免列表出现空白。
 func (s *Server) loadItemImage(r *http.Request, itemID, imageType string, index int) ([]byte, error) {
+	// 用户手动删过媒体库封面时只认手动图，不再回退拼图；
+	// 想重新用拼图，走管理页"刷新媒体库图片"或带 Source=generated 显式请求。
+	if strings.EqualFold(imageType, "Primary") &&
+		artworkSourceParam(r) != imageSourceGenerated &&
+		s.libraryCovers != nil && s.libraryCovers.CoverDeleted(itemID) {
+		return s.images.LoadItemImage(itemID, imageType, index)
+	}
 	if s.preferGeneratedArtwork(r, itemID) {
 		raw, err := s.images.LoadGeneratedImage(itemID, imageType, index)
 		if errors.Is(err, media.ErrImageNotFound) {
@@ -174,6 +181,14 @@ func (s *Server) handleUploadImage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "更新图片标记失败")
 		return
 	}
+	// 上传了新的手动封面，解除"用户删过封面"的状态，拼图恢复兜底资格。
+	if s.libraryCovers != nil {
+		if _, libErr := s.store.LibraryByID(r.Context(), itemID); libErr == nil {
+			if err := s.libraryCovers.ClearCoverDeleted(itemID); err != nil {
+				log.Printf("[library-cover] 清除媒体库封面删除标记失败 library=%s: %v", itemID, err)
+			}
+		}
+	}
 	writeNoContent(w)
 }
 
@@ -188,6 +203,11 @@ func (s *Server) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
 	imageType := r.PathValue("type")
 	index := atoi(r.PathValue("index"))
 
+	// 媒体库不在 items 表里，封面标记由拼图目录自己维护，
+	// 走 syncImageTags 回写 items 必然拿不到条目而报 500。
+	_, libErr := s.store.LibraryByID(r.Context(), itemID)
+	isLibrary := libErr == nil && s.libraryCovers != nil
+
 	// 编辑弹窗里生成图带 Source=generated，删除时必须落到对应的目录。
 	if artworkSourceParam(r) == imageSourceGenerated {
 		if err := s.images.DeleteGeneratedImage(itemID, imageType, index); err != nil {
@@ -199,6 +219,18 @@ func (s *Server) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.imageRenderer.RemoveItem(itemID)
+		if isLibrary {
+			// 拼图连同 tag/sig 一起清掉，并记下用户删过封面，避免下次扫描又拼回来。
+			if err := s.libraryCovers.ForgetGeneratedCover(itemID); err != nil {
+				log.Printf("[library-cover] 清理媒体库拼图封面失败 library=%s: %v", itemID, err)
+			}
+			if err := s.libraryCovers.MarkCoverDeleted(itemID); err != nil {
+				writeError(w, http.StatusInternalServerError, "删除图片失败")
+				return
+			}
+			writeNoContent(w)
+			return
+		}
 		// 目录图还在时 tag 继续有效；否则清空标记，客户端回退到占位图。
 		if _, loadErr := s.images.LoadItemImage(itemID, imageType, index); loadErr != nil {
 			_ = s.syncImageTags(r, itemID, imageType, index, "")
@@ -216,6 +248,15 @@ func (s *Server) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.imageRenderer.RemoveItem(itemID)
+	if isLibrary {
+		// 用户要自己传封面或显式重拼，这里不再用拼图自动兜底。
+		if err := s.libraryCovers.MarkCoverDeleted(itemID); err != nil {
+			writeError(w, http.StatusInternalServerError, "删除图片失败")
+			return
+		}
+		writeNoContent(w)
+		return
+	}
 	if err := s.syncImageTags(r, itemID, imageType, index, ""); err != nil {
 		writeError(w, http.StatusInternalServerError, "更新图片标记失败")
 		return
@@ -227,6 +268,10 @@ func (s *Server) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
 // 客户端靠这些标记决定是否发起图片请求。
 func (s *Server) syncImageTags(r *http.Request, itemID, imageType string, index int, tag string) error {
 	item, err := s.store.GetItem(r.Context(), currentUser(r).ID, itemID)
+	if errors.Is(err, store.ErrNotFound) {
+		// 媒体库、人物等实体不在 items 表里，没有可回写的标记，视为成功。
+		return nil
+	}
 	if err != nil {
 		return err
 	}

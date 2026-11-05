@@ -28,7 +28,10 @@ import (
 //
 // 结果写在 generated/primary/0.jpg，而目录导入与手动上传的封面在 primary/0.jpg。
 // 读图链路对媒体库先读 primary、缺失才回退 generated，所以拼图只作兜底：
-// 用户一上传封面，拼图自动让位；删掉手动图后又回退到拼图。
+// 用户一上传封面，拼图自动让位。
+//
+// 用户手动删掉封面时写入 disabled 标记：此后读图不再回退拼图、扫描结束也不重拼，
+// 卡片回到占位图；要重新用拼图必须显式"刷新媒体库图片"，或自己上传新封面。
 const (
 	// libraryCoverCount 是拼图的列数上限，取最近的这么多张海报。
 	libraryCoverCount = 3
@@ -37,6 +40,8 @@ const (
 	coverCanvasH = 720
 	// libraryCoverSignatureVersion 在布局或尺寸调整时递增，旧签名随之失效并触发重拼。
 	libraryCoverSignatureVersion = "v5"
+	// coverDeletedExt 是"用户手动删除了封面"的标记文件后缀，与图片放在一起。
+	coverDeletedExt = "disabled"
 )
 
 // LibraryCoverBuilder 负责生成并登记媒体库拼图封面。
@@ -67,6 +72,16 @@ func (b *LibraryCoverBuilder) RebuildForce(ctx context.Context, lib store.Librar
 func (b *LibraryCoverBuilder) rebuild(ctx context.Context, lib store.Library, force bool) (bool, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	if force {
+		// 手动刷新是明确的"重新用拼图"动作，先解除删除标记。
+		if err := b.ClearCoverDeleted(lib.ID); err != nil {
+			return false, err
+		}
+	} else if b.CoverDeleted(lib.ID) {
+		// 用户删过封面：扫描结束的自动重建不再把拼图塞回去。
+		return false, nil
+	}
 
 	// 多取一些候选：条目海报可能还没生成，需要往后找够 3 张有图的。
 	ids, err := b.store.RecentLibraryItemIDs(ctx, lib.ID, libraryCoverCount*5)
@@ -124,7 +139,41 @@ func (b *LibraryCoverBuilder) Tag(libraryID string) string {
 	if info, err := os.Stat(b.images.ItemPath(libraryID, "Primary", 0)); err == nil && info.Size() > 0 {
 		return hashTag([]byte(fmt.Sprintf("manual:%d:%d", info.Size(), info.ModTime().UnixNano())))
 	}
+	// 用户删过封面：拼图不再兜底，卡片直接回落到占位图。
+	if b.CoverDeleted(libraryID) {
+		return ""
+	}
 	return b.readMeta(libraryID, "tag")
+}
+
+// MarkCoverDeleted 记录"管理员手动删除了媒体库封面"。
+// 读图、Views 列表和扫描后的自动重拼都会遵守这个标记，直到上传新封面或手动刷新封面。
+func (b *LibraryCoverBuilder) MarkCoverDeleted(libraryID string) error {
+	if err := b.writeMeta(libraryID, coverDeletedExt, "1"); err != nil {
+		return fmt.Errorf("记录媒体库封面删除状态失败: %w", err)
+	}
+	return nil
+}
+
+// ClearCoverDeleted 取消删除标记，拼图封面重新生效。
+func (b *LibraryCoverBuilder) ClearCoverDeleted(libraryID string) error {
+	err := os.Remove(b.images.GeneratedMetaPath(libraryID, "Primary", 0, coverDeletedExt))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// CoverDeleted 表示管理员手动删除了封面，拼图不应再自动兜底。
+func (b *LibraryCoverBuilder) CoverDeleted(libraryID string) bool {
+	_, err := os.Stat(b.images.GeneratedMetaPath(libraryID, "Primary", 0, coverDeletedExt))
+	return err == nil
+}
+
+// ForgetGeneratedCover 清理拼图封面及其派生信息（tag/sig），
+// 用于管理员直接删掉拼接封面文件后，别让旧 tag 继续指向不存在的图片。
+func (b *LibraryCoverBuilder) ForgetGeneratedCover(libraryID string) error {
+	return b.removeCover(libraryID)
 }
 
 type coverSource struct {
