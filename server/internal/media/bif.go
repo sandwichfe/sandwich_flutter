@@ -22,7 +22,7 @@ import (
 //
 // 客户端解析规则（emby_pc_player_page.dart / _BifPreviewData）：
 //   - 头部固定 64 字节，bytes[0]=0x89，bytes[1..3]="BIF"
-//   - 偏移 4：版本号，偏移 8：帧数(uint32 LE)，偏移 12：帧间隔(ms，uint32 LE)
+//   - 偏移 8：版本号（固定 0），偏移 12：帧数(uint32 LE)，偏移 16：帧间隔(ms，uint32 LE)
 //   - 偏移 64 起为索引表，每项 8 字节：绝对时间戳(ms) + 数据偏移
 //   - 索引表共 帧数+1 项，最后一项仅用于确定数据区结束位置
 type BifCache struct {
@@ -90,8 +90,8 @@ func (c *BifCache) RemoveItem(itemID string) {
 	}
 }
 
-// cacheHit 判断缓存文件是否可复用：内容非空，且不比源文件旧（片源换过就要重抽）。
-func cacheHit(path, sourcePath string) bool {
+// freshFile 判断文件是否可复用：内容非空，且不比源文件旧（片源换过就要重做）。
+func freshFile(path, sourcePath string) bool {
 	info, err := os.Stat(path)
 	if err != nil || info.Size() == 0 {
 		return false
@@ -104,6 +104,12 @@ func cacheHit(path, sourcePath string) bool {
 		return true
 	}
 	return !src.ModTime().After(info.ModTime())
+}
+
+// cacheHit 在 freshFile 基础上再校验 BIF 布局：旧版本会把别家格式的 BIF
+// （索引时间戳是帧序号）原样拷进缓存，这类文件必须当作未命中重建。
+func cacheHit(path, sourcePath string) bool {
+	return usableBIF(path) && freshFile(path, sourcePath)
 }
 
 // reuse 返回当前条目可复用的缓存：先找参数完全一致的文件，再退到早期无参数命名。
@@ -280,9 +286,11 @@ func (c *BifCache) Generate(ctx context.Context, itemID, sourcePath string, opts
 
 	// 媒体目录里已经有预生成的 BIF 时直接拿来用，网络盘上可以省掉整段抽帧。
 	// 强制重生成时跳过复用，否则新间隔不会生效。
-	if local := FindLocalBIF(sourcePath); !force && local != "" && !sameFilePath(local, target) && cacheHit(local, sourcePath) {
-		if err := copyFile(local, target); err == nil {
-			return target, countBIFrames(target), true, nil
+	// 注意这里只判断「不比片源旧」，格式由 importLocalBIF 解析并重写：
+	// 第三方 BIF 的索引时间戳是帧序号，原样复制会让预览永远停在最后一帧。
+	if local := FindLocalBIF(sourcePath); !force && local != "" && !sameFilePath(local, target) && freshFile(local, sourcePath) {
+		if imported, frames, err := c.importLocalBIF(itemID, width, local); err == nil {
+			return imported, frames, true, nil
 		}
 	}
 
@@ -401,8 +409,9 @@ func parseFFmpegProgress(line string) (int64, bool) {
 	return value / 1000, true
 }
 
-// countBIFrames 从 BIF 头部读取帧数（偏移 8，uint32 小端），读不到时返回 0。
-// 历史文件曾把帧数写在偏移 12，读到 0 时按旧布局回退，避免把已有缓存算成 0 帧。
+// countBIFrames 从 BIF 头部读取帧数（uint32 小端），读不到时返回 0。
+// 先读偏移 8（本项目旧版布局的帧数），为 0 时回退偏移 12（标准布局的帧数），
+// 两种布局都能读出正确帧数，避免把已有缓存算成 0 帧。
 func countBIFrames(path string) int {
 	file, err := os.Open(path)
 	if err != nil {
@@ -514,13 +523,35 @@ func collectFrames(dir string) ([][]byte, error) {
 	return frames, nil
 }
 
-// PackBIF 按 BIF 规范拼装文件内容。
-func PackBIF(frames [][]byte, intervalMs uint32) []byte {
-	const headerLength = 64
-	const indexEntryLength = 8
+const (
+	// bifHeaderLength 是 BIF 固定头部长度，索引表从 64 字节之后开始。
+	bifHeaderLength = 64
+	// bifIndexEntryLen 是索引项长度：帧时间戳(ms) + 数据偏移。
+	bifIndexEntryLen = 8
+)
 
-	indexLength := (len(frames) + 1) * indexEntryLength
-	dataStart := headerLength + indexLength
+// bifLayout 描述「帧数 / 帧间隔」在头部里的偏移。
+// 标准 BIF（Emby、Infuse 等实现）是 12 / 16；本项目早期版本写在 8 / 12，两种都要能读，
+// 否则历史缓存会被判成无效而全部重抽。
+type bifLayout struct {
+	countOffset    int
+	intervalOffset int
+}
+
+// bifLayouts 按优先级排列：先按标准布局解析，再退回本项目旧版布局。
+var bifLayouts = []bifLayout{
+	{countOffset: 12, intervalOffset: 16},
+	{countOffset: 8, intervalOffset: 12},
+}
+
+// PackBIF 按标准 BIF 布局拼装文件内容。
+//   - 0..3：魔数 0x89 'B' 'I' 'F'，4..7：固定换行符 0d 0a 1a 0a
+//   - 8..11：版本号，必须为 0（客户端会先把这里当帧数读，写非 0 会被误判）
+//   - 12..15：帧数，16..19：帧间隔(ms)
+//   - 64 起为索引表，每项 8 字节：帧时间戳(ms) + 数据偏移，共 帧数+1 项
+func PackBIF(frames [][]byte, intervalMs uint32) []byte {
+	indexLength := (len(frames) + 1) * bifIndexEntryLen
+	dataStart := bifHeaderLength + indexLength
 
 	total := dataStart
 	for _, frame := range frames {
@@ -530,14 +561,14 @@ func PackBIF(frames [][]byte, intervalMs uint32) []byte {
 	buf := make([]byte, total)
 	buf[0] = 0x89
 	copy(buf[1:4], "BIF")
-	// 4..7 版本号，8..11 帧数，12..15 帧间隔(ms)，与 BIF/Emby 规范一致。
-	binary.LittleEndian.PutUint32(buf[4:8], 1)
-	binary.LittleEndian.PutUint32(buf[8:12], uint32(len(frames)))
-	binary.LittleEndian.PutUint32(buf[12:16], intervalMs)
+	copy(buf[4:8], []byte{0x0d, 0x0a, 0x1a, 0x0a})
+	binary.LittleEndian.PutUint32(buf[8:12], 0)
+	binary.LittleEndian.PutUint32(buf[12:16], uint32(len(frames)))
+	binary.LittleEndian.PutUint32(buf[16:20], intervalMs)
 
 	offset := dataStart
 	for index, frame := range frames {
-		entry := headerLength + index*indexEntryLength
+		entry := bifHeaderLength + index*bifIndexEntryLen
 		binary.LittleEndian.PutUint32(buf[entry:entry+4], uint32(index)*intervalMs)
 		binary.LittleEndian.PutUint32(buf[entry+4:entry+8], uint32(offset))
 		copy(buf[offset:], frame)
@@ -545,11 +576,116 @@ func PackBIF(frames [][]byte, intervalMs uint32) []byte {
 	}
 
 	// 哨兵项：时间戳无效，偏移指向数据区末尾。
-	sentinel := headerLength + len(frames)*indexEntryLength
+	sentinel := bifHeaderLength + len(frames)*bifIndexEntryLen
 	binary.LittleEndian.PutUint32(buf[sentinel:sentinel+4], 0xFFFFFFFF)
 	binary.LittleEndian.PutUint32(buf[sentinel+4:sentinel+8], uint32(offset))
 
 	return buf
+}
+
+// UnpackBIF 解析 BIF 内容，兼容标准布局与本项目旧版布局，返回帧数据和帧间隔。
+// 只做结构校验（索引偏移、JPEG 头），不解释时间戳：第三方 BIF 的索引时间戳可能是帧序号，
+// 由调用方按间隔重新打包。
+func UnpackBIF(data []byte) ([][]byte, uint32, error) {
+	if len(data) < bifHeaderLength+2*bifIndexEntryLen || data[0] != 0x89 || string(data[1:4]) != "BIF" {
+		return nil, 0, fmt.Errorf("不是有效的 BIF 文件")
+	}
+	for _, layout := range bifLayouts {
+		if frames, interval, err := readBIFFrames(data, layout); err == nil {
+			return frames, interval, nil
+		}
+	}
+	return nil, 0, fmt.Errorf("无法识别的 BIF 布局")
+}
+
+// readBIFFrames 按指定布局切出全部帧，布局不匹配时返回错误。
+func readBIFFrames(data []byte, layout bifLayout) ([][]byte, uint32, error) {
+	count := int(binary.LittleEndian.Uint32(data[layout.countOffset : layout.countOffset+4]))
+	interval := binary.LittleEndian.Uint32(data[layout.intervalOffset : layout.intervalOffset+4])
+	if count <= 0 || interval == 0 {
+		return nil, 0, fmt.Errorf("BIF 头部字段无效")
+	}
+	if bifHeaderLength+(count+1)*bifIndexEntryLen > len(data) {
+		return nil, 0, fmt.Errorf("BIF 帧数超出文件长度")
+	}
+
+	frames := make([][]byte, 0, count)
+	for index := 0; index < count; index++ {
+		entry := bifHeaderLength + index*bifIndexEntryLen
+		start := int(binary.LittleEndian.Uint32(data[entry+4 : entry+8]))
+		end := int(binary.LittleEndian.Uint32(data[entry+bifIndexEntryLen+4 : entry+bifIndexEntryLen+8]))
+		if start < bifHeaderLength || end-start < 2 || end > len(data) {
+			return nil, 0, fmt.Errorf("BIF 索引偏移无效")
+		}
+		if data[start] != 0xFF || data[start+1] != 0xD8 {
+			return nil, 0, fmt.Errorf("BIF 帧数据不是 JPEG")
+		}
+		frames = append(frames, data[start:end])
+	}
+	return frames, interval, nil
+}
+
+// usableBIF 判断文件是不是本项目能直接用的 BIF：布局正确，且索引时间戳按 index*intervalMs 递增。
+// 早期版本会把媒体目录里别家生成的 BIF 原样拷进缓存（索引时间戳是帧序号 0,1,2…），
+// 客户端按毫秒二分查找会永远落在最后一帧，这类文件必须重建。
+func usableBIF(path string) bool {
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+
+	header := make([]byte, bifHeaderLength+2*bifIndexEntryLen)
+	if _, err := io.ReadFull(file, header); err != nil {
+		return false
+	}
+	if header[0] != 0x89 || string(header[1:4]) != "BIF" {
+		return false
+	}
+
+	for _, layout := range bifLayouts {
+		count := int(binary.LittleEndian.Uint32(header[layout.countOffset : layout.countOffset+4]))
+		interval := binary.LittleEndian.Uint32(header[layout.intervalOffset : layout.intervalOffset+4])
+		if count <= 0 || interval == 0 {
+			continue
+		}
+		first := binary.LittleEndian.Uint32(header[bifHeaderLength : bifHeaderLength+4])
+		if first != 0 {
+			continue
+		}
+		if count > 1 {
+			second := binary.LittleEndian.Uint32(header[bifHeaderLength+bifIndexEntryLen:])
+			if second != interval {
+				continue
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// importLocalBIF 把媒体目录里现成的 BIF 规范化后写进缓存，返回缓存路径与帧数。
+// 只重写头部与索引、不重新解码，网络盘上可以省掉整段抽帧。
+// 缓存名用 BIF 自身的间隔，避免把 10s 间隔的文件当成 4s 间隔复用。
+func (c *BifCache) importLocalBIF(itemID string, width int, local string) (string, int, error) {
+	raw, err := os.ReadFile(local)
+	if err != nil {
+		return "", 0, err
+	}
+	frames, interval, err := UnpackBIF(raw)
+	if err != nil {
+		return "", 0, err
+	}
+
+	target := c.Path(itemID, width, interval)
+	if sameFilePath(local, target) {
+		// 媒体目录就是缓存目录时不要覆盖用户原有的文件。
+		return "", 0, fmt.Errorf("本地 BIF 已位于缓存目录")
+	}
+	if err := writeFileAtomic(target, PackBIF(frames, interval)); err != nil {
+		return "", 0, err
+	}
+	return target, len(frames), nil
 }
 
 func truncate(text string, limit int) string {
@@ -592,23 +728,4 @@ func FindLocalBIF(videoPath string) string {
 		return filepath.Join(dir, entry.Name())
 	}
 	return ""
-}
-
-func copyFile(source, target string) error {
-	in, err := os.Open(source)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-
-	out, err := os.Create(target)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	if _, err := io.Copy(out, in); err != nil {
-		return err
-	}
-	return out.Sync()
 }

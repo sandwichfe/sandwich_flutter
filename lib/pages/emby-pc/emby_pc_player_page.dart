@@ -769,8 +769,8 @@ class _BifPreviewData {
       0,
       ((bytes.length - headerLength) ~/ indexEntryLength) - 1,
     );
-    // 规范布局：偏移 8 是帧数、偏移 12 是帧间隔(ms)；
-    // 历史服务端把帧数写在偏移 12、偏移 8 留 0，读到 0 或越界时按旧布局回退。
+    // 标准 BIF 布局：偏移 8 是版本号(固定 0)、偏移 12 是帧数、偏移 16 是帧间隔(ms)；
+    // 服务端早期版本把帧数写在偏移 8，读到 0 或越界时按旧布局回退。
     var declaredFrameCount = view.getUint32(8, Endian.little);
     if (declaredFrameCount == 0 || declaredFrameCount > maxFrameCount) {
       declaredFrameCount = view.getUint32(12, Endian.little);

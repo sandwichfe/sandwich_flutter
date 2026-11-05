@@ -2,6 +2,7 @@ package media
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"os"
 	"path/filepath"
@@ -23,13 +24,14 @@ func TestPackBIFRoundTrip(t *testing.T) {
 	if packed[0] != 0x89 || string(packed[1:4]) != "BIF" {
 		t.Fatalf("BIF 头部标识错误: % x", packed[:4])
 	}
-	if got := binary.LittleEndian.Uint32(packed[4:8]); got != 1 {
-		t.Fatalf("版本号 = %d，期望 1", got)
+	// 版本号必须为 0：客户端会先把偏移 8 当帧数读，写非 0 会被误判成帧数。
+	if got := binary.LittleEndian.Uint32(packed[8:12]); got != 0 {
+		t.Fatalf("版本号 = %d，期望 0", got)
 	}
-	if got := binary.LittleEndian.Uint32(packed[8:12]); got != uint32(len(frames)) {
+	if got := binary.LittleEndian.Uint32(packed[12:16]); got != uint32(len(frames)) {
 		t.Fatalf("帧数 = %d，期望 %d", got, len(frames))
 	}
-	if got := binary.LittleEndian.Uint32(packed[12:16]); got != intervalMs {
+	if got := binary.LittleEndian.Uint32(packed[16:20]); got != intervalMs {
 		t.Fatalf("抽帧间隔 = %d，期望 %d", got, intervalMs)
 	}
 
@@ -54,6 +56,55 @@ func TestPackBIFRoundTrip(t *testing.T) {
 	}
 	if got := int(binary.LittleEndian.Uint32(packed[sentinel+4 : sentinel+8])); got != len(packed) {
 		t.Fatalf("哨兵偏移 = %d，期望 %d", got, len(packed))
+	}
+}
+
+// TestBifCacheNormalizesLocalBIF 校验媒体目录里的第三方 BIF 会被重写索引后再复用：
+// 这类文件索引时间戳是帧序号（0、1、2…），原样拷进缓存会让预览永远停在最后一帧。
+func TestBifCacheNormalizesLocalBIF(t *testing.T) {
+	dir := t.TempDir()
+	cache := NewBifCache(dir, "ffmpeg")
+
+	mediaDir := t.TempDir()
+	source := filepath.Join(mediaDir, "movie.mp4")
+	if err := os.WriteFile(source, []byte("video"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	frames := [][]byte{{0xff, 0xd8, 1}, {0xff, 0xd8, 2}, {0xff, 0xd8, 3}}
+	raw := PackBIF(frames, 10000)
+	// 模拟第三方产物：索引时间戳写成帧序号。
+	for index := range frames {
+		binary.LittleEndian.PutUint32(raw[64+index*8:], uint32(index))
+	}
+	if err := os.WriteFile(filepath.Join(mediaDir, "movie.bif"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	path, count, reused, err := cache.Generate(context.Background(), "item1", source, BifOptions{
+		IntervalMs: 4000,
+		Width:      320,
+	})
+	if err != nil {
+		t.Fatalf("导入本地 BIF 失败: %v", err)
+	}
+	if !reused || count != len(frames) {
+		t.Fatalf("复用状态 = %v，帧数 = %d", reused, count)
+	}
+	// 缓存名要用 BIF 自身的间隔，不能把 10s 间隔的帧算成 4s。
+	if want := cache.Path("item1", 320, 10000); path != want {
+		t.Fatalf("缓存路径 = %q，期望 %q", path, want)
+	}
+
+	cached, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint32(cached[64+8:]); got != 10000 {
+		t.Fatalf("重写后的第 2 项时间戳 = %d，期望 10000", got)
+	}
+	// 规范化后的缓存必须能被后续请求判定为可用，否则每次都会重建。
+	if hit := cache.Lookup("item1", source, 10000, 320); hit != path {
+		t.Fatalf("规范化后的缓存未命中: %q", hit)
 	}
 }
 
