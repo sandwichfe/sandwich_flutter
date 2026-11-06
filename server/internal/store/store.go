@@ -34,7 +34,7 @@ type Store struct {
 
 // schemaVersion 对应 schema.sql 的表结构版本号。
 // 改表结构时递增，并在 schemaMigrations 里补上「上一版 → 这一版」的语句。
-const schemaVersion = 7
+const schemaVersion = 8
 
 // schemaMigrations 是「版本 N → N+1」的升级语句。
 // 新库按 schema.sql 一次建到最新；老库按 PRAGMA user_version 逐级补齐，
@@ -89,6 +89,12 @@ var schemaMigrations = map[int][]string{
 		`ALTER TABLE persons ADD COLUMN cup_size TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE persons ADD COLUMN overview TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE persons ADD COLUMN provider_ids TEXT NOT NULL DEFAULT '{}'`,
+	},
+	// 7 → 8：演员刮削状态（手动字段标记 / 上次刮削时间 / 匹配结果）。
+	7: {
+		`ALTER TABLE persons ADD COLUMN manual_fields TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE persons ADD COLUMN scraped_at TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE persons ADD COLUMN match_state TEXT NOT NULL DEFAULT ''`,
 	},
 }
 

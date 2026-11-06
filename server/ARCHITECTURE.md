@@ -174,6 +174,55 @@ w.Write(rendered)
 
 写真文件不会被当成头像（`readActorIndex` 会跳过 `-fanart` / `-backdrop` 后缀）。手动上传/删除走同一套图片接口：`POST|DELETE /emby/Items/{personId}/Images/{Primary|Backdrop}/{index}`，落盘后会回写 `persons` 的图片标记。
 
+### 2.7 演员刮削（TMDB，手动触发）
+
+扫描流程**不联网**；演员资料只在设置页点「开始刮削」或人物页点「从 TMDB 刮削」时才去取。
+
+```
+PersonScrapeJobManager（串行，同刻只跑一个任务）
+   ↓ 候选来自 persons（item_count > 0，missing 模式只挑没编号/没刮过的）
+   ↓ resolveTmdbID：已有 Tmdb 编号 → 关联影片 /movie/{id}/credits 反查 → 姓名搜索 + 作品交叉验证
+   ↓ /person/{id} + /external_ids + /images（≤ tmdb.max_backdrops 张写真）
+   ↓ ApplyScrapedPerson（manual_fields 保护手动字段；force 才覆盖已有值）
+   ↓ 图片落 data/images/{personID}/，tag 回写 persons
+```
+
+| 接口 | 说明 |
+|---|---|
+| `POST /emby/PersonScrapeJobs` | 正文 `{"Mode":"all"\|"missing","Force":false}` |
+| `GET /emby/PersonScrapeJobs` | 返回 `{Configured, Jobs}`，前端据此提示"未配置 Key" |
+| `GET /emby/PersonScrapeJobs/{jobId}` | 轮询进度 |
+| `POST /emby/PersonScrapeJobs/{jobId}/Cancel` | 取消 |
+| `POST /emby/Persons/{personId}/Scrape` | 单个人物，正文可选 `{"Force":true}` |
+
+覆盖规则：
+
+- `manual_fields` 记录被手动编辑过的字段（`UpdatePersonMetadata` 写入），刮削**永不覆盖**这些字段，即使 `Force=true`
+- 未锁定字段默认**只补空值**，`Force=true` 才用 TMDB 数据覆盖
+- 图片：`image_locks` 锁定的实体整段跳过；用户上传/生成的图不覆盖，本地导入与上次刮削的图可刷新
+- 重名无法唯一确定（`match_state=ambiguous`）时不写任何资料，只记录状态，避免张冠李戴
+
+配置项（`config.yaml`，也可用环境变量）：
+
+```yaml
+tmdb:
+  api_key: ''        # EMBYX_TMDB_API_KEY，空表示未启用
+  language: zh-CN    # 简介为空自动回退 en-US
+  proxy: ''          # EMBYX_TMDB_PROXY，国内网络通常必填
+  rate_limit: 4      # 每秒请求上限，1~10，超过按 10 处理
+  max_backdrops: 6   # 0 表示不下写真
+```
+
+**为什么不会被限流/封禁**
+
+- 任务本身串行：`PersonScrapeJobManager` 同一时刻只允许一个刮削任务，不会有 N 个任务并发打接口
+- 全局限速：所有请求（含图片 CDN）统一走 `waitTurn`，默认 4 次/秒，只有官方上限（50/秒）的 8%；`rate_limit` 可调但硬上限 10
+- 命中 429 时**整个客户端一起冷却**（遵守 `Retry-After`，退避 1s/2s/3s 重试 3 次），不会以原速率继续猛打
+- 影片演职员表有进程内缓存（上限 500 部），同一部片的演员不会重复拉 credits
+- 冒烟测试：`TestClientRateLimitSpacing` 校验请求间隔、`TestClientRetryAfterCooldown` 校验 429 退避
+
+按默认 4 次/秒估算，1000 位演员约需 40～60 分钟（每人 4～10 个请求，含图片）。TMDB 要求在产品中署名其数据来源。
+
 ---
 
 ## 3. 数据库存了什么

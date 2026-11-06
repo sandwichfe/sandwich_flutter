@@ -178,6 +178,8 @@ enum EmbyPcMediaAction {
   editImages,
   refreshMetadata,
   togglePlayed,
+  // 仅人物页使用：从 TMDB 刮削该演员的资料与图片。
+  scrapePerson,
 }
 
 class EmbyPcMediaTile extends StatefulWidget {

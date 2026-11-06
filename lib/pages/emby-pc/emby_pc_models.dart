@@ -19,6 +19,11 @@ class EmbyPcItem {
   final String premiereDate;
   final String dateCreated;
 
+  // 人物详情专用：出生年月日、性别、罩杯（Emby 协议外的扩展字段）。
+  final String birthDate;
+  final String gender;
+  final String cupSize;
+
   // 上次播放时间来自用户数据，只在服务端返回该字段时展示。
   final String lastPlayedDate;
   final bool isFavorite;
@@ -56,6 +61,9 @@ class EmbyPcItem {
     this.path = '',
     this.premiereDate = '',
     this.dateCreated = '',
+    this.birthDate = '',
+    this.gender = '',
+    this.cupSize = '',
     this.lastPlayedDate = '',
     this.isFavorite = false,
     this.played = false,
@@ -93,6 +101,9 @@ class EmbyPcItem {
       path: _text(json['Path']),
       premiereDate: _text(json['PremiereDate']),
       dateCreated: _text(json['DateCreated']),
+      birthDate: _text(json['BirthDate']),
+      gender: _text(json['Gender']),
+      cupSize: _text(json['CupSize']),
       lastPlayedDate: _text(userData['LastPlayedDate']),
       isFavorite: userData['IsFavorite'] == true,
       played: userData['Played'] == true,
@@ -143,6 +154,9 @@ class EmbyPcItem {
     path: path,
     premiereDate: premiereDate,
     dateCreated: dateCreated,
+    birthDate: birthDate,
+    gender: gender,
+    cupSize: cupSize,
     lastPlayedDate: lastPlayedDate,
     isFavorite: isFavorite ?? this.isFavorite,
     played: played ?? this.played,
@@ -648,6 +662,112 @@ class EmbyPcThumbnailJob {
         doneDurationSeconds: _integer(json['DoneDurationSeconds']),
         estimatedFrames: _integer(json['EstimatedFrames']),
         generatedFrames: _integer(json['GeneratedFrames']),
+      );
+}
+
+// 演员刮削任务快照。状态值由后端定义：running / completed / canceled。
+// mode 为 all（全部）/ missing（只补缺）/ single（单个演员）。
+class EmbyPcPersonScrapeJob {
+  final String id;
+  final String mode;
+  final bool force;
+  final int total;
+  final int completed;
+  final int failed;
+  final int skipped;
+  // 真正写入了新资料的人数，与「匹配成功但字段已是最新」区分开。
+  final int updated;
+  // 下载并落盘的图片张数（头像 + 写真）。
+  final int images;
+  final double progress;
+  final String status;
+  final String currentItem;
+  final List<String> errors;
+  final String startedAt;
+  final String finishedAt;
+
+  const EmbyPcPersonScrapeJob({
+    required this.id,
+    required this.mode,
+    required this.force,
+    required this.total,
+    required this.completed,
+    required this.failed,
+    required this.skipped,
+    required this.updated,
+    required this.images,
+    required this.progress,
+    required this.status,
+    required this.currentItem,
+    required this.errors,
+    required this.startedAt,
+    required this.finishedAt,
+  });
+
+  bool get isRunning => status == 'running';
+
+  bool get isCanceled => status == 'canceled';
+
+  // 失败、跳过都算已处理，进度条不会因为个别人名对不上停在中途。
+  int get finishedCount => completed + failed + skipped;
+
+  double get ratio => progress.clamp(0.0, 1.0).toDouble();
+
+  String get scopeLabel => switch (mode) {
+    'all' => '全部演员',
+    'missing' => '仅缺资料',
+    'single' => '单个演员',
+    _ => mode,
+  };
+
+  String get statusLabel => switch (status) {
+    'running' => '刮削中',
+    'completed' => '已完成',
+    'canceled' => '已取消',
+    _ => status,
+  };
+
+  factory EmbyPcPersonScrapeJob.fromJson(Map<String, dynamic> json) =>
+      EmbyPcPersonScrapeJob(
+        id: _text(json['JobId']),
+        mode: _text(json['Mode']),
+        force: _booleanOrNull(json['Force']) ?? false,
+        total: _integer(json['Total']),
+        completed: _integer(json['Completed']),
+        failed: _integer(json['Failed']),
+        skipped: _integer(json['Skipped']),
+        updated: _integer(json['Updated']),
+        images: _integer(json['Images']),
+        progress: (_doubleOrNull(json['Progress']) ?? 0).clamp(0.0, 1.0),
+        status: _text(json['Status']),
+        currentItem: _text(json['CurrentItem']),
+        errors: _strings(json['Errors']),
+        startedAt: _text(json['StartedAt']),
+        finishedAt: _text(json['FinishedAt']),
+      );
+}
+
+// GET /PersonScrapeJobs：configured 表示服务端是否配置了 TMDB API Key。
+class EmbyPcPersonScrapeJobs {
+  final bool configured;
+  final List<EmbyPcPersonScrapeJob> jobs;
+
+  const EmbyPcPersonScrapeJobs({
+    this.configured = false,
+    this.jobs = const [],
+  });
+
+  factory EmbyPcPersonScrapeJobs.fromJson(Map<String, dynamic> json) =>
+      EmbyPcPersonScrapeJobs(
+        configured: _booleanOrNull(json['Configured']) ?? false,
+        jobs: (json['Jobs'] is List ? json['Jobs'] as List : const [])
+            .whereType<Map>()
+            .map(
+              (item) => EmbyPcPersonScrapeJob.fromJson(
+                item.map((key, value) => MapEntry(key.toString(), value)),
+              ),
+            )
+            .toList(),
       );
 }
 

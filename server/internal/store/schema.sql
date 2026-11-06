@@ -114,6 +114,11 @@ CREATE TABLE IF NOT EXISTS persons (
     overview      TEXT NOT NULL DEFAULT '',
     -- provider_ids 与 items 同构：{"Tmdb":"123","Imdb":"nm456"}。
     provider_ids  TEXT NOT NULL DEFAULT '{}',
+    -- manual_fields 记录手动编辑过的字段名（JSON 数组），刮削不会覆盖这些字段。
+    manual_fields TEXT NOT NULL DEFAULT '[]',
+    -- scraped_at 是上次 TMDB 刮削时间，match_state: matched/ambiguous/not_found。
+    scraped_at    TEXT NOT NULL DEFAULT '',
+    match_state   TEXT NOT NULL DEFAULT '',
     -- item_count 是 item_people 的派生值，关联变化时重算，避免列表页做全表聚合。
     item_count INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT '',

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"embyx/internal/config"
 	"embyx/internal/httpapi"
 	"embyx/internal/media"
+	"embyx/internal/metadata"
 	"embyx/internal/store"
 )
 
@@ -58,7 +60,22 @@ func main() {
 	scanner := media.NewScanner(st, prober, images, bifCache)
 	thumbs := media.NewThumbnailJobManager(bifCache)
 
-	api := httpapi.New(cfg, st, images, bifCache, scanner, thumbs, prober)
+	// 演员刮削只在手动触发时联网；没配 Key 就不装配，接口会提示"未配置"。
+	var personScrape *metadata.PersonScrapeJobManager
+	if strings.TrimSpace(cfg.TmdbAPIKey) != "" {
+		client, err := metadata.NewClient(cfg.TmdbAPIKey, cfg.TmdbLanguage, cfg.TmdbProxy)
+		if err != nil {
+			log.Fatalf("初始化 TMDB 客户端失败: %v", err)
+		}
+		client.SetRateLimit(cfg.TmdbRateLimit)
+		scraper := metadata.NewPersonScraper(st, images, client, cfg.TmdbMaxBackdrops)
+		scraper.SetLogger(func(format string, args ...any) { log.Printf(format, args...) })
+		personScrape = metadata.NewPersonScrapeJobManager(scraper)
+		log.Printf("演员刮削已启用: 语言=%s 限速=%d 次/秒 写真上限=%d 代理=%v",
+			cfg.TmdbLanguage, client.RateLimit(), cfg.TmdbMaxBackdrops, cfg.TmdbProxy != "")
+	}
+
+	api := httpapi.New(cfg, st, images, bifCache, scanner, thumbs, prober, personScrape)
 	api.SetBaseContext(rootCtx)
 
 	// 缓存回收（S4.1）：启动先跑一轮，之后按 cache.sweep_interval 巡检。

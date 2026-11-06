@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'emby-pc/emby_pc_detail_page.dart';
 import 'emby-pc/emby_pc_library_admin_page.dart';
+import 'emby-pc/emby_pc_person_scrape_page.dart';
 import 'emby-pc/emby_pc_service.dart';
 import 'emby-pc/emby_pc_thumbnail_job_page.dart';
 import 'user_profile_page.dart';
@@ -191,6 +192,17 @@ class _SettingsPageState extends State<SettingsPage> {
               // 预生成任务在服务端后台执行，页面只负责提交参数与轮询进度。
               onTap: () => Navigator.of(context).push(
                 embyPcFadeRoute(context, (_) => const EmbyPcThumbnailJobPage()),
+              ),
+            ),
+            const Divider(height: 1, indent: 72),
+            ListTile(
+              leading: const Icon(Icons.person_search_outlined),
+              title: const Text('演员刮削'),
+              subtitle: const Text('从 TMDB 补齐演员简介、生日与头像写真'),
+              trailing: const Icon(Icons.chevron_right),
+              // 刮削是联网操作，只在手动触发时执行，扫描流程不受影响。
+              onTap: () => Navigator.of(context).push(
+                embyPcFadeRoute(context, (_) => const EmbyPcPersonScrapePage()),
               ),
             ),
             const Divider(height: 1, indent: 72),

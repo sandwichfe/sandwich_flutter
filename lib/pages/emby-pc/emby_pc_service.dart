@@ -410,6 +410,80 @@ class EmbyPcService {
     return EmbyPcThumbnailJob.fromJson(data);
   }
 
+  // ---- 演员资料刮削（TMDB，仅手动触发） ----
+
+  // 批量刮削演员资料与图片。mode 为 all / missing（只补缺）。
+  Future<EmbyPcPersonScrapeJob> startPersonScrapeJob({
+    String mode = 'missing',
+    bool force = false,
+  }) async {
+    final response = await _client.post(
+      _uri('/emby/PersonScrapeJobs'),
+      headers: {..._tokenHeader, 'Content-Type': 'application/json'},
+      body: jsonEncode({'Mode': mode, 'Force': force}),
+    );
+    if (response.statusCode == 409) {
+      throw const EmbyPcException('已有演员刮削任务在运行，请等待完成或先取消');
+    }
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw const EmbyPcException('登录已失效或当前账号没有管理权限');
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final message = _responseError(response);
+      throw EmbyPcException(
+        message.isEmpty ? '启动演员刮削失败：HTTP ${response.statusCode}' : message,
+      );
+    }
+    final data = _decodeResponse(response, '启动演员刮削失败');
+    return EmbyPcPersonScrapeJob.fromJson(data);
+  }
+
+  // 最近的任务列表 + 服务端是否配置了 TMDB Key。
+  Future<EmbyPcPersonScrapeJobs> getPersonScrapeJobs() async {
+    final data = await _get('/emby/PersonScrapeJobs');
+    return EmbyPcPersonScrapeJobs.fromJson(data);
+  }
+
+  Future<EmbyPcPersonScrapeJob> getPersonScrapeJob(String jobId) async {
+    final data = await _get('/emby/PersonScrapeJobs/$jobId');
+    return EmbyPcPersonScrapeJob.fromJson(data);
+  }
+
+  Future<EmbyPcPersonScrapeJob> cancelPersonScrapeJob(String jobId) async {
+    final response = await _client.post(
+      _uri('/emby/PersonScrapeJobs/$jobId/Cancel'),
+      headers: _tokenHeader,
+    );
+    final data = _decodeResponse(response, '取消演员刮削失败');
+    return EmbyPcPersonScrapeJob.fromJson(data);
+  }
+
+  // 人物页「刮削此人物」：同样排进队列，避免与批量任务抢占限流。
+  Future<EmbyPcPersonScrapeJob> scrapePerson(
+    String personId, {
+    bool force = false,
+  }) async {
+    final response = await _client.post(
+      _uri('/emby/Persons/$personId/Scrape'),
+      headers: {..._tokenHeader, 'Content-Type': 'application/json'},
+      body: jsonEncode({'Force': force}),
+    );
+    if (response.statusCode == 409) {
+      throw const EmbyPcException('已有演员刮削任务在运行，请等待完成或先取消');
+    }
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw const EmbyPcException('登录已失效或当前账号没有管理权限');
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final message = _responseError(response);
+      throw EmbyPcException(
+        message.isEmpty ? '刮削演员失败：HTTP ${response.statusCode}' : message,
+      );
+    }
+    final data = _decodeResponse(response, '刮削演员失败');
+    return EmbyPcPersonScrapeJob.fromJson(data);
+  }
+
   // 条目级刷新：后端发现 id 属于媒体库时直接触发该库扫描。
   Future<String> scanLibraryItem(String libraryId) async {
     final response = await _client.post(

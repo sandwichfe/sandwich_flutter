@@ -372,6 +372,18 @@ func (s *Store) UpdatePersonMetadata(ctx context.Context, personID string, paylo
 	setString("gender", "Gender")
 	setString("cup_size", "CupSize")
 
+	// 记录哪些字段被手动编辑过：刮削会跳过这些字段，人工数据优先。
+	if touched := touchedManualFields(payload); len(touched) > 0 {
+		var existing []string
+		var raw string
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT manual_fields FROM persons WHERE person_id = ?`, personID).Scan(&raw); err == nil {
+			unmarshalJSON(raw, &existing)
+		}
+		sets = append(sets, "manual_fields = ?")
+		args = append(args, marshalJSON(mergeManualFields(existing, touched)))
+	}
+
 	if sortName, ok := payload["SortName"].(string); ok {
 		sets = append(sets, "sort_name = ?")
 		args = append(args, strings.TrimSpace(sortName))
@@ -398,6 +410,21 @@ func (s *Store) UpdatePersonMetadata(ctx context.Context, personID string, paylo
 	if _, err := s.db.ExecContext(ctx,
 		"UPDATE persons SET "+strings.Join(sets, ", ")+" WHERE person_id = ?", args...); err != nil {
 		return fmt.Errorf("更新演员信息失败: %w", err)
+	}
+	return nil
+}
+
+// SetPersonBackdropTags 整体替换演员的写真标记（刮削用）。
+// 与逐张更新的 SetPersonImageTag 相比，它能顺手清掉「这次比上次少」的残留槽位。
+func (s *Store) SetPersonBackdropTags(ctx context.Context, personID string, tags []string) error {
+	payload := marshalJSON(tags)
+	if payload == "null" {
+		payload = "[]"
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE persons SET backdrop_tags = ?, updated_at = ? WHERE person_id = ?`,
+		payload, NowISO(), personID); err != nil {
+		return fmt.Errorf("更新演员写真失败: %w", err)
 	}
 	return nil
 }

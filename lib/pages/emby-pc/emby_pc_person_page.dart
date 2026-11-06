@@ -153,6 +153,17 @@ class _EmbyPcPersonPageState extends State<EmbyPcPersonPage> {
         return;
       }
 
+      // 刮削在服务端后台执行，这里只提交任务；完成情况去设置页看进度。
+      if (action == EmbyPcMediaAction.scrapePerson) {
+        final job = await EmbyPcService.instance.scrapePerson(person.id);
+        if (mounted) {
+          _showMessage(
+            job.total > 0 ? '已提交「${person.name}」的刮削任务' : '没有可刮削的内容',
+          );
+        }
+        return;
+      }
+
       // 人物与影片共用 Emby 的项目元数据刷新接口。
       final response = await EmbyPcService.instance.refreshMetadata(
         person.id,
@@ -488,6 +499,13 @@ class _PersonContent extends StatelessWidget {
                     ),
                   ),
                   PopupMenuItem(
+                    value: EmbyPcMediaAction.scrapePerson,
+                    child: _PersonActionEntry(
+                      icon: Icons.person_search_outlined,
+                      label: '从 TMDB 刮削',
+                    ),
+                  ),
+                  PopupMenuItem(
                     value: EmbyPcMediaAction.refreshMetadata,
                     child: _PersonActionEntry(
                       icon: Icons.refresh_outlined,
@@ -630,12 +648,22 @@ class _PersonContent extends StatelessWidget {
 
   List<String> _personFacts(EmbyPcItem person) => [
     if (person.type.isNotEmpty) '类型：${_typeLabel(person.type)}',
-    if (person.sortName.isNotEmpty) '排序名：${person.sortName}',
+    if (person.birthDate.isNotEmpty) '生日：${_formatDate(person.birthDate)}',
+    if (person.gender.isNotEmpty) '性别：${_genderLabel(person.gender)}',
+    if (person.cupSize.isNotEmpty) '罩杯：${person.cupSize}',
     if (person.premiereDate.isNotEmpty)
       '首映日期：${_formatDate(person.premiereDate)}',
     if (person.dateCreated.isNotEmpty)
       '添加日期：${_formatDate(person.dateCreated)}',
   ];
+
+  // TMDB 返回 Male/Female/NonBinary，这里统一显示成中文。
+  String _genderLabel(String gender) => switch (gender) {
+    'Male' => '男',
+    'Female' => '女',
+    'NonBinary' => '非二元',
+    _ => gender,
+  };
 
   // 流派等已有资料与新增外部资料统一使用相同的信息卡片样式。
   List<Widget> _personInfoCards(BuildContext context, EmbyPcItem person) {
@@ -765,6 +793,8 @@ class _PersonMetadataDialogState extends State<_PersonMetadataDialog> {
   late final TextEditingController _dateCreatedController;
   late final TextEditingController _overviewController;
   late final TextEditingController _birthDateController;
+  late final TextEditingController _genderController;
+  late final TextEditingController _cupSizeController;
   late final TextEditingController _imdbController;
   late final TextEditingController _tmdbController;
   late final TextEditingController _tvdbController;
@@ -787,9 +817,15 @@ class _PersonMetadataDialogState extends State<_PersonMetadataDialog> {
     _overviewController = TextEditingController(
       text: _personText(widget.item['Overview']),
     );
-    // Emby 人物 DTO 使用 PremiereDate 存储出生日期。
+    // 生日单独存 BirthDate；PremiereDate 是首映/出道日期，两者分开。
     _birthDateController = TextEditingController(
-      text: _personFormatDate(_personText(widget.item['PremiereDate'])),
+      text: _personFormatDate(_personText(widget.item['BirthDate'])),
+    );
+    _genderController = TextEditingController(
+      text: _personText(widget.item['Gender']),
+    );
+    _cupSizeController = TextEditingController(
+      text: _personText(widget.item['CupSize']),
     );
     _imdbController = TextEditingController(
       text: _personText(providerIds['Imdb']),
@@ -811,6 +847,8 @@ class _PersonMetadataDialogState extends State<_PersonMetadataDialog> {
     _dateCreatedController.dispose();
     _overviewController.dispose();
     _birthDateController.dispose();
+    _genderController.dispose();
+    _cupSizeController.dispose();
     _imdbController.dispose();
     _tmdbController.dispose();
     _tvdbController.dispose();
@@ -870,7 +908,9 @@ class _PersonMetadataDialogState extends State<_PersonMetadataDialog> {
         includeTime: true,
       )
       ..['Overview'] = _overviewController.text.trim()
-      ..['PremiereDate'] = _personIsoDate(_birthDateController.text)
+      ..['BirthDate'] = _personIsoDate(_birthDateController.text)
+      ..['Gender'] = _genderController.text.trim()
+      ..['CupSize'] = _cupSizeController.text.trim()
       ..['ProviderIds'] = providerIds
       ..['Tags'] = _personSplitValues(_tagsController.text);
     try {
@@ -964,6 +1004,43 @@ class _PersonMetadataDialogState extends State<_PersonMetadataDialog> {
                               child: _personDateField(
                                 _birthDateController,
                                 '出生日期',
+                              ),
+                            ),
+                            SizedBox(
+                              width: fieldWidth,
+                              child: DropdownButtonFormField<String>(
+                                initialValue: _genderOptions.containsKey(
+                                      _genderController.text.trim(),
+                                    )
+                                    ? _genderController.text.trim()
+                                    : null,
+                                decoration: const InputDecoration(
+                                  labelText: '性别',
+                                  border: OutlineInputBorder(),
+                                ),
+                                items: [
+                                  for (final entry in _genderOptions.entries)
+                                    DropdownMenuItem(
+                                      value: entry.key,
+                                      child: Text(entry.value),
+                                    ),
+                                ],
+                                onChanged: _saving
+                                    ? null
+                                    : (value) => setState(
+                                        () => _genderController.text = value ?? '',
+                                      ),
+                              ),
+                            ),
+                            SizedBox(
+                              width: fieldWidth,
+                              child: TextFormField(
+                                controller: _cupSizeController,
+                                decoration: const InputDecoration(
+                                  labelText: '罩杯',
+                                  hintText: '如 C / D',
+                                  border: OutlineInputBorder(),
+                                ),
                               ),
                             ),
                             SizedBox(
@@ -1092,6 +1169,13 @@ class _PersonMetadataDialogState extends State<_PersonMetadataDialog> {
     ),
   );
 }
+
+// 性别取值与 TMDB 对齐，界面显示中文。
+const _genderOptions = <String, String>{
+  'Female': '女',
+  'Male': '男',
+  'NonBinary': '非二元',
+};
 
 Map<String, dynamic> _personMap(dynamic value) => value is Map
     ? value.map((key, value) => MapEntry(key.toString(), value))

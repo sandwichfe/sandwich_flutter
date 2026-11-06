@@ -7,6 +7,7 @@ import (
 
 	"embyx/internal/config"
 	"embyx/internal/media"
+	"embyx/internal/metadata"
 	"embyx/internal/store"
 )
 
@@ -21,6 +22,8 @@ type Server struct {
 	// artwork 按需从视频画面生成海报与封面；artworkJobs 负责整库批量生成。
 	artwork     *media.ArtworkGenerator
 	artworkJobs *media.ArtworkJobManager
+	// personScrape 负责演员资料刮削；未配置 TMDB Key 时为 nil，接口直接提示未启用。
+	personScrape *metadata.PersonScrapeJobManager
 	// imageRenderer 负责按宽度/画质缩放图片并做磁盘缓存。
 	imageRenderer *media.ImageRenderer
 	// libraryCovers 生成媒体库默认拼图封面（最近加入的条目海报竖切成最多 3 列拼成横屏）。
@@ -35,15 +38,17 @@ type Server struct {
 // New 装配 HTTP 层。prober 由 main 注入，和扫描器共用同一个实例，
 // 避免同一个 ffprobe 可执行文件被构造两次、配置改了只生效一半。
 func New(cfg config.Config, st *store.Store, images *media.ImageStore, bif *media.BifCache,
-	scanner *media.Scanner, thumbs *media.ThumbnailJobManager, prober *media.Prober) *Server {
+	scanner *media.Scanner, thumbs *media.ThumbnailJobManager, prober *media.Prober,
+	personScrape *metadata.PersonScrapeJobManager) *Server {
 	server := &Server{
-		cfg:     cfg,
-		store:   st,
-		images:  images,
-		bif:     bif,
-		scanner: scanner,
-		thumbs:  thumbs,
-		artwork: media.NewArtworkGenerator(images, prober, cfg.FFmpegPath),
+		cfg:          cfg,
+		store:        st,
+		images:       images,
+		bif:          bif,
+		scanner:      scanner,
+		thumbs:       thumbs,
+		personScrape: personScrape,
+		artwork:      media.NewArtworkGenerator(images, prober, cfg.FFmpegPath),
 		// 缩放结果落在数据目录下，和 BIF 缓存同级。
 		imageRenderer: media.NewImageRenderer(filepath.Join(cfg.DataDir, "cache", "images")),
 		libraryCovers: media.NewLibraryCoverBuilder(images, st),
@@ -83,6 +88,9 @@ func (s *Server) SetBaseContext(ctx context.Context) {
 	}
 	if s.bif != nil {
 		s.bif.SetBaseContext(ctx)
+	}
+	if s.personScrape != nil {
+		s.personScrape.SetParentContext(ctx)
 	}
 }
 
@@ -158,6 +166,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /emby/ThumbnailJobs", s.handleThumbnailJobs)
 	s.mux.HandleFunc("GET /emby/ThumbnailJobs/{jobId}", s.handleThumbnailJob)
 	s.mux.HandleFunc("POST /emby/ThumbnailJobs/{jobId}/Cancel", s.handleCancelThumbnailJob)
+
+	// 演员资料刮削（TMDB，仅手动触发）
+	s.mux.HandleFunc("POST /emby/PersonScrapeJobs", s.handleCreatePersonScrapeJob)
+	s.mux.HandleFunc("GET /emby/PersonScrapeJobs", s.handlePersonScrapeJobs)
+	s.mux.HandleFunc("GET /emby/PersonScrapeJobs/{jobId}", s.handlePersonScrapeJob)
+	s.mux.HandleFunc("POST /emby/PersonScrapeJobs/{jobId}/Cancel", s.handleCancelPersonScrapeJob)
+	s.mux.HandleFunc("POST /emby/Persons/{personId}/Scrape", s.handleScrapePerson)
 
 	// 播放
 	s.mux.HandleFunc("POST /emby/Items/{itemId}/PlaybackInfo", s.handlePlaybackInfo)

@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +31,15 @@ type Config struct {
 	CacheImageLimitMB  int
 	CacheBifLimitMB    int
 	CacheSweepInterval time.Duration
+
+	// TMDB 演员刮削：只在手动触发时联网，扫描流程不依赖网络。
+	// APIKey 为空时刮削接口直接返回"未配置"，其余功能不受影响。
+	TmdbAPIKey   string
+	TmdbLanguage string
+	TmdbProxy    string
+	// TmdbRateLimit 是每秒请求上限，默认 4（TMDB 官方要求不超过 50/秒）。
+	TmdbRateLimit    int
+	TmdbMaxBackdrops int
 
 	// ConfigPath 记录实际使用的配置文件位置，便于启动日志提示。
 	ConfigPath string
@@ -56,6 +66,13 @@ type fileConfig struct {
 		BifLimitMB   *int   `yaml:"bif_limit_mb"`
 		Sweep        string `yaml:"sweep_interval"`
 	} `yaml:"cache"`
+	Tmdb struct {
+		APIKey       string `yaml:"api_key"`
+		Language     string `yaml:"language"`
+		Proxy        string `yaml:"proxy"`
+		RateLimit    *int   `yaml:"rate_limit"`
+		MaxBackdrops *int   `yaml:"max_backdrops"`
+	} `yaml:"tmdb"`
 }
 
 // DefaultAdminPassword 是内置的初始管理员密码，仅用于提示"还没改密码"。
@@ -73,6 +90,9 @@ func Default() Config {
 		CacheImageLimitMB:  2048,
 		CacheBifLimitMB:    1024,
 		CacheSweepInterval: 6 * time.Hour,
+		TmdbLanguage:       "zh-CN",
+		TmdbRateLimit:      4,
+		TmdbMaxBackdrops:   6,
 	}
 }
 
@@ -209,6 +229,23 @@ func (c *Config) applyFile(fc fileConfig) {
 			c.CacheSweepInterval = interval
 		}
 	}
+	if value := strings.TrimSpace(fc.Tmdb.APIKey); value != "" {
+		c.TmdbAPIKey = value
+	}
+	if value := strings.TrimSpace(fc.Tmdb.Language); value != "" {
+		c.TmdbLanguage = value
+	}
+	if value := strings.TrimSpace(fc.Tmdb.Proxy); value != "" {
+		c.TmdbProxy = value
+	}
+	// 允许写 0（不下载写真），只有负数才回落默认值。
+	if fc.Tmdb.MaxBackdrops != nil && *fc.Tmdb.MaxBackdrops >= 0 {
+		c.TmdbMaxBackdrops = *fc.Tmdb.MaxBackdrops
+	}
+	// 限流留一点余量：低于 1 或高于 10 都夹到边界，避免手写配置把 Key 打废。
+	if fc.Tmdb.RateLimit != nil {
+		c.TmdbRateLimit = clamp(*fc.Tmdb.RateLimit, 1, 10)
+	}
 }
 
 func (c *Config) applyEnv() {
@@ -229,6 +266,22 @@ func (c *Config) applyEnv() {
 	}
 	if value := lookupEnv("EMBYX_FFMPEG"); value != "" {
 		c.FFmpegPath = value
+	}
+	if value := lookupEnv("EMBYX_TMDB_API_KEY"); value != "" {
+		c.TmdbAPIKey = value
+	}
+	if value := lookupEnv("EMBYX_TMDB_LANGUAGE"); value != "" {
+		c.TmdbLanguage = value
+	}
+	if value := lookupEnv("EMBYX_TMDB_PROXY"); value != "" {
+		c.TmdbProxy = value
+	}
+	if value := lookupEnv("EMBYX_TMDB_RATE_LIMIT"); value != "" {
+		if limit, err := strconv.Atoi(value); err == nil {
+			c.TmdbRateLimit = clamp(limit, 1, 10)
+		} else {
+			log.Printf("EMBYX_TMDB_RATE_LIMIT 不是整数（示例 4），保持默认值: %q", value)
+		}
 	}
 }
 
@@ -309,6 +362,17 @@ func lookupEnv(key string) string {
 	return strings.TrimSpace(os.Getenv(key))
 }
 
+// clamp 把 value 限制在 [low, high] 区间内。
+func clamp(value, low, high int) int {
+	if value < low {
+		return low
+	}
+	if value > high {
+		return high
+	}
+	return value
+}
+
 const defaultConfigTemplate = `# embyx 配置文件
 # 修改后重启服务生效。
 # 环境变量（EMBYX_ADDR / EMBYX_DATA_DIR / EMBYX_ADMIN_PASSWORD ...）
@@ -340,4 +404,17 @@ cache:
   bif_limit_mb: 1024
   # 缓存巡检间隔（Go duration 格式）：清理已删除条目的残留文件并执行容量淘汰
   sweep_interval: 6h
+
+# 演员刮削（TMDB）。仅在设置页/人物页手动触发，扫描流程不联网。
+# API Key 在 https://www.themoviedb.org/settings/api 免费申请。
+tmdb:
+  api_key: ''
+  # 简介优先取该语言，为空时回退 en-US
+  language: zh-CN
+  # 国内网络通常需要代理，例如 http://127.0.0.1:7890
+  proxy: ''
+  # 每秒请求上限（1~10）。官方要求不超过 50/秒，默认 4 留足余量
+  rate_limit: 4
+  # 每位演员最多保存多少张写真（0 表示不下载写真）
+  max_backdrops: 6
 `
