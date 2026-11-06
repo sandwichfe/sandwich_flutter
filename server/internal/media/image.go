@@ -137,6 +137,50 @@ func (s *ImageStore) DeleteItemImage(itemID, imageType string, index int) error 
 	return err
 }
 
+// PruneItemImages 删除该类型下序号 >= keep 的多余槽位（含 .origin 旁注文件）。
+// 目录里的艺术图变少时用它回收多余文件；用户上传、视频生成的图不在此清理范围内，
+// 避免一次扫描把手工传的背景图删掉。
+func (s *ImageStore) PruneItemImages(itemID, imageType string, keep int) error {
+	dir := filepath.Dir(s.ItemPath(itemID, imageType, 0))
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		index, ok := slotIndex(entry.Name())
+		if !ok || index < keep {
+			continue
+		}
+		origin := s.ReadOrigin(itemID, imageType, index)
+		if origin == OriginUpload || origin == OriginGenerate {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+// slotIndex 从 "3.jpg" / "3.jpg.origin" 这类文件名里取出槽位序号。
+func slotIndex(name string) (int, bool) {
+	dot := strings.Index(name, ".")
+	if dot <= 0 {
+		return 0, false
+	}
+	index, err := strconv.Atoi(name[:dot])
+	if err != nil || index < 0 {
+		return 0, false
+	}
+	return index, true
+}
+
 func (s *ImageStore) LoadItemImage(itemID, imageType string, index int) ([]byte, error) {
 	return readFileOrNotFound(s.ItemPath(itemID, imageType, index))
 }

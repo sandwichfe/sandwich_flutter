@@ -133,7 +133,7 @@ func normalizeProviderIDs(ids map[string]string) map[string]string {
 // 条目图片被锁定、或库选了"视频生成的封面"时跳过目录图，避免覆盖用户/生成结果；
 // 人物头像有自己的锁，不受条目锁与库开关影响。
 func (s *Scanner) importArtwork(item *store.Item, videoPath string, logf func(string, ...any)) {
-	// 同目录的图片与演员头像只枚举一次：网络盘上这两次 ReadDir 是扫描里最贵的一环。
+	// 同目录的图片、演员头像与 extrafanart 只枚举一次：网络盘上这几次 ReadDir 是扫描里最贵的一环。
 	dir := filepath.Dir(videoPath)
 	snapshot := s.snapshotDir(dir)
 	art := findArtworkIn(dir, filepath.Base(videoPath), snapshot.images)
@@ -160,13 +160,32 @@ func (s *Scanner) importArtwork(item *store.Item, videoPath string, logf func(st
 			}
 		}
 
-		for index, path := range art.Backdrops {
+		// extrafanart 子目录里的图追加在同目录背景图之后：
+		// 0 号槽位仍然是详情页顶部那张大图，艺术图依次排在后面。
+		extraFanart := snapshot.extraFanartFor(filepath.Base(videoPath))
+		backdrops := art.Backdrops
+		if len(extraFanart) > 0 {
+			logf("匹配 extrafanart %s → 追加 %d 张艺术图", videoPath, len(extraFanart))
+			backdrops = append(append([]string(nil), art.Backdrops...), extraFanart...)
+		}
+		imported := 0
+		for index, path := range backdrops {
 			tag, err := s.saveArtwork(item.ID, "Backdrop", index, path)
-			if err != nil {
+			// 落盘成功但来源标记写失败时 tag 非空，图本身可用，仍然记账。
+			if err != nil && tag == "" {
 				logf("导入背景图失败 %s: %v", path, err)
 				continue
 			}
+			if err != nil {
+				logf("写入背景图来源失败 %s: %v", path, err)
+			}
 			item.BackdropTags = append(item.BackdropTags, tag)
+			imported = index + 1
+		}
+		// 源端艺术图变少时清掉多出来的槽位，否则图片管理弹窗里会残留已删除的图。
+		// 用户上传或视频生成的图由 PruneItemImages 自己跳过，不会被误删。
+		if err := s.images.PruneItemImages(item.ID, "Backdrop", imported); err != nil {
+			logf("清理多余背景图失败 %s: %v", videoPath, err)
 		}
 
 		extraImages := []struct {

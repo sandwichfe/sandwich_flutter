@@ -213,6 +213,22 @@ type dirSnapshot struct {
 	images map[string]string
 	// actors 来自 .actors 子目录，演员名 → 头像路径。
 	actors map[string]string
+	// extraFanart 来自 extrafanart / <视频名>-extrafanart 子目录，
+	// 小写目录名 → 按自然序排好的图片路径。
+	extraFanart map[string][]string
+}
+
+// extraFanartFor 取该视频对应的 extrafanart 图片：同目录多部片时优先
+// <视频名>-extrafanart，没有才回退到整目录共用的 extrafanart。
+func (s *dirSnapshot) extraFanartFor(fileName string) []string {
+	if s == nil || len(s.extraFanart) == 0 {
+		return nil
+	}
+	base := strings.ToLower(strings.TrimSuffix(fileName, filepath.Ext(fileName)))
+	if paths := s.extraFanart[base+"-extrafanart"]; len(paths) > 0 {
+		return paths
+	}
+	return s.extraFanart["extrafanart"]
 }
 
 // prepareScanCache 在扫描开始时准备两类快照，读完即固定，扫描期间不再变化。
@@ -264,7 +280,11 @@ func (s *Scanner) snapshotDir(dir string) *dirSnapshot {
 		return snapshot
 	}
 
-	snapshot = &dirSnapshot{images: readImageIndex(dir), actors: readActorIndex(dir)}
+	snapshot = &dirSnapshot{
+		images:      readImageIndex(dir),
+		actors:      readActorIndex(dir),
+		extraFanart: readExtraFanartIndex(dir),
+	}
 
 	s.dirMu.Lock()
 	if s.dirCache == nil {
@@ -466,7 +486,10 @@ func (s *Scanner) buildItem(ctx context.Context, libraryID, root, path string, l
 	if err != nil {
 		return nil, false, err
 	}
-	fingerprint := fileFingerprint(info)
+	// extrafanart 子目录里的图同样算片源的一部分：把它的内容摘要并进指纹，
+	// 后加或删掉艺术图都会让指纹变化，重新扫描即可触发一次图片导入。
+	fingerprint := artworkFingerprint(info,
+		s.snapshotDir(filepath.Dir(path)).extraFanartFor(filepath.Base(path)))
 
 	// NFO 只是一个很小的文件，解析很便宜，但它决定条目 ID，
 	// 所以必须在探测前完成；解析失败时退回按路径派生 ID。
@@ -587,6 +610,30 @@ func deriveItemID(nfo *NFOData, libraryID, root, path string) string {
 // fileFingerprint 用体积与修改时间组合指纹：两者都没变就认为文件内容没变。
 func fileFingerprint(info os.FileInfo) string {
 	return fmt.Sprintf("%d:%d", info.Size(), info.ModTime().UnixNano())
+}
+
+// artworkFingerprint 是入库时写入 items.fingerprint 的完整值：
+// 片源体积/修改时间 + extrafanart 目录摘要。扫描与测试共用这一份，避免两处拼法不一致。
+func artworkFingerprint(info os.FileInfo, extraFanart []string) string {
+	return fileFingerprint(info) + extraFanartFingerprint(extraFanart)
+}
+
+// extraFanartFingerprint 把 extrafanart 目录的内容摘要成指纹的一段。
+// 这里只统计张数与各图体积/修改时间之和：够用且只需几次 stat，
+// 不必对每张图做哈希。
+func extraFanartFingerprint(paths []string) string {
+	if len(paths) == 0 {
+		return ":ef=0"
+	}
+	var sum int64
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			continue
+		}
+		sum += info.Size() + info.ModTime().UnixNano()
+	}
+	return fmt.Sprintf(":ef=%d:%d", len(paths), sum)
 }
 
 // removeCachedBif 回收条目的进度条缩略图缓存，缓存未启用时直接跳过。

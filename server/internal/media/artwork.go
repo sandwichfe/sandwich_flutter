@@ -3,6 +3,7 @@ package media
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -106,6 +107,97 @@ func findArtworkIn(dir, fileName string, images map[string]string) LocalArtwork 
 	}
 
 	return art
+}
+
+// readExtraFanartIndex 枚举视频目录下的 extrafanart 子目录，返回
+// 「小写目录名 → 按文件名自然排序的图片路径」。
+// 支持两种命名：<视频名>-extrafanart（同目录多部片各自独立）与 extrafanart（整目录共用）。
+func readExtraFanartIndex(videoDir string) map[string][]string {
+	entries, err := os.ReadDir(videoDir)
+	if err != nil {
+		return nil
+	}
+	result := make(map[string][]string, 2)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := strings.ToLower(entry.Name())
+		if name != "extrafanart" && !strings.HasSuffix(name, "-extrafanart") {
+			continue
+		}
+		if paths := readExtraFanartImages(filepath.Join(videoDir, entry.Name())); len(paths) > 0 {
+			result[name] = paths
+		}
+	}
+	return result
+}
+
+// readExtraFanartImages 读取一个 extrafanart 目录里的全部图片，按文件名自然排序，
+// 这样 fanart2 会排在 fanart10 前面，与目录里看到的顺序一致。
+func readExtraFanartImages(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	paths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if !artworkExtensions[strings.ToLower(filepath.Ext(entry.Name()))] {
+			continue
+		}
+		paths = append(paths, filepath.Join(dir, entry.Name()))
+	}
+	sort.Slice(paths, func(i, j int) bool {
+		return naturalLess(filepath.Base(paths[i]), filepath.Base(paths[j]))
+	})
+	return paths
+}
+
+// naturalLess 按「连续数字段按数值比较」排序，其余字符按 ASCII 比较。
+func naturalLess(a, b string) bool {
+	a, b = strings.ToLower(a), strings.ToLower(b)
+	for i, j := 0, 0; i < len(a) && j < len(b); {
+		if isASCIIDigit(a[i]) && isASCIIDigit(b[j]) {
+			startI, startJ := i, j
+			for i < len(a) && isASCIIDigit(a[i]) {
+				i++
+			}
+			for j < len(b) && isASCIIDigit(b[j]) {
+				j++
+			}
+			if less, decided := compareDigitRuns(a[startI:i], b[startJ:j]); decided {
+				return less
+			}
+			continue
+		}
+		if a[i] != b[j] {
+			return a[i] < b[j]
+		}
+		i++
+		j++
+	}
+	return len(a) < len(b)
+}
+
+// compareDigitRuns 比较两段纯数字：先去掉前导零，再比长度、最后比字典序。
+// decided 为 false 表示两段数值相等，交给调用方继续比较后面的字符。
+func compareDigitRuns(a, b string) (less, decided bool) {
+	a = strings.TrimLeft(a, "0")
+	b = strings.TrimLeft(b, "0")
+	if len(a) != len(b) {
+		return len(a) < len(b), true
+	}
+	if a == b {
+		return false, false
+	}
+	return a < b, true
+}
+
+func isASCIIDigit(value byte) bool {
+	return value >= '0' && value <= '9'
 }
 
 // FindActorImages 读取 tinyMediaManager 生成的 .actors 目录。

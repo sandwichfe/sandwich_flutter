@@ -57,6 +57,7 @@ data/
 | 海报 Primary | `<视频名>-poster` → `poster` → `folder` → `cover` → `<视频名>` → `movie` |
 | 背景 Backdrop | `<视频名>-fanart` → `fanart` → `<视频名>-backdrop` → `backdrop` → `<视频名>-background` → `background` |
 | 背景（带序号） | `<视频名>-fanart1..10` → `fanart1..10` → `<视频名>-backdrop1..10` → `backdrop1..10` → `extrafanart1..10` |
+| 艺术图（子目录） | `<视频名>-extrafanart/` → `extrafanart/`（目录内所有 jpg/jpeg/png，按文件名自然排序，追加在同目录背景图之后） |
 | 横幅 Banner | `<视频名>-banner` → `banner` |
 | 缩略 Thumb | `<视频名>-thumb` → `thumb` → `landscape` |
 | Logo | `<视频名>-clearlogo` → `clearlogo` → `<视频名>-logo` → `logo` |
@@ -67,7 +68,9 @@ data/
 
 只接受 `.jpg` / `.jpeg` / `.png`。`.webp` 会被跳过——标准库解不了，硬存会导致响应头声明 `image/jpeg` 但内容是 webp。
 
-**不支持 `extrafanart/` 子目录**。如果你目录里是 `extrafanart/0.png`、`1.png`，这些不会入库；只有文件名形如 `extrafanart1.jpg` 的才会被当成第二张背景图。
+`extrafanart/` 子目录是支持的：目录里所有 `.jpg/.jpeg/.png` 按文件名自然排序（`fanart2` 在 `fanart10` 之前）依次追加为 Backdrop，序号接在同目录背景图之后，所以 0 号槽位（详情页顶部大图）仍然优先由 `fanart.jpg` 一类文件占用。同目录多部片时优先用 `<视频名>-extrafanart/`，没有才回退到整目录共用的 `extrafanart/`。
+
+`extrafanart/` 的内容摘要（张数 + 各图体积/修改时间之和）会并进 `items.fingerprint`：只要增删改过艺术图，重新扫描就会重跑一次图片导入。源端删图后，多出来的 Backdrop 槽位会被清理（用户上传 / 视频生成的图不清理）。
 
 查看你当前目录的实际匹配结果：`IPX712.[4K]-poster.jpg` 会命中 `<视频名>-poster`，`fanart.jpg` 命中 `fanart`。
 
@@ -219,7 +222,7 @@ file:<path>?_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=forei
 | `image_tags` | 图片入库 | JSON 对象 |
 | `backdrop_tags` | 图片入库 | JSON 数组 |
 | `screenshot_tags` | 未实现 | 恒为 `[]` |
-| `fingerprint` | 扫描时算 `size:mtime` | 重复扫描命中就跳过 ffprobe 与图片导入 |
+| `fingerprint` | 扫描时算 `size:mtime` + `extrafanart` 摘要 | 重复扫描命中就跳过 ffprobe 与图片导入 |
 | `nfo_mtime` | NFO 修改时间（纳秒） | 视频没动但 NFO 改了也要重新入库 |
 
 ### 3.3 一条真实记录长什么样
@@ -294,7 +297,7 @@ ListenAndServe :8096
    ↓ FindNFO → ParseNFO
    │    → 标题/简介/流派/演员/外部 ID；NFO 决定条目 ID，必须在探测前解析
    ↓ deriveItemID（TMDB → IMDb → 库 ID + 相对库根路径）
-   ↓ 比对 fingerprint（size:mtime）与 nfo_mtime
+   ↓ 比对 fingerprint（size:mtime + extrafanart 摘要）与 nfo_mtime
    │    命中 → 只 UPDATE 路径与库归属，跳过下面全部步骤
    ↓ ffprobe -show_format -show_streams
    │    → 时长、容器、码率、宽高、完整流信息（编码/色彩/声道…）
@@ -451,7 +454,7 @@ GET /emby/Library/ScanStatus（管理员）
 |---|---|---|
 | 图片缩放 | 纯 Go 双线性 + 磁盘缓存 | 首次 1600px 约 110ms，命中缓存约 13ms |
 | 图片换新 | 客户端图片 URL 已统一带 `v={tag}`（S5.8） | 服务端换图后 URL 变化，Flutter 缓存自动失效 |
-| `extrafanart/` 子目录 | 不支持 | 多背景图只能靠 `fanart1.jpg` 这种命名 |
+| `extrafanart/` 子目录 | 支持，作为 Backdrop 追加 | 艺术图数量受磁盘缓存容量策略约束 |
 | `.webp` | 跳过 | 只处理 jpg/jpeg/png |
 | 章节 | 未实现 | 详情页章节列表为空；`chapters` 恒为 `[]` |
 | 剧集层级 | 未实现 | 视频统一按 `Movie` 入库，没有 Season/Episode |

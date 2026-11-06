@@ -65,7 +65,7 @@ func TestBuildItemSkipsProbeWhenFingerprintMatches(t *testing.T) {
 		Name:        "movie",
 		SortName:    "movie",
 		Path:        video,
-		Fingerprint: fileFingerprint(info),
+		Fingerprint: artworkFingerprint(info, nil),
 	}); err != nil {
 		t.Fatalf("写入条目失败: %v", err)
 	}
@@ -113,5 +113,167 @@ func TestBuildItemProbesWhenFingerprintChanges(t *testing.T) {
 	scanner := &Scanner{store: st, prober: NewProber(filepath.Join(dir, "missing-ffprobe"))}
 	if _, _, err := scanner.buildItem(context.Background(), "lib1", dir, video, func(string, ...any) {}); err == nil {
 		t.Error("指纹不一致时应重新探测，实际却直接返回成功")
+	}
+}
+
+func TestBuildItemProbesWhenExtraFanartAdded(t *testing.T) {
+	// 片源没动、只往 extrafanart 里补图时，也必须重新导入一次，否则新图永远扫不到。
+	dir := t.TempDir()
+	video := filepath.Join(dir, "movie.mp4")
+	if err := os.WriteFile(video, []byte("fake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := store.Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("打开数据库失败: %v", err)
+	}
+	defer st.Close()
+
+	info, err := os.Stat(video)
+	if err != nil {
+		t.Fatal(err)
+	}
+	itemID := deriveItemID(nil, "lib1", dir, video)
+	if err := st.UpsertItem(context.Background(), &store.Item{
+		ID:          itemID,
+		LibraryID:   "lib1",
+		ParentID:    "lib1",
+		Type:        "Movie",
+		Name:        "movie",
+		SortName:    "movie",
+		Path:        video,
+		Fingerprint: artworkFingerprint(info, nil),
+	}); err != nil {
+		t.Fatalf("写入条目失败: %v", err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(dir, "extrafanart"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "extrafanart", "fanart1.jpg"), []byte("img"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	scanner := &Scanner{store: st, prober: NewProber(filepath.Join(dir, "missing-ffprobe"))}
+	if _, _, err := scanner.buildItem(context.Background(), "lib1", dir, video, func(string, ...any) {}); err == nil {
+		t.Error("extrafanart 变化后应重新探测并导入图片，实际却直接返回成功")
+	}
+}
+
+func TestExtraFanartPrefersVideoNamedDir(t *testing.T) {
+	dir := t.TempDir()
+	// 同目录多部片时，<视频名>-extrafanart 只属于对应条目；共用的 extrafanart 兜底。
+	for _, name := range []string{"extrafanart", "Movie-extrafanart"} {
+		if err := os.MkdirAll(filepath.Join(dir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "extrafanart", "fanart1.jpg"), []byte("shared"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Movie-extrafanart", "own.jpg"), []byte("own"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot := &dirSnapshot{extraFanart: readExtraFanartIndex(dir)}
+	if got := snapshot.extraFanartFor("Movie.mkv"); len(got) != 1 || filepath.Base(got[0]) != "own.jpg" {
+		t.Errorf("应优先使用 <视频名>-extrafanart, 实际 %v", got)
+	}
+	if got := snapshot.extraFanartFor("Other.mkv"); len(got) != 1 || filepath.Base(got[0]) != "fanart1.jpg" {
+		t.Errorf("没有同名目录时应回退到共用 extrafanart, 实际 %v", got)
+	}
+}
+
+func TestReadExtraFanartImagesSortsNaturally(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "extrafanart")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// 字典序会把 fanart10 排在 fanart2 前面，这里要求按数字大小排。
+	names := []string{"fanart10.jpg", "fanart2.jpg", "fanart1.png", "note.txt"}
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := readExtraFanartImages(dir)
+	want := []string{"fanart1.png", "fanart2.jpg", "fanart10.jpg"}
+	if len(got) != len(want) {
+		t.Fatalf("期望 %v, 实际 %v", want, got)
+	}
+	for index := range want {
+		if filepath.Base(got[index]) != want[index] {
+			t.Fatalf("期望 %v, 实际 %v", want, got)
+		}
+	}
+}
+
+func TestImportArtworkCachesExtraFanart(t *testing.T) {
+	dir := t.TempDir()
+	video := filepath.Join(dir, "Movie.mkv")
+	mustWriteFile(t, video, "video")
+	mustWriteFile(t, filepath.Join(dir, "fanart.jpg"), "main-fanart")
+	if err := os.MkdirAll(filepath.Join(dir, "extrafanart"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustWriteFile(t, filepath.Join(dir, "extrafanart", "fanart1.jpg"), "extra-1")
+	mustWriteFile(t, filepath.Join(dir, "extrafanart", "fanart2.jpg"), "extra-2")
+
+	st, err := store.Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("打开数据库失败: %v", err)
+	}
+	defer st.Close()
+
+	images := NewImageStore(filepath.Join(dir, "images"))
+	scanner := &Scanner{store: st, images: images}
+	item := &store.Item{
+		ID:           "item1",
+		LibraryID:    "lib1",
+		ImageTags:    map[string]string{},
+		BackdropTags: []string{},
+	}
+	scanner.importArtwork(item, video, func(string, ...any) {})
+
+	// fanart.jpg 仍是 0 号（详情页顶部大图），extrafanart 依次追加在后面。
+	if len(item.BackdropTags) != 3 {
+		t.Fatalf("应导入 1 张背景 + 2 张艺术图, 实际 %d 张", len(item.BackdropTags))
+	}
+	for index, want := range []string{"main-fanart", "extra-1", "extra-2"} {
+		raw, err := images.LoadItemImage("item1", "Backdrop", index)
+		if err != nil {
+			t.Fatalf("第 %d 张应已落盘: %v", index, err)
+		}
+		if string(raw) != want {
+			t.Errorf("第 %d 张内容应为 %q, 实际 %q", index, want, string(raw))
+		}
+	}
+
+	// 源端删掉一张艺术图后重新扫描：多出来的槽位要被回收，标签也只保留现有的。
+	if err := os.Remove(filepath.Join(dir, "extrafanart", "fanart2.jpg")); err != nil {
+		t.Fatal(err)
+	}
+	scanner.dirCache = nil
+	item2 := &store.Item{
+		ID:           "item1",
+		LibraryID:    "lib1",
+		ImageTags:    map[string]string{},
+		BackdropTags: []string{},
+	}
+	scanner.importArtwork(item2, video, func(string, ...any) {})
+	if len(item2.BackdropTags) != 2 {
+		t.Fatalf("删图后应只剩 2 张, 实际 %d 张", len(item2.BackdropTags))
+	}
+	if images.HasItemImage("item1", "Backdrop", 2) {
+		t.Error("多余的第 3 个槽位应被清理")
+	}
+}
+
+func mustWriteFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("写入 %s 失败: %v", path, err)
 	}
 }
