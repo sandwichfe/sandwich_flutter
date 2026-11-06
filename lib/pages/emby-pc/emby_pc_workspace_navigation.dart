@@ -7,6 +7,7 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
     if (_c.view == 'recently-played') return '继续观看';
     if (_c.view == 'latest') return '最新入库';
     if (_c.view == 'people') return '演员列表';
+    if (_c.view == 'part-groups') return '分片影片';
     if (_c.view == 'favorite-movies') return '收藏影片';
     if (_c.view == 'favorite-people') return '收藏演员';
     for (final library in _c.libraries) {
@@ -288,8 +289,17 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
                       onPressed: () => _selectLibrary(library.id),
                     ),
                   ),
-                  // 媒体库与全局演员入口分组显示，便于区分内容来源。
+                  // 媒体库与全局入口分组显示，便于区分内容来源。
                   Divider(height: _sidebarCollapsed ? 18 : 28),
+                  _SidebarButton(
+                    icon: Icons.call_split_rounded,
+                    title: '分片影片',
+                    count: null,
+                    showCount: false,
+                    active: _c.view == 'part-groups',
+                    collapsed: _sidebarCollapsed,
+                    onPressed: _selectPartGroups,
+                  ),
                   _SidebarButton(
                     icon: Icons.groups_outlined,
                     title: '演员列表',
@@ -428,8 +438,17 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
                       ),
                     ),
                   ),
-                  // 演员入口与媒体库分组显示，避免与动态媒体库名称混淆。
+                  // 全局入口与媒体库分组显示，避免与动态媒体库名称混淆。
                   const Divider(height: 28),
+                  _SidebarButton(
+                    icon: Icons.call_split_rounded,
+                    title: '分片影片',
+                    count: null,
+                    showCount: false,
+                    active: _c.view == 'part-groups',
+                    onPressed: () =>
+                        _selectFromMobileNavigation(_selectPartGroups),
+                  ),
                   _SidebarButton(
                     icon: Icons.groups_outlined,
                     title: '演员列表',

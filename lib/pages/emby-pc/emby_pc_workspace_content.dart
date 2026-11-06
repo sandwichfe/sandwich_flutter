@@ -11,6 +11,22 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
     // 避免临界宽度下过早增加列数。
     final mediaGridMaxExtent = imageStyle == 'backdrop' ? 336.0 : 214.0;
     final mediaGridAspectRatio = imageStyle == 'backdrop' ? 1.28 : 0.585;
+    // 分片影片是独立的管理视图：自带搜索与刷新，不复用媒体库列表的筛选工具栏。
+    if (_c.view == 'part-groups') {
+      return ColoredBox(
+        color: colors.surfaceContainerLowest,
+        child: Column(
+          children: [
+            _EmbyPcWorkspaceToolbar(
+              this,
+            )._buildWorkspaceHeader(context, compact: compact),
+            Expanded(
+              child: EmbyPcPartGroupsView(onOpenItem: _openItem),
+            ),
+          ],
+        ),
+      );
+    }
     return ColoredBox(
       color: colors.surfaceContainerLowest,
       child: Column(

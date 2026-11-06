@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"embyx/internal/dto"
@@ -222,6 +223,199 @@ func (s *Store) SiblingItems(ctx context.Context, userID, itemID string) ([]dto.
 		items = append(items, result)
 	}
 	return items, rows.Err()
+}
+
+// ---------- 分片组管理视图 ----------
+
+// PartGroupQuery 是分片组列表的查询条件，供管理页核对自动识别结果。
+type PartGroupQuery struct {
+	LibraryID  string
+	SearchTerm string
+	// OnlyMultiple 为 true 时只返回 2 段以上的组；关掉能看到"曾经多段、删了只剩一段"的残留。
+	OnlyMultiple bool
+	StartIndex   int
+	Limit        int
+}
+
+// PartGroup 是管理视图里的一行：一个分组及其全部成员。
+type PartGroup struct {
+	Key         string
+	LibraryID   string
+	LibraryName string
+	Name        string
+	PartCount   int
+	Parts       []PartGroupMember
+}
+
+// PartGroupMember 是组内一个物理文件，只取管理页需要的字段。
+type PartGroupMember struct {
+	ID              string
+	Name            string
+	PartIndex       int
+	RunTimeTicks    int64
+	Path            string
+	PrimaryImageTag string
+}
+
+// PartGroups 按组分页返回分片归属，组内成员一次取全，避免逐个组查库。
+// JOIN items 天然过滤掉孤儿归属行（条目已删），列表里不会出现指向空条目的组。
+func (s *Store) PartGroups(ctx context.Context, q PartGroupQuery) ([]PartGroup, int, error) {
+	where := []string{"1 = 1"}
+	args := []any{}
+	if libraryID := strings.TrimSpace(q.LibraryID); libraryID != "" {
+		where = append(where, "i.library_id = ?")
+		args = append(args, libraryID)
+	}
+	if term := strings.TrimSpace(q.SearchTerm); term != "" {
+		like := "%" + term + "%"
+		where = append(where, `EXISTS (
+			SELECT 1 FROM item_groups g2 JOIN items i2 ON i2.id = g2.item_id
+			WHERE g2.group_key = g.group_key AND (i2.name LIKE ? OR i2.path LIKE ?))`)
+		args = append(args, like, like)
+	}
+
+	fromSQL := ` FROM item_groups g JOIN items i ON i.id = g.item_id
+		WHERE ` + strings.Join(where, " AND ") + ` GROUP BY g.group_key`
+	havingSQL := ""
+	if q.OnlyMultiple {
+		havingSQL = " HAVING COUNT(*) > 1"
+	}
+
+	var total int
+	countSQL := "SELECT COUNT(*) FROM (SELECT g.group_key" + fromSQL + havingSQL + ")"
+	if err := s.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("统计分片组失败: %w", err)
+	}
+
+	limit := q.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	offset := q.StartIndex
+	if offset < 0 {
+		offset = 0
+	}
+
+	listSQL := "SELECT g.group_key, COUNT(*) AS part_count" + fromSQL + havingSQL +
+		// 组按成员最小序号排序，成员序号相同的组用 group_key 兜底保证分页稳定。
+		" ORDER BY MIN(g.part_index) ASC, g.group_key ASC LIMIT ? OFFSET ?"
+	listArgs := append(append([]any{}, args...), limit, offset)
+	rows, err := s.db.QueryContext(ctx, listSQL, listArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("查询分片组失败: %w", err)
+	}
+	defer rows.Close()
+
+	keys := make([]string, 0, limit)
+	counts := make(map[string]int, limit)
+	for rows.Next() {
+		var (
+			key   string
+			count int
+		)
+		if err := rows.Scan(&key, &count); err != nil {
+			return nil, 0, err
+		}
+		keys = append(keys, key)
+		counts[key] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if len(keys) == 0 {
+		return []PartGroup{}, total, nil
+	}
+
+	members, err := s.partGroupMembers(ctx, keys)
+	if err != nil {
+		return nil, 0, err
+	}
+	libraries, err := s.Libraries(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	libraryNames := make(map[string]string, len(libraries))
+	for _, library := range libraries {
+		libraryNames[library.ID] = library.Name
+	}
+
+	groups := make([]PartGroup, 0, len(keys))
+	for _, key := range keys {
+		parts := members[key]
+		group := PartGroup{
+			Key:       key,
+			PartCount: counts[key],
+			Parts:     parts,
+			Name:      groupDisplayName(key, parts),
+		}
+		if len(parts) > 0 {
+			group.LibraryID = groupLibraryID(key)
+		}
+		group.LibraryName = libraryNames[group.LibraryID]
+		groups = append(groups, group)
+	}
+	return groups, total, nil
+}
+
+// partGroupMembers 用一次 IN 查询取回多组的全部成员，按组序号数字升序。
+func (s *Store) partGroupMembers(ctx context.Context, keys []string) (map[string][]PartGroupMember, error) {
+	query := `SELECT g.group_key, g.part_index, i.id, i.name, i.path, i.run_time_ticks, i.image_tags
+		FROM item_groups g JOIN items i ON i.id = g.item_id
+		WHERE g.group_key IN (` + placeholders(len(keys)) + `)
+		ORDER BY g.group_key ASC, g.part_index ASC, i.sort_name ASC`
+	rows, err := s.db.QueryContext(ctx, query, toAny(keys)...)
+	if err != nil {
+		return nil, fmt.Errorf("查询分片组成员失败: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string][]PartGroupMember, len(keys))
+	for rows.Next() {
+		var (
+			key    string
+			member PartGroupMember
+			tags   string
+		)
+		if err := rows.Scan(&key, &member.PartIndex, &member.ID, &member.Name,
+			&member.Path, &member.RunTimeTicks, &tags); err != nil {
+			return nil, err
+		}
+		parsed := map[string]string{}
+		unmarshalJSON(tags, &parsed)
+		member.PrimaryImageTag = parsed["Primary"]
+		result[key] = append(result[key], member)
+	}
+	return result, rows.Err()
+}
+
+// 服务端给分片名的固定后缀 ` (n)`，展示组名时去掉，避免标题里出现两遍序号。
+var partDisplaySuffix = regexp.MustCompile(`\s*\(\d{1,2}\)\s*$`)
+
+// groupDisplayName 用组内序号最小的成员名推导组名；取不到时退回 group_key 末段。
+func groupDisplayName(key string, parts []PartGroupMember) string {
+	if len(parts) > 0 {
+		name := strings.TrimSpace(partDisplaySuffix.ReplaceAllString(parts[0].Name, ""))
+		if name != "" {
+			return name
+		}
+	}
+	if index := strings.LastIndex(key, "|"); index >= 0 {
+		if tail := strings.TrimSpace(key[index+1:]); tail != "" {
+			return tail
+		}
+	}
+	return key
+}
+
+// groupLibraryID 从 group_key（libraryID|相对目录|归一化标题）里取回媒体库 ID。
+func groupLibraryID(key string) string {
+	if index := strings.Index(key, "|"); index > 0 {
+		return key[:index]
+	}
+	return ""
 }
 
 // DeleteItemGroups 手动清理归属行：库内没有外键，条目删了必须跟着删，

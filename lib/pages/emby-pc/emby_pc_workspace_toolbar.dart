@@ -19,26 +19,35 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
         fontWeight: FontWeight.w600,
       ),
     );
+    // 分片影片是独立的管理视图，条目数与搜索都由视图自己维护，头部不再展示列表状态。
+    final partGroupsView = _c.view == 'part-groups';
     // 加载进度紧跟页面标题，并微调字面位置以与大字号标题视觉居中。
-    final loadStatus = Transform.translate(
-      offset: const Offset(0, 2),
-      child: Text(
-        _c.loading && _c.items.isEmpty
-            ? '加载中'
-            // 随机模式只展示当前这批样本，总数仍是筛选后的全量。
-            : _c.randomMode
-            ? '随机 ${_c.items.length} 条 / 共 ${_c.total} 条'
-            : '已加载 ${_c.items.length} 条 /  ${_c.total} 条',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
-      ),
-    );
+    final loadStatus =
+        partGroupsView
+            ? const SizedBox.shrink()
+            : Transform.translate(
+                offset: const Offset(0, 2),
+                child: Text(
+                  _c.loading && _c.items.isEmpty
+                      ? '加载中'
+                      // 随机模式只展示当前这批样本，总数仍是筛选后的全量。
+                      : _c.randomMode
+                      ? '随机 ${_c.items.length} 条 / 共 ${_c.total} 条'
+                      : '已加载 ${_c.items.length} 条 /  ${_c.total} 条',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: colors.onSurfaceVariant,
+                    fontSize: 12,
+                  ),
+                ),
+              );
     if (stackedMobileHeader && _c.view != 'home') {
       return Material(
         color: colors.surfaceContainerLowest,
         child: Container(
-          constraints: const BoxConstraints(minHeight: 118),
+          // 分片影片没有头部搜索行，高度与桌面头部保持一致即可。
+          constraints: BoxConstraints(minHeight: partGroupsView ? 76 : 118),
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
           child: Column(
             children: [
@@ -61,11 +70,13 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                   )._buildAccountMenu(context),
                 ],
               ),
-              const SizedBox(height: 8),
               // 搜索框独占第二行，避免与标题、加载数量和账号入口互相挤压。
-              _EmbyPcWorkspaceNavigation(
-                this,
-              )._buildSearchField(double.infinity),
+              if (!partGroupsView) ...[
+                const SizedBox(height: 8),
+                _EmbyPcWorkspaceNavigation(
+                  this,
+                )._buildSearchField(double.infinity),
+              ],
             ],
           ),
         ),
@@ -96,13 +107,16 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                   ],
                 ),
               ),
-              const SizedBox(width: 16),
               // 窄屏下允许搜索框随剩余空间收缩，避免固定宽度挤出工具栏。
-              Flexible(
-                child: _EmbyPcWorkspaceNavigation(
-                  this,
-                )._buildSearchField(compact ? 230 : 340),
-              ),
+              // 分片影片的搜索框在视图内部，头部不再重复一个查媒体库的输入框。
+              if (!partGroupsView) ...[
+                const SizedBox(width: 16),
+                Flexible(
+                  child: _EmbyPcWorkspaceNavigation(
+                    this,
+                  )._buildSearchField(compact ? 230 : 340),
+                ),
+              ],
             ],
             if (compact) ...[
               const SizedBox(width: 12),
@@ -160,6 +174,8 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
           _selectRecentlyPlayed();
         } else if (value == 'people') {
           _selectPeople();
+        } else if (value == 'part-groups') {
+          _selectPartGroups();
         } else if (value == 'favorite-movies' || value == 'favorite-people') {
           _selectFavorites(value);
         } else {
@@ -178,7 +194,8 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
               (library) =>
                   PopupMenuItem(value: library.id, child: Text(library.name)),
             ),
-            // 紧凑桌面布局使用弹出菜单替代侧栏，也保留演员列表入口。
+            // 紧凑桌面布局使用弹出菜单替代侧栏，也保留分片影片与演员列表入口。
+            const PopupMenuItem(value: 'part-groups', child: Text('分片影片')),
             const PopupMenuItem(value: 'people', child: Text('演员列表')),
             const PopupMenuDivider(),
             const PopupMenuItem(

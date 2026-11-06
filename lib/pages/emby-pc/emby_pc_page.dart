@@ -20,6 +20,7 @@ import 'emby_pc_workspace_controller.dart';
 part 'emby_pc_workspace_navigation.dart';
 part 'emby_pc_workspace_content.dart';
 part 'emby_pc_workspace_toolbar.dart';
+part 'emby_pc_workspace_part_groups.dart';
 part 'emby_pc_global_search.dart';
 part 'emby_pc_workspace_support.dart';
 
@@ -240,7 +241,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
 
   // 接近底部时加载下一页：单飞去抖，快速滚动只保留最后一次请求。
   void _onScroll() {
-    if (_c.view == 'home') return;
+    if (_c.view == 'home' || _c.view == 'part-groups') return;
     // 随机播放只有当前这一批样本，继续翻页会变成再抽一批。
     if (_c.randomMode) return;
     if (_c.loading || _c.loadingMore || _c.refreshing) return;
@@ -371,6 +372,20 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
     });
     await _c.loadItems(reset: true);
     _restoreScrollOffset();
+  }
+
+  // 分片影片是只读核对视图，列表与查询都由视图自己维护，这里只切换视图。
+  Future<void> _selectPartGroups() async {
+    if (_c.view == 'part-groups') return;
+    _rememberScrollOffset();
+    // 让媒体库/收藏列表在途的分页请求失效，避免旧结果写回列表状态。
+    _c.queryVersion++;
+    setState(() {
+      _c.view = 'part-groups';
+      _c.activeId = '';
+      _c.clearItems();
+      _resetQueryControllers();
+    });
   }
 
   Future<void> _selectRecentlyPlayed() async {

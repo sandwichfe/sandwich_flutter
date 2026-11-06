@@ -493,6 +493,79 @@ class EmbyPcPage {
   }
 }
 
+// 分片组管理视图：一组 = 同一部影片被切成的多个物理文件。
+class EmbyPcPartGroup {
+  final String groupKey;
+  final String libraryId;
+  final String libraryName;
+  final String name;
+  final int partCount;
+  final List<EmbyPcPartMember> parts;
+
+  const EmbyPcPartGroup({
+    required this.groupKey,
+    this.libraryId = '',
+    this.libraryName = '',
+    this.name = '',
+    this.partCount = 0,
+    this.parts = const [],
+  });
+
+  factory EmbyPcPartGroup.fromJson(Map<String, dynamic> json) => EmbyPcPartGroup(
+    groupKey: _text(json['GroupKey']),
+    libraryId: _text(json['LibraryId']),
+    libraryName: _text(json['LibraryName']),
+    name: _text(json['Name']),
+    partCount: _integer(json['PartCount']),
+    parts: _maps(json['Parts']).map(EmbyPcPartMember.fromJson).toList(),
+  );
+}
+
+// 组内一个物理文件：只保留核对与跳转详情需要的字段。
+class EmbyPcPartMember {
+  final String id;
+  final String name;
+  final int partIndex;
+  final int runTimeTicks;
+  final String path;
+  final String primaryImageTag;
+
+  const EmbyPcPartMember({
+    required this.id,
+    this.name = '',
+    this.partIndex = 0,
+    this.runTimeTicks = 0,
+    this.path = '',
+    this.primaryImageTag = '',
+  });
+
+  factory EmbyPcPartMember.fromJson(Map<String, dynamic> json) =>
+      EmbyPcPartMember(
+        id: _text(json['Id']),
+        name: _text(json['Name']),
+        partIndex: _integer(json['PartIndex']),
+        runTimeTicks: _integer(json['RunTimeTicks']),
+        path: _text(json['Path']),
+        primaryImageTag: _text(json['PrimaryImageTag']),
+      );
+}
+
+// 分片组列表的响应：Groups 与分页总数分开，便于显示"共 N 组"。
+class EmbyPcPartGroupPage {
+  final List<EmbyPcPartGroup> groups;
+  final int total;
+
+  const EmbyPcPartGroupPage({required this.groups, required this.total});
+
+  factory EmbyPcPartGroupPage.fromJson(Map<String, dynamic> json) {
+    final groups = _maps(json['Groups']).map(EmbyPcPartGroup.fromJson).toList();
+    return EmbyPcPartGroupPage(
+      groups: groups,
+      total: _integerOrNull(json['TotalRecordCount']) ?? groups.length,
+    );
+  }
+}
+
 // 媒体库管理走 VirtualFolders 接口，比 Views 多返回目录列表和条目数。
 class EmbyPcVirtualFolder {
   final String id;

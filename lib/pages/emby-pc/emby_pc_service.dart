@@ -933,6 +933,25 @@ class EmbyPcService {
     return EmbyPcPage.fromJson(data).items;
   }
 
+  // 分片组列表（管理员）：按组返回自动识别结果，供核对哪些影片被切成了多个文件。
+  Future<EmbyPcPartGroupPage> getPartGroups({
+    String searchTerm = '',
+    bool onlyMultiple = true,
+    int startIndex = 0,
+    int limit = 100,
+  }) async {
+    final data = await _get(
+      '/emby/ItemGroups',
+      query: {
+        if (searchTerm.trim().isNotEmpty) 'SearchTerm': searchTerm.trim(),
+        'OnlyMultiple': onlyMultiple ? 'true' : 'false',
+        'StartIndex': '$startIndex',
+        'Limit': '${limit.clamp(1, 200)}',
+      },
+    );
+    return EmbyPcPartGroupPage.fromJson(data);
+  }
+
   Future<bool> setFavorite(String itemId, bool favorite) async {
     final path = '/emby/Users/$userId/FavoriteItems/$itemId';
     final response = favorite

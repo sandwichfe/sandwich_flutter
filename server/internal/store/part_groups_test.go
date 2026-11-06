@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 )
@@ -140,6 +141,79 @@ func TestBackfillItemGroups(t *testing.T) {
 	}
 	if siblings[1].ID != "3070118_2.mp4" {
 		t.Fatalf("分片顺序不符: %+v", siblings)
+	}
+}
+
+// TestPartGroupsListing 验证管理视图的按组查询：组名去掉序号后缀、成员按序返回、
+// OnlyMultiple 与搜索条件都生效。
+func TestPartGroupsListing(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+	if err := st.SaveLibrary(ctx, Library{
+		ID: "lib1", Name: "影片", CollectionType: "movies",
+	}); err != nil {
+		t.Fatalf("保存媒体库失败: %v", err)
+	}
+
+	// 一组三段：名称带服务端追加的序号后缀。
+	for index, name := range []string{"11201 (1)", "11201 (2)", "11201 (3)"} {
+		item := partItem(fmt.Sprintf("multi%d", index+1), "lib1||11201", index+1)
+		item.Name = name
+		item.SortName = name
+		if err := st.UpsertItem(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 一组一段：默认不该出现在"只看多段"的列表里。
+	solo := partItem("solo", "lib1||solo", 1)
+	solo.Name = "solo (1)"
+	if err := st.UpsertItem(ctx, solo); err != nil {
+		t.Fatal(err)
+	}
+
+	groups, total, err := st.PartGroups(ctx, PartGroupQuery{OnlyMultiple: true})
+	if err != nil {
+		t.Fatalf("查询分片组失败: %v", err)
+	}
+	if total != 1 || len(groups) != 1 {
+		t.Fatalf("只看多段应返回 1 组，实际 total=%d len=%d", total, len(groups))
+	}
+	group := groups[0]
+	// 组名去掉 ` (n)`，库里显示的是纯标题。
+	if group.Name != "11201" {
+		t.Fatalf("组名=%q，期望 11201", group.Name)
+	}
+	if group.PartCount != 3 || len(group.Parts) != 3 {
+		t.Fatalf("成员数不符: %+v", group)
+	}
+	// 成员按 part_index 数字升序。
+	for index, part := range group.Parts {
+		if part.PartIndex != index+1 {
+			t.Fatalf("成员顺序不符: %+v", group.Parts)
+		}
+	}
+	if group.LibraryName != "影片" || group.LibraryID != "lib1" {
+		t.Fatalf("库信息不符: %+v", group)
+	}
+
+	// 关闭 OnlyMultiple 后单段组也会出现。
+	all, allTotal, err := st.PartGroups(ctx, PartGroupQuery{OnlyMultiple: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allTotal != 2 || len(all) != 2 {
+		t.Fatalf("关闭只看多段应返回 2 组，实际 total=%d len=%d", allTotal, len(all))
+	}
+
+	// 搜索命中成员名，仍然按组返回。
+	searched, searchedTotal, err := st.PartGroups(ctx, PartGroupQuery{
+		OnlyMultiple: true, SearchTerm: "11201",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if searchedTotal != 1 || len(searched) != 1 || searched[0].Key != "lib1||11201" {
+		t.Fatalf("搜索结果不符: %+v", searched)
 	}
 }
 

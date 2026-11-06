@@ -140,6 +140,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /emby/Items/{itemId}/Similar", s.handleSimilar)
 	// 分片影片：同一部影片被切成多个文件时，返回同组的其它部分（本项目扩展）。
 	s.mux.HandleFunc("GET /emby/Items/{itemId}/Siblings", s.handleSiblings)
+	// 分片组管理视图：按组列出自动识别结果，供核对分组是否准确（本项目扩展，需管理员）。
+	s.mux.HandleFunc("GET /emby/ItemGroups", s.handleItemGroups)
 	s.mux.HandleFunc("POST /emby/Items/{itemId}", s.handleUpdateItem)
 	s.mux.HandleFunc("POST /emby/Items/{itemId}/Refresh", s.handleRefreshItem)
 
