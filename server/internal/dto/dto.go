@@ -67,6 +67,13 @@ type BaseItemDto struct {
 	IndexNumber       *int     `json:"IndexNumber,omitempty"`
 	ParentIndexNumber *int     `json:"ParentIndexNumber,omitempty"`
 
+	// 分片影片（本项目扩展）：一部影片被切成多个文件时，PartIndex/PartCount 用于画 `1/2` 徽标。
+	// 只有 /Items/{itemId} 与 /Items/{itemId}/Siblings 会输出，普通影片没有这两个字段。
+	PartIndex *int `json:"PartIndex,omitempty"`
+	PartCount *int `json:"PartCount,omitempty"`
+	// IsCurrent 只在兄弟列表里标记当前条目，前端据此高亮并禁用点击。
+	IsCurrent bool `json:"IsCurrent,omitempty"`
+
 	Genres  []string     `json:"Genres,omitempty"`
 	Tags    []string     `json:"Tags,omitempty"`
 	Studios []NameIDPair `json:"Studios,omitempty"`

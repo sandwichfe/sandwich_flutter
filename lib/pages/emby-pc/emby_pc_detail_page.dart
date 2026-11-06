@@ -11,6 +11,7 @@ import 'emby_pc_widgets.dart';
 
 part 'emby_pc_detail_layout.dart';
 part 'emby_pc_detail_chapters.dart';
+part 'emby_pc_detail_parts.dart';
 part 'emby_pc_detail_people_artwork.dart';
 part 'emby_pc_detail_information.dart';
 part 'emby_pc_artwork_preview.dart';
@@ -120,6 +121,8 @@ class EmbyPcDetailPage extends StatefulWidget {
 class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
   EmbyPcItem? _detail;
   List<EmbyPcItem> _similar = const [];
+  // 同一部影片的分片（含当前条目）；只有 2 段以上才渲染区块。
+  List<EmbyPcItem> _parts = const [];
   bool _loading = true;
   bool _favoriteBusy = false;
   bool _actionBusy = false;
@@ -160,11 +163,13 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
       final results = await Future.wait<dynamic>([
         EmbyPcService.instance.getItemDetail(widget.item.id),
         EmbyPcService.instance.getSimilarItems(widget.item.id),
+        _loadParts(widget.item.id),
       ]);
       if (!mounted) return;
       setState(() {
         _detail = results[0] as EmbyPcItem;
         _similar = results[1] as List<EmbyPcItem>;
+        _parts = results[2] as List<EmbyPcItem>;
         _error = '';
       });
     } catch (error) {
@@ -173,6 +178,15 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
     } finally {
       _refreshing = false;
       if (mounted && !silent) setState(() => _loading = false);
+    }
+  }
+
+  // 分片列表是旁路信息：服务端未升级或请求失败时按"不分片"处理，不能影响整页详情。
+  Future<List<EmbyPcItem>> _loadParts(String itemId) async {
+    try {
+      return await EmbyPcService.instance.getItemSiblings(itemId);
+    } catch (_) {
+      return const <EmbyPcItem>[];
     }
   }
 
@@ -328,6 +342,7 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
                         child: _DetailContent(
                           detail: detail,
                           similar: _similar,
+                          parts: _parts,
                           favoriteBusy: _favoriteBusy,
                           actionBusy: _actionBusy,
                           onFavorite: _toggleFavorite,

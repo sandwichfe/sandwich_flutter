@@ -171,6 +171,10 @@ func (s *Store) DeleteLibrary(ctx context.Context, id string) ([]string, error) 
 	if err := deleteItemPeople(ctx, tx, itemIDs); err != nil {
 		return nil, err
 	}
+	// 分片归属同理：库删了这些行再也查不到，必须跟着条目一起清。
+	if err := deleteItemGroups(ctx, tx, itemIDs); err != nil {
+		return nil, err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM items WHERE library_id = ? OR parent_id = ?`, id, id); err != nil {
 		return nil, fmt.Errorf("删除库内条目失败: %w", err)
 	}
@@ -233,6 +237,10 @@ func (s *Store) DeleteItems(ctx context.Context, ids []string) error {
 	defer func() { _ = tx.Rollback() }()
 
 	if err := deleteItemPeople(ctx, tx, ids); err != nil {
+		return err
+	}
+	// 分片归属没有外键，条目删除后必须手动清，并把同组剩下的分片数刷新回去。
+	if err := deleteItemGroups(ctx, tx, ids); err != nil {
 		return err
 	}
 

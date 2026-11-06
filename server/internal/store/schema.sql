@@ -140,6 +140,23 @@ CREATE TABLE IF NOT EXISTS item_people (
 
 CREATE INDEX IF NOT EXISTS idx_item_people_person ON item_people(person_id);
 
+-- 分片归属：一部影片被切成 `_1` / `_2` 多个文件时，把同组的 items 串起来。
+-- 单归属（item_id 作主键）而不是多对多：一个物理文件只可能是某部作品的一段。
+-- 只有带明确序号后缀的文件才写行，普通影片一条都不写。
+CREATE TABLE IF NOT EXISTS item_groups (
+    item_id    TEXT PRIMARY KEY,
+    -- group_key = library_id | 相对目录 | 归一化标题，算法见 internal/partgroup。
+    group_key  TEXT NOT NULL,
+    -- part_index 存文件名里的原始序号（1 起），不存组内位置：缺号时才看得出原始编号。
+    part_index INTEGER NOT NULL DEFAULT 0,
+    -- part_count 是组内成员数（冗余，省掉详情页每次 COUNT(*)）。
+    part_count INTEGER NOT NULL DEFAULT 0,
+    -- relation 预留：固定 part，将来可扩展 series / collection。
+    relation   TEXT NOT NULL DEFAULT 'part'
+);
+
+CREATE INDEX IF NOT EXISTS idx_item_groups_key ON item_groups(group_key);
+
 -- 图片锁：锁上的条目/演员/媒体库，扫描导入与自动重拼封面都不会覆盖其图片。
 -- 单独一张表而不是 items 加列，因为锁要覆盖三类实体（items / persons / libraries）。
 CREATE TABLE IF NOT EXISTS image_locks (

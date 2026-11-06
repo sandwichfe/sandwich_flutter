@@ -1,12 +1,14 @@
 package store
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha1"
 	"database/sql"
 	_ "embed"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -34,7 +36,11 @@ type Store struct {
 
 // schemaVersion 对应 schema.sql 的表结构版本号。
 // 改表结构时递增，并在 schemaMigrations 里补上「上一版 → 这一版」的语句。
-const schemaVersion = 8
+const schemaVersion = 9
+
+// schemaVersionBackfillGroups 是「分片归属」开始生效的版本：
+// 从这个版本起，打开老库要按现存 items 回填 item_groups，不重扫也能生效。
+const schemaVersionBackfillGroups = 9
 
 // schemaMigrations 是「版本 N → N+1」的升级语句。
 // 新库按 schema.sql 一次建到最新；老库按 PRAGMA user_version 逐级补齐，
@@ -96,6 +102,17 @@ var schemaMigrations = map[int][]string{
 		`ALTER TABLE persons ADD COLUMN scraped_at TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE persons ADD COLUMN match_state TEXT NOT NULL DEFAULT ''`,
 	},
+	// 8 → 9：分片影片归属表。归属行由扫描旁路写入，老库另由 Go 侧回填。
+	8: {
+		`CREATE TABLE IF NOT EXISTS item_groups (
+			item_id    TEXT PRIMARY KEY,
+			group_key  TEXT NOT NULL,
+			part_index INTEGER NOT NULL DEFAULT 0,
+			part_count INTEGER NOT NULL DEFAULT 0,
+			relation   TEXT NOT NULL DEFAULT 'part'
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_item_groups_key ON item_groups(group_key)`,
+	},
 }
 
 func Open(dbPath string) (*Store, error) {
@@ -152,6 +169,13 @@ func (s *Store) prepareSchema() error {
 	}
 	if err := s.migrateSchema(version); err != nil {
 		return err
+	}
+	// 分片归属从版本 9 起生效：老库不重新扫描也要能补齐，否则详情页要等下一次扫描才有分片列表。
+	// 回填失败只记日志，不影响启动——归属信息是旁路能力。
+	if version < schemaVersionBackfillGroups {
+		if err := s.BackfillItemGroups(context.Background()); err != nil {
+			log.Printf("回填分片归属失败: %v", err)
+		}
 	}
 	return nil
 }

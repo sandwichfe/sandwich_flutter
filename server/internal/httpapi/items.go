@@ -229,6 +229,25 @@ func (s *Server) handleSimilar(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, dto.QueryResult{Items: items, TotalRecordCount: len(items)})
 }
 
+// handleSiblings 对应本项目扩展的 GET /Items/{itemId}/Siblings：
+// 返回同一部影片的其它分片，按原始序号升序，当前条目带 IsCurrent 标记一起返回，
+// 这样前端不用自己拼接。没有分片归属时返回空数组而不是 404——绝大多数影片都是这种情形。
+func (s *Server) handleSiblings(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("UserId")
+	itemID := r.PathValue("itemId")
+
+	items, err := s.store.SiblingItems(r.Context(), userID, itemID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "条目不存在")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "查询分片列表失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, dto.QueryResult{Items: items, TotalRecordCount: len(items)})
+}
+
 func (s *Server) handleUpdateItem(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	if user == nil || !user.IsAdmin {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	"embyx/internal/dto"
@@ -53,6 +54,11 @@ type Item struct {
 	Fingerprint string
 	// NFOMtime 是 NFO 文件的修改时间（纳秒），单独比对，改了 NFO 也要重新入库。
 	NFOMtime int64
+
+	// PartGroupKey / PartIndex 是扫描时从文件名推导的分片归属，不写进 items 表；
+	// PartGroupKey 为空表示该文件不是分片，不参与分组。
+	PartGroupKey string
+	PartIndex    int
 }
 
 type UserData struct {
@@ -306,6 +312,10 @@ func (s *Store) GetItem(ctx context.Context, userID, itemID string) (*dto.BaseIt
 	if len(people) > 0 {
 		result.People = people
 	}
+	// 分片序号与总数一并返回：详情页不必等兄弟接口就能画出 `1/2` 徽标。
+	if err := s.fillPartInfo(ctx, &result); err != nil {
+		return nil, err
+	}
 	return &result, nil
 }
 
@@ -492,6 +502,10 @@ func (s *Store) UpsertItem(ctx context.Context, item *Item) error {
 	// 演员拆表：persons 是演员主表，item_people 是演员×条目关联，people JSON 只是入库快照。
 	if err := syncItemPeople(ctx, tx, item.ID, item.People); err != nil {
 		return err
+	}
+	// 分片归属是扫描的旁路产物：写失败只记日志，不能让文件入库失败。
+	if err := upsertItemGroup(ctx, tx, item); err != nil {
+		log.Printf("写入分片归属失败 item=%s: %v", item.ID, err)
 	}
 	return tx.Commit()
 }

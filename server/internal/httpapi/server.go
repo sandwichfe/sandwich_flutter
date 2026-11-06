@@ -138,6 +138,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /emby/Studios", s.handleStudios)
 	s.mux.HandleFunc("GET /emby/Tags", s.handleTags)
 	s.mux.HandleFunc("GET /emby/Items/{itemId}/Similar", s.handleSimilar)
+	// 分片影片：同一部影片被切成多个文件时，返回同组的其它部分（本项目扩展）。
+	s.mux.HandleFunc("GET /emby/Items/{itemId}/Siblings", s.handleSiblings)
 	s.mux.HandleFunc("POST /emby/Items/{itemId}", s.handleUpdateItem)
 	s.mux.HandleFunc("POST /emby/Items/{itemId}/Refresh", s.handleRefreshItem)
 

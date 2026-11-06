@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 
 	"embyx/internal/dto"
+	"embyx/internal/partgroup"
 	"embyx/internal/store"
 )
 
@@ -514,6 +515,15 @@ func (s *Scanner) buildItem(ctx context.Context, libraryID, root, path string, l
 
 	itemID := deriveItemID(nfo, libraryID, root, path)
 
+	// 分片后缀要在解析标题前剥掉：`3070118_1` 直接进 cleanTitle 会变成 "3070118 1"。
+	fileName := filepath.Base(path)
+	part, isPart := partgroup.ParseSuffix(strings.TrimSuffix(fileName, filepath.Ext(fileName)))
+	// 归属键只对分片文件有意义；普通影片为空，一条归属行都不会写。
+	partGroupKey := ""
+	if isPart {
+		partGroupKey = partgroup.GroupKey(libraryID, relativeDir(root, path), part.Stem)
+	}
+
 	// 指纹一致说明片源没换过、NFO 也没改过：
 	// 只纠正路径与库归属，跳过 ffprobe 与图片导入——大库重复扫描的耗时几乎都在这里。
 	if state, ok := s.storedState(ctx, itemID); ok &&
@@ -524,6 +534,19 @@ func (s *Scanner) buildItem(ctx context.Context, libraryID, root, path string, l
 				return nil, false, err
 			}
 		}
+		// 归属行是旁路数据：归属行缺失（老库未回填、手动删过）时，靠这一行补回来。
+		// 不碰 items，也不影响重复扫描的性能特征。
+		if partGroupKey != "" {
+			group := store.ItemGroup{
+				ItemID:    itemID,
+				GroupKey:  partGroupKey,
+				PartIndex: part.Index,
+				Relation:  "part",
+			}
+			if err := s.store.EnsureItemGroup(ctx, group); err != nil {
+				logf("补充分片归属失败 %s: %v", path, err)
+			}
+		}
 		return nil, false, nil
 	}
 
@@ -532,7 +555,11 @@ func (s *Scanner) buildItem(ctx context.Context, libraryID, root, path string, l
 		return nil, false, err
 	}
 
-	fileTitle, fileYear := parseFileName(filepath.Base(path))
+	titleSource := fileName
+	if isPart {
+		titleSource = part.Stem
+	}
+	fileTitle, fileYear := parseFileName(titleSource)
 	item := &store.Item{
 		ID: itemID,
 		// Emby 语义里媒体库是条目的父节点，客户端浏览库内内容时传 ParentId=<库ID>。
@@ -578,6 +605,14 @@ func (s *Scanner) buildItem(ctx context.Context, libraryID, root, path string, l
 	if item.SortName == "" {
 		item.SortName = item.Name
 	}
+	// 分片文件在名字里保留序号（`3070118` → `3070118 (1)`）：
+	// 列表页不用改造就能区分两条记录，避免上线后出现两模一样的卡片。
+	if partGroupKey != "" {
+		item.Name = withPartLabel(item.Name, part.Index)
+		item.SortName = withPartLabel(item.SortName, part.Index)
+		item.PartGroupKey = partGroupKey
+		item.PartIndex = part.Index
+	}
 	if item.DateCreated == "" {
 		item.DateCreated = store.NowISO()
 	}
@@ -608,6 +643,28 @@ func deriveItemID(nfo *NFOData, libraryID, root, path string) string {
 	}
 	// 统一分隔符并转小写：Windows 路径大小写不敏感，同一文件不应派生出两个 ID。
 	return store.StableID("item:" + libraryID + ":" + strings.ToLower(filepath.ToSlash(relative)))
+}
+
+// relativeDir 返回文件相对库根的目录，分组键用它而不是绝对路径：
+// 整个库换盘符、换挂载点后，同一部影片的分片仍然成组。
+func relativeDir(root, path string) string {
+	if root == "" {
+		return ""
+	}
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return ""
+	}
+	return filepath.Dir(rel)
+}
+
+// withPartLabel 把分片序号写进条目名，`3070118` → `3070118 (1)`。
+func withPartLabel(name string, index int) string {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return fmt.Sprintf("(%d)", index)
+	}
+	return fmt.Sprintf("%s (%d)", trimmed, index)
 }
 
 // fileFingerprint 用体积与修改时间组合指纹：两者都没变就认为文件内容没变。

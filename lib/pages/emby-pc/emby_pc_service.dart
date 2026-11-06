@@ -923,6 +923,16 @@ class EmbyPcService {
     return EmbyPcPage.fromJson(data).items;
   }
 
+  // 分片列表：同一部影片被切成多个文件时，返回同组的全部部分（含当前条目）。
+  // 没有分片归属时服务端返回空数组，调用方按"不分片"处理即可。
+  Future<List<EmbyPcItem>> getItemSiblings(String itemId) async {
+    final data = await _get(
+      '/emby/Items/$itemId/Siblings',
+      query: {'UserId': userId},
+    );
+    return EmbyPcPage.fromJson(data).items;
+  }
+
   Future<bool> setFavorite(String itemId, bool favorite) async {
     final path = '/emby/Users/$userId/FavoriteItems/$itemId';
     final response = favorite

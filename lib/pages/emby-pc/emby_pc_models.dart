@@ -15,6 +15,13 @@ class EmbyPcItem {
   final int? childCount;
   final int? width;
   final int? height;
+
+  // 分片影片：同一部影片被切成多个文件时，服务端在详情与兄弟列表里给出序号与总数。
+  final int? partIndex;
+  final int? partCount;
+
+  // 兄弟列表里标记当前条目，用于高亮并禁用点击。
+  final bool isCurrent;
   final String path;
   final String premiereDate;
   final String dateCreated;
@@ -58,6 +65,9 @@ class EmbyPcItem {
     this.childCount,
     this.width,
     this.height,
+    this.partIndex,
+    this.partCount,
+    this.isCurrent = false,
     this.path = '',
     this.premiereDate = '',
     this.dateCreated = '',
@@ -98,6 +108,9 @@ class EmbyPcItem {
       childCount: _integerOrNull(json['ChildCount']),
       width: _integerOrNull(json['Width']),
       height: _integerOrNull(json['Height']),
+      partIndex: _integerOrNull(json['PartIndex']),
+      partCount: _integerOrNull(json['PartCount']),
+      isCurrent: json['IsCurrent'] == true,
       path: _text(json['Path']),
       premiereDate: _text(json['PremiereDate']),
       dateCreated: _text(json['DateCreated']),
@@ -151,6 +164,9 @@ class EmbyPcItem {
     childCount: childCount,
     width: width ?? this.width,
     height: height ?? this.height,
+    partIndex: partIndex,
+    partCount: partCount,
+    isCurrent: isCurrent,
     path: path,
     premiereDate: premiereDate,
     dateCreated: dateCreated,

@@ -48,6 +48,7 @@
 | GET | `/Users/{userId}/Items/{itemId}` | 详情 / 编辑页数据源 |
 | GET | `/Persons` | 人物列表，`PremiereDate` 存生日 |
 | GET | `/Items/{itemId}/Similar` | 相似推荐 |
+| GET | `/Items/{itemId}/Siblings` | 分片影片的同组部分（本项目扩展，无分片时返回空数组） |
 | POST | `/Items/{itemId}` | 保存元数据 |
 | POST | `/Items/{itemId}/Refresh` | 元数据刷新，需管理员 |
 

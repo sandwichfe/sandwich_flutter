@@ -82,6 +82,54 @@ func TestBuildItemSkipsProbeWhenFingerprintMatches(t *testing.T) {
 	}
 }
 
+// TestBuildItemBackfillsPartGroupOnSkip 验证指纹命中的跳过分支也会补写归属行：
+// 归属行缺失（老库未回填、手动删过）时，重新扫描能自己修回来，且完全不碰 items。
+func TestBuildItemBackfillsPartGroupOnSkip(t *testing.T) {
+	dir := t.TempDir()
+	video := filepath.Join(dir, "3070118_1.mp4")
+	if err := os.WriteFile(video, []byte("fake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := store.Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("打开数据库失败: %v", err)
+	}
+	defer st.Close()
+
+	info, err := os.Stat(video)
+	if err != nil {
+		t.Fatal(err)
+	}
+	itemID := deriveItemID(nil, "lib1", dir, video)
+	if err := st.UpsertItem(context.Background(), &store.Item{
+		ID:          itemID,
+		LibraryID:   "lib1",
+		ParentID:    "lib1",
+		Type:        "Movie",
+		Name:        "3070118 (1)",
+		SortName:    "3070118 (1)",
+		Path:        video,
+		Fingerprint: artworkFingerprint(info, nil),
+	}); err != nil {
+		t.Fatalf("写入条目失败: %v", err)
+	}
+
+	scanner := &Scanner{store: st, prober: NewProber(filepath.Join(dir, "missing-ffprobe"))}
+	if _, needWrite, err := scanner.buildItem(
+		context.Background(), "lib1", dir, video, func(string, ...any) {}); err != nil || needWrite {
+		t.Fatalf("指纹命中应跳过写库: needWrite=%v err=%v", needWrite, err)
+	}
+
+	group, err := st.ItemGroupOf(context.Background(), itemID)
+	if err != nil {
+		t.Fatalf("跳过分支应补写分片归属: %v", err)
+	}
+	if group.PartIndex != 1 || group.PartCount != 1 {
+		t.Fatalf("归属行不符合预期: %+v", group)
+	}
+}
+
 func TestBuildItemProbesWhenFingerprintChanges(t *testing.T) {
 	dir := t.TempDir()
 	video := filepath.Join(dir, "movie.mp4")

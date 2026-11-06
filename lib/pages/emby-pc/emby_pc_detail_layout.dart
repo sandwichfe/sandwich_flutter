@@ -43,6 +43,7 @@ class _DetailBackdrop extends StatelessWidget {
 class _DetailContent extends StatelessWidget {
   final EmbyPcItem detail;
   final List<EmbyPcItem> similar;
+  final List<EmbyPcItem> parts;
   final bool favoriteBusy;
   final bool actionBusy;
   final VoidCallback onFavorite;
@@ -55,6 +56,7 @@ class _DetailContent extends StatelessWidget {
   const _DetailContent({
     required this.detail,
     required this.similar,
+    required this.parts,
     required this.favoriteBusy,
     required this.actionBusy,
     required this.onFavorite,
@@ -140,6 +142,15 @@ class _DetailContent extends StatelessWidget {
           if (artworkImages.isNotEmpty) ...[
             const SizedBox(height: 32),
             _ArtworkSection(images: artworkImages),
+          ],
+          // 分片区块紧跟在图片之后：只有 2 段以上才出现，普通影片不留空框。
+          if (parts.length > 1) ...[
+            const SizedBox(height: 32),
+            _PartsSection(
+              currentItemId: detail.id,
+              parts: parts,
+              onOpenItem: onOpenSimilar,
+            ),
           ],
           if (creditPeople.isNotEmpty) ...[
             const SizedBox(height: 32),
