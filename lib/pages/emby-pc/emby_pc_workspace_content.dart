@@ -33,75 +33,103 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
               ],
             ),
           Expanded(
-            child: _c.view == 'home'
-                ? _buildHomeContent(context)
-                : _c.loading && _c.items.isEmpty
-                ? const Center(child: CircularProgressIndicator())
-                : _c.items.isEmpty
-                ? _EmptyState(
-                    hasFilters: _hasActiveFilters,
-                    onClearFilters: _clearAllFilters,
-                  )
-                : CustomScrollView(
-                    controller: _scrollController,
-                    slivers: [
-                      SliverPadding(
-                        // 媒体库详情仅展示视频网格，不再插入精选横幅。
-                        padding: const EdgeInsets.fromLTRB(26, 18, 26, 30),
-                        sliver: SliverGrid.builder(
-                          gridDelegate:
-                              SliverGridDelegateWithMaxCrossAxisExtent(
-                                maxCrossAxisExtent: mediaGridMaxExtent,
-                                crossAxisSpacing: 20,
-                                mainAxisSpacing: 22,
-                                childAspectRatio: mediaGridAspectRatio,
-                              ),
-                          itemCount: _c.items.length,
-                          itemBuilder: (context, index) {
-                            final item = _c.items[index];
-                            return EmbyPcMediaTile(
-                              item: item,
-                              imageStyle: imageStyle,
-                              secondaryLabel: peopleList
-                                  ? _personBirthYear(item)
-                                  : _c.view == 'recently-played'
-                                  ? item.lastPlayedLabel
-                                  : '',
-                              hideDefaultMetadata: peopleList,
-                              favoriteBusy: _favoriteBusyIds.contains(item.id),
-                              actionBusy: _mediaActionBusyIds.contains(item.id),
-                              onOpen: () => _openItem(item),
-                              onPlay: peopleList
-                                  ? null
-                                  : () => _playItem(item),
-                              onFavorite: () => _toggleFavorite(item),
-                              onAction: (action) =>
-                                  _handleMediaAction(item, action),
-                            );
-                          },
-                        ),
-                      ),
-                      if (_c.loadingMore)
-                        SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(26, 0, 26, 30),
-                          sliver: SliverGrid.builder(
-                            gridDelegate:
-                                SliverGridDelegateWithMaxCrossAxisExtent(
-                                  maxCrossAxisExtent: mediaGridMaxExtent,
-                                  crossAxisSpacing: 20,
-                                  mainAxisSpacing: 22,
-                                  childAspectRatio: mediaGridAspectRatio,
+            // 首页与媒体库共用同一份滚动控制器，回到顶部按钮跟随视图重算位置。
+            child: EmbyPcScrollToTop(
+              controller: _scrollController,
+              builder:
+                  (context, _) =>
+                      _c.view == 'home'
+                          ? _buildHomeContent(context)
+                          : _c.loading && _c.items.isEmpty
+                          ? const Center(child: CircularProgressIndicator())
+                          : _c.items.isEmpty
+                          ? _EmptyState(
+                            hasFilters: _hasActiveFilters,
+                            onClearFilters: _clearAllFilters,
+                          )
+                          : CustomScrollView(
+                            controller: _scrollController,
+                            slivers: [
+                              SliverPadding(
+                                // 媒体库详情仅展示视频网格，不再插入精选横幅。
+                                padding: const EdgeInsets.fromLTRB(
+                                  26,
+                                  18,
+                                  26,
+                                  30,
                                 ),
-                            itemCount: 6, // 显示 6 个骨架屏占位符
-                            itemBuilder: (context, index) {
-                              return EmbyPcLoadingPlaceholder(
-                                isBackdrop: imageStyle == 'backdrop',
-                              );
-                            },
+                                sliver: SliverGrid.builder(
+                                  gridDelegate:
+                                      SliverGridDelegateWithMaxCrossAxisExtent(
+                                        maxCrossAxisExtent: mediaGridMaxExtent,
+                                        crossAxisSpacing: 20,
+                                        mainAxisSpacing: 22,
+                                        childAspectRatio: mediaGridAspectRatio,
+                                      ),
+                                  itemCount: _c.items.length,
+                                  itemBuilder: (context, index) {
+                                    final item = _c.items[index];
+                                    return EmbyPcMediaTile(
+                                      item: item,
+                                      imageStyle: imageStyle,
+                                      secondaryLabel:
+                                          peopleList
+                                              ? _personBirthYear(item)
+                                              : _c.view == 'recently-played'
+                                              ? item.lastPlayedLabel
+                                              : '',
+                                      hideDefaultMetadata: peopleList,
+                                      favoriteBusy: _favoriteBusyIds.contains(
+                                        item.id,
+                                      ),
+                                      actionBusy: _mediaActionBusyIds.contains(
+                                        item.id,
+                                      ),
+                                      onOpen: () => _openItem(item),
+                                      onPlay:
+                                          peopleList
+                                              ? null
+                                              : () => _playItem(item),
+                                      onFavorite:
+                                          () => _toggleFavorite(item),
+                                      onAction:
+                                          (action) => _handleMediaAction(
+                                            item,
+                                            action,
+                                          ),
+                                    );
+                                  },
+                                ),
+                              ),
+                              if (_c.loadingMore)
+                                SliverPadding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    26,
+                                    0,
+                                    26,
+                                    30,
+                                  ),
+                                  sliver: SliverGrid.builder(
+                                    gridDelegate:
+                                        SliverGridDelegateWithMaxCrossAxisExtent(
+                                          maxCrossAxisExtent:
+                                              mediaGridMaxExtent,
+                                          crossAxisSpacing: 20,
+                                          mainAxisSpacing: 22,
+                                          childAspectRatio:
+                                              mediaGridAspectRatio,
+                                        ),
+                                    itemCount: 6, // 显示 6 个骨架屏占位符
+                                    itemBuilder: (context, index) {
+                                      return EmbyPcLoadingPlaceholder(
+                                        isBackdrop: imageStyle == 'backdrop',
+                                      );
+                                    },
+                                  ),
+                                ),
+                            ],
                           ),
-                        ),
-                    ],
-                  ),
+            ),
           ),
         ],
       ),

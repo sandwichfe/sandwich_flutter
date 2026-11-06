@@ -220,40 +220,45 @@ class _EmbyPcPersonPageState extends State<EmbyPcPersonPage> {
         child: Text('没有可显示的人物资料'),
       );
     } else {
-      pageContent = CustomScrollView(
+      pageContent = EmbyPcScrollToTop(
         key: ValueKey('person-${person.id}'),
-        slivers: [
-          SliverToBoxAdapter(
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 1180),
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: _PersonContent(
-                    person: person,
-                    items: _items,
-                    total: _total,
-                    loadingMore: _loadingMore,
-                    onLoadMore: _loadMoreItems,
-                    favoriteBusy: _favoriteBusy,
-                    onFavorite: _toggleFavorite,
-                    actionBusy: _actionBusy,
-                    onAction: _handleAction,
-                    onOpenItem: (item) => Navigator.of(context).push(
-                      embyPcFadeRoute(
-                        context,
-                        (_) => EmbyPcDetailPage(
-                          item: item,
-                          onMediaAction: widget.onMediaAction,
+        builder:
+            (context, scrollController) => CustomScrollView(
+              controller: scrollController,
+              slivers: [
+                SliverToBoxAdapter(
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 1180),
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: _PersonContent(
+                          person: person,
+                          items: _items,
+                          total: _total,
+                          loadingMore: _loadingMore,
+                          onLoadMore: _loadMoreItems,
+                          favoriteBusy: _favoriteBusy,
+                          onFavorite: _toggleFavorite,
+                          actionBusy: _actionBusy,
+                          onAction: _handleAction,
+                          onOpenItem:
+                              (item) => Navigator.of(context).push(
+                                embyPcFadeRoute(
+                                  context,
+                                  (_) => EmbyPcDetailPage(
+                                    item: item,
+                                    onMediaAction: widget.onMediaAction,
+                                  ),
+                                ),
+                              ),
                         ),
                       ),
                     ),
                   ),
                 ),
-              ),
+              ],
             ),
-          ),
-        ],
       );
     }
 

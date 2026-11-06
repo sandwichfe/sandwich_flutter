@@ -171,6 +171,142 @@ class _EmbyPcHorizontalDragScrollBehavior extends MaterialScrollBehavior {
   };
 }
 
+// 长列表回到顶部：滚动超过阈值后右下角浮现按钮，所有列表页统一用这一个组件。
+// 通过 builder 交出滚动控制器，页面无需自己维护滚动状态；已经持有控制器的列表
+// （例如需要跨视图记住滚动位置）传入 controller 即可复用同一份滚动状态。
+class EmbyPcScrollToTop extends StatefulWidget {
+  final ScrollController? controller;
+  final Widget Function(BuildContext context, ScrollController controller) builder;
+  // 默认滚动约一屏多一点才出现，避免轻微滚动就弹出按钮。
+  final double threshold;
+  final EdgeInsetsGeometry padding;
+  final String tooltip;
+
+  const EmbyPcScrollToTop({
+    super.key,
+    required this.builder,
+    this.controller,
+    this.threshold = 420,
+    this.padding = const EdgeInsets.only(right: 24, bottom: 24),
+    this.tooltip = '回到顶部',
+  });
+
+  @override
+  State<EmbyPcScrollToTop> createState() => _EmbyPcScrollToTopState();
+}
+
+class _EmbyPcScrollToTopState extends State<EmbyPcScrollToTop> {
+  // 只有调用方没有提供控制器时才由组件自己持有并负责销毁。
+  ScrollController? _inner;
+  bool _visible = false;
+
+  ScrollController get _controller => widget.controller ?? _inner!;
+
+  @override
+  void initState() {
+    super.initState();
+    _bind();
+  }
+
+  @override
+  void didUpdateWidget(covariant EmbyPcScrollToTop oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller == widget.controller) return;
+    _unbind(oldWidget.controller);
+    _visible = false;
+    _bind();
+  }
+
+  @override
+  void dispose() {
+    _unbind(widget.controller);
+    super.dispose();
+  }
+
+  void _bind() {
+    if (widget.controller == null) _inner = ScrollController();
+    _controller.addListener(_handleScrollChanged);
+  }
+
+  void _unbind(ScrollController? controller) {
+    (controller ?? _inner)?.removeListener(_handleScrollChanged);
+    // 外部控制器由页面负责销毁，这里只回收自建的实例。
+    if (controller == null) {
+      _inner?.dispose();
+      _inner = null;
+    }
+  }
+
+  // 只在可见状态真正变化时重建，滚动过程本身不触发整页刷新。
+  void _handleScrollChanged() {
+    if (!mounted || !_controller.hasClients) return;
+    final visible = _controller.offset > widget.threshold;
+    if (visible == _visible) return;
+    setState(() => _visible = visible);
+  }
+
+  void _scrollToTop() {
+    if (!_controller.hasClients) return;
+    final reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    final target = _controller.position.minScrollExtent;
+    if (reduceMotion) {
+      _controller.jumpTo(target);
+      return;
+    }
+    _controller.animateTo(
+      target,
+      duration: const Duration(milliseconds: 380),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    final duration =
+        reduceMotion ? Duration.zero : const Duration(milliseconds: 180);
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        widget.builder(context, _controller),
+        Positioned.fill(
+          child: Align(
+            alignment: Alignment.bottomRight,
+            child: Padding(
+              padding: widget.padding,
+              child: IgnorePointer(
+                ignoring: !_visible,
+                child: AnimatedSlide(
+                  offset: _visible ? Offset.zero : const Offset(0, 0.4),
+                  duration: duration,
+                  curve: Curves.easeOutCubic,
+                  child: AnimatedOpacity(
+                    opacity: _visible ? 1 : 0,
+                    duration: duration,
+                    child: Material(
+                      color: colors.surface.withValues(alpha: 0.96),
+                      elevation: 6,
+                      shape: CircleBorder(
+                        side: BorderSide(color: colors.outlineVariant),
+                      ),
+                      child: IconButton(
+                        onPressed: _scrollToTop,
+                        tooltip: widget.tooltip,
+                        icon: const Icon(Icons.vertical_align_top_rounded),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 // 卡片只负责分发管理动作，具体弹窗和接口调用由所在页面处理。
 // togglePlayed 用于手动标记已看/未看，属于用户数据而不是元数据编辑。
 enum EmbyPcMediaAction {

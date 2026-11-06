@@ -313,43 +313,49 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
         child: Text('没有可显示的媒体详情'),
       );
     } else {
-      pageContent = CustomScrollView(
+      pageContent = EmbyPcScrollToTop(
         key: ValueKey('detail-${detail.id}'),
-        slivers: [
-          SliverToBoxAdapter(
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 1180),
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: _DetailContent(
-                    detail: detail,
-                    similar: _similar,
-                    favoriteBusy: _favoriteBusy,
-                    actionBusy: _actionBusy,
-                    onFavorite: _toggleFavorite,
-                    onAction: _handleAction,
-                    onPlay: _play,
-                    onSelectMediaSource: _selectMediaSource,
-                    onOpenSimilar: (item) => _pushAndRefresh(
-                      EmbyPcDetailPage(
-                        item: item,
-                        onMediaAction: widget.onMediaAction,
-                      ),
-                    ),
-                    onOpenPerson: (person) => _pushAndRefresh(
-                      EmbyPcPersonPage(
-                        personId: person.id,
-                        personName: person.name,
-                        onMediaAction: widget.onMediaAction,
+        builder:
+            (context, scrollController) => CustomScrollView(
+              controller: scrollController,
+              slivers: [
+                SliverToBoxAdapter(
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 1180),
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: _DetailContent(
+                          detail: detail,
+                          similar: _similar,
+                          favoriteBusy: _favoriteBusy,
+                          actionBusy: _actionBusy,
+                          onFavorite: _toggleFavorite,
+                          onAction: _handleAction,
+                          onPlay: _play,
+                          onSelectMediaSource: _selectMediaSource,
+                          onOpenSimilar:
+                              (item) => _pushAndRefresh(
+                                EmbyPcDetailPage(
+                                  item: item,
+                                  onMediaAction: widget.onMediaAction,
+                                ),
+                              ),
+                          onOpenPerson:
+                              (person) => _pushAndRefresh(
+                                EmbyPcPersonPage(
+                                  personId: person.id,
+                                  personName: person.name,
+                                  onMediaAction: widget.onMediaAction,
+                                ),
+                              ),
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
+              ],
             ),
-          ),
-        ],
       );
     }
 
