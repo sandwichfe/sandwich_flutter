@@ -31,18 +31,27 @@ class _PartsSection extends StatelessWidget {
             itemWidth: cardWidth,
             height: cardWidth * 9 / 16 + 46,
             navigationLabel: '分片',
-            itemBuilder:
-                (context, index) => _PartCard(
-                  part: parts[index],
+            itemBuilder: (context, index) {
+              final part = parts[index];
+              final current = part.id == currentItemId;
+              final title = _partTitle(parts, index);
+              // 括号里只留序号，完整名称放进悬停提示，标题才不会太长。
+              final tooltip =
+                  part.name.isEmpty ? title : '$title · ${part.name}';
+              return Tooltip(
+                message: tooltip,
+                waitDuration: const Duration(milliseconds: 500),
+                child: _PartCard(
+                  part: part,
+                  title: title,
                   // 缺号时按组内排序位置展示，避免出现 `1/3`、`3/3` 这种断号。
                   position: index + 1,
                   total: parts.length,
-                  current: parts[index].id == currentItemId,
-                  onOpen:
-                      parts[index].id == currentItemId
-                          ? null
-                          : () => onOpenItem(parts[index]),
+                  current: current,
+                  onOpen: current ? null : () => onOpenItem(part),
                 ),
+              );
+            },
           );
         },
       ),
@@ -50,9 +59,49 @@ class _PartsSection extends StatelessWidget {
   );
 }
 
+// 卡片标题为「第 N 部分（差异段）」：分片名的前半段都是同一部影片，放进括号只会把标题撑长，
+// 所以只保留各段名称去掉公共前缀后剩下的那截（`11201-A`/`11201-B` → `A`/`B`）。
+// 名称完全相同（老库数据、或各段 NFO 写的是同一个标题）时没有差异段，
+// 退回服务端的分片序号，保证括号里始终有内容，卡片之间仍然能区分。
+String _partTitle(List<EmbyPcItem> parts, int index) {
+  final position = index + 1;
+  final names = parts.map((part) => part.name.trim()).toList();
+  var suffix = _nameSuffix(names, index);
+  if (suffix.isEmpty) {
+    final partIndex = parts[index].partIndex ?? 0;
+    suffix = '${partIndex > 0 ? partIndex : position}';
+  }
+  return '第 $position 部分（$suffix）';
+}
+
+// _nameSuffix 取当前名称去掉「全组公共前缀」后的剩余部分。
+// 两侧的括号与分隔符一并清掉：`3070118 (1)` 的 `1)` 会变成 `1`。
+String _nameSuffix(List<String> names, int index) {
+  final name = names[index];
+  if (name.isEmpty) return '';
+  var prefixLength = name.length;
+  for (final other in names) {
+    // 空名称不参与求公共前缀，否则一个空名会把所有差异都吃掉。
+    if (other.isEmpty) continue;
+    final limit = prefixLength < other.length ? prefixLength : other.length;
+    var matched = 0;
+    while (matched < limit && name[matched] == other[matched]) {
+      matched++;
+    }
+    prefixLength = matched;
+    if (prefixLength == 0) break;
+  }
+  final remainder = name.substring(prefixLength);
+  return remainder
+      .replaceFirst(RegExp(r'^[\s._()\[\]（）【】-]+'), '')
+      .replaceFirst(RegExp(r'[\s._()\[\]（）【】-]+$'), '')
+      .trim();
+}
+
 // 分片卡片与图片卡片同构：16:9 缩略图 + 单行说明，当前项用主题色描边且不可点击。
 class _PartCard extends StatefulWidget {
   final EmbyPcItem part;
+  final String title;
   final int position;
   final int total;
   final bool current;
@@ -60,6 +109,7 @@ class _PartCard extends StatefulWidget {
 
   const _PartCard({
     required this.part,
+    required this.title,
     required this.position,
     required this.total,
     required this.current,
@@ -172,7 +222,7 @@ class _PartCardState extends State<_PartCard> {
                   children: [
                     Expanded(
                       child: Text(
-                        part.name,
+                        widget.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
