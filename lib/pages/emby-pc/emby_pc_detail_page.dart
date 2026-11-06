@@ -124,18 +124,38 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
   bool _favoriteBusy = false;
   bool _actionBusy = false;
   String _error = '';
+  // 静默刷新进行中时忽略重复触发，避免管理动作与图片通知各请求一次。
+  bool _refreshing = false;
 
   @override
   void initState() {
     super.initState();
+    // 任何入口改了条目图片都通知一次，这里静默重取，保证详情页不会停在旧图上。
+    EmbyPcService.instance.imagesRevision.addListener(_handleImagesChanged);
     _loadDetail();
   }
 
-  Future<void> _loadDetail() async {
-    setState(() {
-      _loading = true;
-      _error = '';
-    });
+  @override
+  void dispose() {
+    EmbyPcService.instance.imagesRevision.removeListener(_handleImagesChanged);
+    super.dispose();
+  }
+
+  // 图片变更后只刷新数据，不切回整页加载态，避免打断正在浏览的内容。
+  void _handleImagesChanged() {
+    if (!mounted) return;
+    _loadDetail(silent: true);
+  }
+
+  Future<void> _loadDetail({bool silent = false}) async {
+    if (silent && _refreshing) return;
+    if (!silent) {
+      setState(() {
+        _loading = true;
+        _error = '';
+      });
+    }
+    _refreshing = true;
     try {
       final results = await Future.wait<dynamic>([
         EmbyPcService.instance.getItemDetail(widget.item.id),
@@ -145,12 +165,21 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
       setState(() {
         _detail = results[0] as EmbyPcItem;
         _similar = results[1] as List<EmbyPcItem>;
+        _error = '';
       });
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      // 静默刷新失败时保留已有内容，只有首次加载才展示错误页。
+      if (mounted && !silent) setState(() => _error = error.toString());
     } finally {
-      if (mounted) setState(() => _loading = false);
+      _refreshing = false;
+      if (mounted && !silent) setState(() => _loading = false);
     }
+  }
+
+  // 跳出去的页面可能改了图片或元数据，返回时静默重取，回到详情页即是最新内容。
+  Future<void> _pushAndRefresh(Widget page) async {
+    await Navigator.of(context).push(embyPcFadeRoute(context, (_) => page));
+    if (mounted) await _loadDetail(silent: true);
   }
 
   Future<void> _toggleFavorite() async {
@@ -234,9 +263,9 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
     if (detail == null || _actionBusy) return;
     setState(() => _actionBusy = true);
     try {
-      // 管理动作复用工作台逻辑，详情页只在内容变更后重新加载展示数据。
+      // 管理动作复用工作台逻辑，详情页只在内容变更后静默重取展示数据。
       final changed = await widget.onMediaAction(detail, action);
-      if (changed && mounted) await _loadDetail();
+      if (changed && mounted) await _loadDetail(silent: true);
     } finally {
       if (mounted) setState(() => _actionBusy = false);
     }
@@ -302,27 +331,19 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
                     onAction: _handleAction,
                     onPlay: _play,
                     onSelectMediaSource: _selectMediaSource,
-                    onOpenSimilar:
-                        (item) => Navigator.of(context).push(
-                          embyPcFadeRoute(
-                            context,
-                            (_) => EmbyPcDetailPage(
-                              item: item,
-                              onMediaAction: widget.onMediaAction,
-                            ),
-                          ),
-                        ),
-                    onOpenPerson:
-                        (person) => Navigator.of(context).push(
-                          embyPcFadeRoute(
-                            context,
-                            (_) => EmbyPcPersonPage(
-                              personId: person.id,
-                              personName: person.name,
-                              onMediaAction: widget.onMediaAction,
-                            ),
-                          ),
-                        ),
+                    onOpenSimilar: (item) => _pushAndRefresh(
+                      EmbyPcDetailPage(
+                        item: item,
+                        onMediaAction: widget.onMediaAction,
+                      ),
+                    ),
+                    onOpenPerson: (person) => _pushAndRefresh(
+                      EmbyPcPersonPage(
+                        personId: person.id,
+                        personName: person.name,
+                        onMediaAction: widget.onMediaAction,
+                      ),
+                    ),
                   ),
                 ),
               ),

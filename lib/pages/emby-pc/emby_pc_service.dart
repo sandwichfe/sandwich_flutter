@@ -51,6 +51,21 @@ class EmbyPcService {
   // 头像状态变化（加载失败、上传成功）时通知界面重建，切换占位图标或新头像。
   final ValueNotifier<int> avatarRevision = ValueNotifier<int>(0);
 
+  // 条目图片的本地修订号：上传/删除/生成后自增。
+  // 服务端 tag 有时不会随图片一起变化，靠这里的计数让图片地址一定变，
+  // Flutter 的图片缓存才会重新下载，而不是继续显示旧图。
+  final Map<String, int> _itemImageRevisions = {};
+
+  // 任一图片变更后通知界面（详情页等）重新获取数据。
+  final ValueNotifier<int> imagesRevision = ValueNotifier<int>(0);
+
+  int _itemImageRevision(String itemId) => _itemImageRevisions[itemId] ?? 0;
+
+  void _markItemImagesChanged(String itemId) {
+    _itemImageRevisions[itemId] = _itemImageRevision(itemId) + 1;
+    imagesRevision.value++;
+  }
+
   /// 是否值得发起头像请求：没有主图标记或本次会话已确认失败时返回 false。
   bool get hasUserAvatar =>
       currentUserAvatarTag.isNotEmpty && !_avatarUnavailable;
@@ -479,6 +494,7 @@ class EmbyPcService {
       body: base64Encode(bytes),
     );
     _ensureSuccess(response, '上传图像失败');
+    _markItemImagesChanged(itemId);
   }
 
   Future<void> uploadUserAvatar({
@@ -514,6 +530,7 @@ class EmbyPcService {
       headers: _tokenHeader,
     );
     _ensureSuccess(response, '删除图像失败');
+    _markItemImagesChanged(itemId);
   }
 
   Future<EmbyPcPage> getItems({
@@ -891,12 +908,17 @@ class EmbyPcService {
             : '',
       _ => item.imageTags[type]?.toString() ?? '',
     };
+    // 服务端 tag 没有跟着变（或接口缓存了旧数据）时，本地修订号仍能让地址变化。
+    final revision = _itemImageRevision(item.id);
+    final version = revision == 0
+        ? tag
+        : (tag.isEmpty ? 'r$revision' : '$tag-r$revision');
     return imageUrl(
       item.id,
       type: type,
       index: index,
       maxWidth: maxWidth,
-      cacheKey: tag,
+      cacheKey: version,
     );
   }
 
@@ -937,9 +959,11 @@ class EmbyPcService {
         message.isEmpty ? '生成封面失败：HTTP ${response.statusCode}' : message,
       );
     }
-    return EmbyPcArtworkGeneration.fromJson(
+    final generation = EmbyPcArtworkGeneration.fromJson(
       _decodeResponse(response, '生成封面失败'),
     );
+    _markItemImagesChanged(itemId);
+    return generation;
   }
 
   // 用户头像使用 Swagger 的 Users/{Id}/Images/{Type} 接口，请求当前登录用户的主图。

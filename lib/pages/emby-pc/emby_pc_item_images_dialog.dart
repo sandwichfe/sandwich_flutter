@@ -45,6 +45,10 @@ class _EmbyPcItemImagesDialogState extends State<EmbyPcItemImagesDialog> {
   bool _generating = false;
   int _imageRevision = 0;
 
+  // 每次打开弹窗都换一个图片地址版本号：图片可能在别处（扫描、其它客户端）被替换，
+  // 沿用上次的地址只会命中本地图片缓存，看到的就是旧图。
+  late final String _openToken;
+
   // 图片锁：锁上后扫描导入与自动重拼不会覆盖，手动操作不受影响。
   bool _locked = false;
   bool _lockBusy = false;
@@ -57,6 +61,7 @@ class _EmbyPcItemImagesDialogState extends State<EmbyPcItemImagesDialog> {
   @override
   void initState() {
     super.initState();
+    _openToken = '${DateTime.now().microsecondsSinceEpoch}';
     // 图像列表仅在用户打开编辑弹窗时按需获取。
     _loadImages();
     _loadLock();
@@ -458,7 +463,8 @@ class _EmbyPcItemImagesDialogState extends State<EmbyPcItemImagesDialog> {
             type: image.type,
             index: image.index,
             maxWidth: 520,
-            cacheKey: '$_imageRevision',
+            // 打开时的版本号 + 本次会话的改动次数：打开必取最新，改图后立即换地址。
+            cacheKey: '$_openToken-$_imageRevision',
           );
     return Material(
       color: colors.surfaceContainerLow,
