@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -7,23 +9,33 @@ class WindowsTitleBar extends StatefulWidget {
 
   const WindowsTitleBar({super.key, required this.child});
 
+  /// 由切换全屏的调用方直接告知目标状态：标题栏与窗口尺寸会在同一帧内变化，
+  /// 避免"先缩窗口再收起标题栏"造成的二次布局闪烁。
+  static void setFullscreen(bool value) {
+    _WindowsTitleBarState._instance?._applyFullscreen(value);
+  }
+
   @override
   State<WindowsTitleBar> createState() => _WindowsTitleBarState();
 }
 
 class _WindowsTitleBarState extends State<WindowsTitleBar> with WindowListener {
+  static _WindowsTitleBarState? _instance;
+
   bool _isMaximized = false;
   bool _isFullScreen = false;
 
   @override
   void initState() {
     super.initState();
+    _instance = this;
     windowManager.addListener(this);
     _syncWindowState();
   }
 
   @override
   void dispose() {
+    if (identical(_instance, this)) _instance = null;
     windowManager.removeListener(this);
     super.dispose();
   }
@@ -33,10 +45,30 @@ class _WindowsTitleBarState extends State<WindowsTitleBar> with WindowListener {
     final isMaximized = await windowManager.isMaximized();
     final isFullScreen = await windowManager.isFullScreen();
     if (!mounted) return;
+    // 状态没变时不重建，避免全屏切换期间多出一次无意义的布局。
+    if (_isMaximized == isMaximized && _isFullScreen == isFullScreen) return;
     setState(() {
       _isMaximized = isMaximized;
       _isFullScreen = isFullScreen;
     });
+  }
+
+  void _applyFullscreen(bool value) {
+    if (!mounted || _isFullScreen == value) return;
+    setState(() => _isFullScreen = value);
+  }
+
+  /// 以原生窗口状态为准刷新标题栏，并在窗口完成异步状态迁移后再校正一次。
+  void _scheduleSync() {
+    if (!mounted) return;
+    unawaited(_syncWindowState());
+    // 退出全屏依赖 PostMessage(SC_MAXIMIZE)，WM_SIZE 处理完后状态才稳定。
+    unawaited(
+      Future<void>.delayed(
+        const Duration(milliseconds: 120),
+        _syncWindowState,
+      ),
+    );
   }
 
   /// 在最大化和普通窗口之间切换，并及时更新还原按钮状态。
@@ -49,29 +81,31 @@ class _WindowsTitleBarState extends State<WindowsTitleBar> with WindowListener {
     await _syncWindowState();
   }
 
+  // 事件只作为触发时机，状态一律回查原生窗口，避免 media_kit/window_manager
+  // 状态机不同步时把标题栏留在错误状态。
   @override
   void onWindowMaximize() {
-    if (mounted) setState(() => _isMaximized = true);
+    _scheduleSync();
   }
 
   @override
   void onWindowUnmaximize() {
-    if (mounted) setState(() => _isMaximized = false);
+    _scheduleSync();
   }
 
   @override
   void onWindowRestore() {
-    _syncWindowState();
+    _scheduleSync();
   }
 
   @override
   void onWindowEnterFullScreen() {
-    if (mounted) setState(() => _isFullScreen = true);
+    _scheduleSync();
   }
 
   @override
   void onWindowLeaveFullScreen() {
-    if (mounted) setState(() => _isFullScreen = false);
+    _scheduleSync();
   }
 
   @override

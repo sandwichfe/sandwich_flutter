@@ -11,6 +11,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../../widgets/windows_title_bar.dart';
 import 'emby_pc_models.dart';
 import 'emby_pc_service.dart';
 
@@ -162,6 +163,8 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
   double _aspectRatio = 16 / 9;
   // 默认完整显示视频；用户可在控制栏切换铺满或拉伸模式。
   BoxFit _videoFit = BoxFit.contain;
+  // 全屏由页面自己维护：不再走 media_kit 全屏路由，只切窗口状态与画面布局参数。
+  bool _playerFullscreen = false;
   Timer? _progressTimer;
   Future<void> _playbackReportQueue = Future<void>.value();
   bool _closing = false;
@@ -173,11 +176,8 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
   bool _stopReportQueued = false;
   bool _playerDisposed = false;
   late final _ThumbnailPreviewController _thumbnailPreviewController;
-  // 保持普通播放器音量控件状态引用稳定，让键盘调节也能唤起同一个音量浮层。
+  // 保持播放器音量控件状态引用稳定，让键盘调节也能唤起同一个音量浮层。
   final GlobalKey<_VolumeControlState> _volumeControlKey =
-      GlobalKey<_VolumeControlState>();
-  // 全屏路由与原页面会同时挂载控制层，使用独立 Key 避免跨路由争用同一 Element。
-  final GlobalKey<_VolumeControlState> _fullscreenVolumeControlKey =
       GlobalKey<_VolumeControlState>();
 
   @override
@@ -530,9 +530,9 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
     });
   }
 
-  // 鼠标在窗口内移动时唤回标题栏并重新计时。
+  // 鼠标在窗口内移动时唤回标题栏并重新计时；全屏不显示标题栏。
   void _revealChrome() {
-    if (!_isPlaying || _closing) return;
+    if (_playerFullscreen || !_isPlaying || _closing) return;
     if (!_chromeVisible) setState(() => _chromeVisible = true);
     _syncChromeVisibility();
   }
@@ -564,6 +564,8 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
       _closing = true;
       _chromeVisible = true;
     });
+    // 全屏中返回其他页面时先复原窗口，避免标题栏在非播放页继续隐藏。
+    await _resetWindowFullscreen();
     await _finishPlaybackReports();
     if (!mounted) return;
     setState(() => _allowPop = true);
@@ -662,8 +664,65 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
 
   void _setVideoFit(BoxFit fit) {
     if (_videoFit == fit) return;
-    // 画面模式保存在当前播放器页面中，全屏路由会通过共享参数立即同步。
+    // 画面模式保存在当前播放器页面中，全屏切换不会重建播放器，改动直接生效。
     setState(() => _videoFit = fit);
+  }
+
+  // Windows 全屏交给 window_manager 独占窗口样式：它进入全屏会同步外层的
+  // WindowsTitleBar 隐藏自绘标题栏，窗口也能真正铺满显示器；
+  // media_kit 自带的原生全屏直接改窗口样式，会与 window_manager 抢同一个窗口。
+  // 其他平台仍用 media_kit 的系统全屏（Android 的沉浸式由它统一处理）。
+  bool get _usesWindowManagerFullscreen =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+
+  // 全屏只切换窗口尺寸和页面布局，不再走 media_kit 的全屏路由：
+  // 路由会重建一份 Video（重新初始化视频纹理），正是进出全屏时黑屏闪烁的来源。
+  Future<void> _setFullscreen(bool value) async {
+    if (_playerFullscreen == value) return;
+    // 先落下页面与标题栏状态，再改窗口尺寸：下一帧同时拿到新布局和新视口，
+    // 标题栏折叠与窗口 resize 合并为一次布局，画面不跳。
+    setState(() {
+      _playerFullscreen = value;
+      // 退出全屏时亮出标题栏，避免刚回到窗口就找不到返回按钮。
+      if (!value) _chromeVisible = true;
+    });
+    if (!_usesWindowManagerFullscreen) {
+      if (value) {
+        await defaultEnterNativeFullscreen();
+      } else {
+        await defaultExitNativeFullscreen();
+      }
+      return;
+    }
+    WindowsTitleBar.setFullscreen(value);
+    try {
+      await windowManager.setFullScreen(value);
+    } catch (error, stackTrace) {
+      debugPrint('切换窗口全屏失败：$error');
+      debugPrintStack(stackTrace: stackTrace);
+      // 窗口没切成功时回滚界面状态，避免画面与控制层判断不一致。
+      if (mounted) setState(() => _playerFullscreen = !value);
+      WindowsTitleBar.setFullscreen(!value);
+    }
+  }
+
+  Future<void> _toggleFullscreen() async {
+    // Tooltip 使用 OverlayPortal，窗口尺寸变化前先收起，避免浮层错位。
+    Tooltip.dismissAllToolTips();
+    await _setFullscreen(!_playerFullscreen);
+  }
+
+  // 全屏状态下直接退出播放器不会自动复原窗口，返回前必须收尾。
+  Future<void> _resetWindowFullscreen() async {
+    if (!_usesWindowManagerFullscreen) return;
+    try {
+      if (!await windowManager.isFullScreen()) return;
+      WindowsTitleBar.setFullscreen(false);
+      await windowManager.setFullScreen(false);
+    } catch (error, stackTrace) {
+      debugPrint('恢复窗口全屏状态失败：$error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
   }
 
   @override
@@ -684,6 +743,8 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
       _stopReportQueued = true;
       unawaited(_reportPlayback(EmbyPcPlaybackEvent.stopped));
     }
+    // 异常移除页面（如全屏中直接关闭窗口）同样不能把窗口留在全屏状态。
+    unawaited(_resetWindowFullscreen());
     if (_usesWindowCloseGuard) {
       windowManager.removeListener(this);
       unawaited(_setWindowCloseGuard(false));
@@ -702,7 +763,13 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
       canPop: _allowPop,
       // 系统返回、键盘返回和标题栏返回都先经过同一个可等待退出流程。
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) unawaited(_closePlayer());
+        if (didPop) return;
+        // 全屏时返回键先退出全屏，与 Esc 行为保持一致。
+        if (_playerFullscreen) {
+          unawaited(_setFullscreen(false));
+          return;
+        }
+        unawaited(_closePlayer());
       },
       child: MouseRegion(
         // 鼠标在窗口内移动即唤回标题栏，静止 2 秒后自动隐藏。
@@ -711,45 +778,48 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
           backgroundColor: Colors.black,
           // 标题栏浮在画面之上：隐藏时视频不会因为少了一行而重新布局。
           extendBodyBehindAppBar: true,
-          appBar: PreferredSize(
-            preferredSize: const Size.fromHeight(kToolbarHeight),
-            child: IgnorePointer(
-              ignoring: !_chromeVisible,
-              child: AnimatedOpacity(
-                opacity: _chromeVisible ? 1 : 0,
-                duration: const Duration(milliseconds: 180),
-                child: AppBar(
-                  backgroundColor: Colors.black.withValues(alpha: 0.55),
-                  foregroundColor: Colors.white,
-                  leading: BackButton(
-                    onPressed: _closing
-                        ? null
-                        : () => unawaited(_closePlayer()),
-                  ),
-                  title: Text(
-                    widget.item.name,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  // 退出上报期间提供明确状态，并禁用重复返回操作。
-                  actions: [
-                    if (_closing)
-                      const Padding(
-                        padding: EdgeInsets.only(right: 16),
-                        child: Center(
-                          child: SizedBox.square(
-                            dimension: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          ),
+          // 全屏不再挂 AppBar，避免它随窗口 resize 多出一次重建。
+          appBar: _playerFullscreen
+              ? null
+              : PreferredSize(
+                  preferredSize: const Size.fromHeight(kToolbarHeight),
+                  child: IgnorePointer(
+                    ignoring: !_chromeVisible,
+                    child: AnimatedOpacity(
+                      opacity: _chromeVisible ? 1 : 0,
+                      duration: const Duration(milliseconds: 180),
+                      child: AppBar(
+                        backgroundColor: Colors.black.withValues(alpha: 0.55),
+                        foregroundColor: Colors.white,
+                        leading: BackButton(
+                          onPressed: _closing
+                              ? null
+                              : () => unawaited(_closePlayer()),
                         ),
+                        title: Text(
+                          widget.item.name,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        // 退出上报期间提供明确状态，并禁用重复返回操作。
+                        actions: [
+                          if (_closing)
+                            const Padding(
+                              padding: EdgeInsets.only(right: 16),
+                              child: Center(
+                                child: SizedBox.square(
+                                  dimension: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
-                  ],
+                    ),
+                  ),
                 ),
-              ),
-            ),
-          ),
           body: _loading
               ? Center(
                   child: _PlayerLoadingIndicator(
@@ -777,17 +847,26 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
                     controller: _videoController,
                     aspectRatio: _aspectRatio,
                     fit: _videoFit,
-                    // 存在剩余黑边时仅将画面轻微上移，控制栏仍固定在播放器底部。
-                    alignment: const Alignment(0, -0.22),
-                    // Flutter 字幕上移到控制区上方，避免与进度条和操作按钮重叠。
-                    subtitleViewConfiguration: const SubtitleViewConfiguration(
-                      padding: EdgeInsets.fromLTRB(24, 0, 24, 104),
+                    // 存在剩余黑边时仅将画面轻微上移，控制栏仍固定在播放器底部；
+                    // 全屏时控制栏会自动隐藏，画面必须居中，否则底部黑边明显偏大。
+                    alignment: _playerFullscreen
+                        ? Alignment.center
+                        : const Alignment(0, -0.22),
+                    // Flutter 字幕上移到控制区上方，避免与进度条和操作按钮重叠；
+                    // 全屏没有顶部标题栏，控制栏也更贴近画面，字幕可以下移一些。
+                    subtitleViewConfiguration: SubtitleViewConfiguration(
+                      padding: EdgeInsets.fromLTRB(
+                        24,
+                        0,
+                        24,
+                        _playerFullscreen ? 80 : 104,
+                      ),
                     ),
                     // Render the custom controls inside Video as its only
                     // control layer instead of stacking a second outer bar.
                     // 控制层自身占满播放器，再在内部固定到底部，避免 Align 的松约束
                     // 让进度条、预览框在不同窗口比例下出现错位。
-                    controls: (videoState) => _PlayerControls(
+                    controls: (_) => _PlayerControls(
                       player: _player,
                       position: _position,
                       duration: _duration,
@@ -799,10 +878,9 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
                       volume: _volume,
                       videoFit: _videoFit,
                       speed: _playbackRate,
-                      // media_kit 全屏时会保留原页面并新建 Video，两个控制层必须使用不同 Key。
-                      volumeControlKey: isFullscreen(videoState.context)
-                          ? _fullscreenVolumeControlKey
-                          : _volumeControlKey,
+                      isFullscreen: _playerFullscreen,
+                      volumeControlKey: _volumeControlKey,
+                      onToggleFullscreen: () => unawaited(_toggleFullscreen()),
                       onTogglePlay: _togglePlay,
                       onToggleMute: _toggleMute,
                       onVideoFitChanged: _setVideoFit,
@@ -969,7 +1047,10 @@ class _PlayerControls extends StatefulWidget {
   final BoxFit videoFit;
   // 倍速由页面统一持有，控制层只负责展示与回传选择。
   final double speed;
+  // 全屏状态由页面持有：不再依赖 media_kit 的全屏路由，只作为展示与回调。
+  final bool isFullscreen;
   final GlobalKey<_VolumeControlState> volumeControlKey;
+  final VoidCallback onToggleFullscreen;
   final VoidCallback onTogglePlay;
   final VoidCallback onToggleMute;
   final ValueChanged<BoxFit> onVideoFitChanged;
@@ -990,7 +1071,9 @@ class _PlayerControls extends StatefulWidget {
     required this.volume,
     required this.videoFit,
     required this.speed,
+    required this.isFullscreen,
     required this.volumeControlKey,
+    required this.onToggleFullscreen,
     required this.onTogglePlay,
     required this.onToggleMute,
     required this.onVideoFitChanged,
@@ -1048,10 +1131,12 @@ class _PlayerControlsState extends State<_PlayerControls> {
   double get volume => widget.volume;
   BoxFit get videoFit => widget.videoFit;
   double get speed => widget.speed;
+  bool get isFullscreen => widget.isFullscreen;
   GlobalKey<_VolumeControlState> get volumeControlKey =>
       widget.volumeControlKey;
   VoidCallback get onTogglePlay => widget.onTogglePlay;
   VoidCallback get onToggleMute => widget.onToggleMute;
+  VoidCallback get onToggleFullscreen => widget.onToggleFullscreen;
   ValueChanged<BoxFit> get onVideoFitChanged => widget.onVideoFitChanged;
   ValueChanged<double> get onVolumeChanged => widget.onVolumeChanged;
   ValueChanged<Duration> get onSeek => widget.onSeek;
@@ -1060,7 +1145,7 @@ class _PlayerControlsState extends State<_PlayerControls> {
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
   bool get _usesAndroidFullscreenControls =>
-      _usesAndroidTouchGestures && isFullscreen(context);
+      _usesAndroidTouchGestures && isFullscreen;
 
   // 桌面端播放中同样自动隐藏控制层，让画面完整可见；暂停时保持可见便于操作。
   bool get _usesDesktopAutoHideControls {
@@ -1083,6 +1168,12 @@ class _PlayerControlsState extends State<_PlayerControls> {
   @override
   void didUpdateWidget(covariant _PlayerControls oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.isFullscreen != isFullscreen) {
+      // 切换全屏时先亮出工具栏，避免刚进全屏就只剩画面、找不到退出按钮。
+      _controlsVisible = true;
+      _synchronizeControlsVisibility();
+      return;
+    }
     if (!_autoHideControls || !isPlaying) {
       _controlsHideTimer?.cancel();
       _controlsVisible = true;
@@ -1228,14 +1319,9 @@ class _PlayerControlsState extends State<_PlayerControls> {
     super.dispose();
   }
 
-  Future<void> _toggleFullscreen(BuildContext context) async {
-    // Flutter Tooltip 使用 OverlayPortal；等待退出动画结束后再改变窗口尺寸。
-    final tooltipWasVisible = Tooltip.dismissAllToolTips();
-    if (tooltipWasVisible) {
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-      await WidgetsBinding.instance.endOfFrame;
-    }
-    if (context.mounted) await toggleFullscreen(context);
+  // Esc 只用于退出全屏；非全屏时按键照常交给上层处理。
+  void _handleEscape() {
+    if (isFullscreen) onToggleFullscreen();
   }
 
   void _seekBy(Duration delta) {
@@ -1320,14 +1406,17 @@ class _PlayerControlsState extends State<_PlayerControls> {
         const SingleActivator(
           LogicalKeyboardKey.enter,
           includeRepeats: false,
-        ): () =>
-            unawaited(_toggleFullscreen(context)),
+        ): onToggleFullscreen,
         // 同时支持桌面键盘的数字键盘回车键切换全屏。
         const SingleActivator(
           LogicalKeyboardKey.numpadEnter,
           includeRepeats: false,
-        ): () =>
-            unawaited(_toggleFullscreen(context)),
+        ): onToggleFullscreen,
+        // 全屏时 Esc 直接退出全屏；菜单打开时由菜单优先响应。
+        const SingleActivator(
+          LogicalKeyboardKey.escape,
+          includeRepeats: false,
+        ): _handleEscape,
         // 自定义控制层接管默认控制层的方向键交互。
         const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
             _seekBy(_keyboardRewindStep),
@@ -1544,19 +1633,17 @@ class _PlayerControlsState extends State<_PlayerControls> {
                                             onToggleMute: onToggleMute,
                                             onVolumeChanged: onVolumeChanged,
                                           ),
-                                          // 使用播放器自带的全屏路由，并同步桌面端的原生窗口状态。
+                                          // 全屏由页面切换窗口状态，不再重建播放器路由。
                                           IconButton(
-                                            tooltip: isFullscreen(context)
-                                                ? '退出全屏'
+                                            tooltip: isFullscreen
+                                                ? '退出全屏 (Esc)'
                                                 : '全屏',
                                             color: Colors.white,
                                             visualDensity:
                                                 VisualDensity.compact,
-                                            onPressed: () => unawaited(
-                                              _toggleFullscreen(context),
-                                            ),
+                                            onPressed: onToggleFullscreen,
                                             icon: Icon(
-                                              isFullscreen(context)
+                                              isFullscreen
                                                   ? Icons
                                                         .fullscreen_exit_rounded
                                                   : Icons.fullscreen_rounded,
