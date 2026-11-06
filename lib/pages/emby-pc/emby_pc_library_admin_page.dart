@@ -595,7 +595,7 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
                   value: _LibraryAdminAction.refreshCover,
                   child: ListTile(
                     leading: Icon(Icons.wallpaper_outlined),
-                    title: Text('刷新媒体库图片'),
+                    title: Text('刷新媒体库封面'),
                   ),
                 ),
                 const PopupMenuItem(
