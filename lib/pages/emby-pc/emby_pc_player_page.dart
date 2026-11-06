@@ -2239,6 +2239,16 @@ class _PreviewTimelineBarState extends State<_PreviewTimelineBar> {
   int _activeFrameIndex = -1;
   Uint8List? _activeFrameBytes;
   late int _controllerRevision;
+  // 拖动期间只更新预览图与滑块位置，松手后才真正跳转；否则播放器会在拖动过程中
+  // 反复 seek 并重新加载，画面与音频跟随手指不断跳变。
+  double? _dragValue;
+  // 松手后播放器位置尚未追上目标前，滑块继续显示目标位置，避免回跳一帧旧进度。
+  Duration? _pendingSeek;
+  Timer? _pendingSeekTimer;
+
+  // 拖动中或跳转落地前的临时显示位置（毫秒），为空时跟随真实播放进度。
+  double? get _pendingMilliseconds =>
+      _dragValue ?? _pendingSeek?.inMilliseconds.toDouble();
 
   // Web 与桌面端使用 hover，移动端继续由 Slider 的拖动回调触发预览。
   bool get _supportsHoverPreview {
@@ -2263,6 +2273,35 @@ class _PreviewTimelineBarState extends State<_PreviewTimelineBar> {
       _activeFrameIndex = -1;
       _activeFrameBytes = null;
     }
+    _synchronizePendingSeek();
+  }
+
+  // 播放器位置追上目标位置后结束临时显示值，滑块重新跟随真实播放进度。
+  void _synchronizePendingSeek() {
+    final pending = _pendingSeek;
+    if (pending == null) return;
+    if ((widget.position - pending).abs() > const Duration(seconds: 1)) return;
+    // didUpdateWidget 之后紧接 build，这里只重置字段即可，无需再调用 setState。
+    _pendingSeekTimer?.cancel();
+    _pendingSeekTimer = null;
+    _pendingSeek = null;
+    _dragValue = null;
+  }
+
+  // 松手时提交跳转：先记住目标位置，等播放器位置事件到达后再恢复跟随。
+  void _commitSeek(Duration target) {
+    _pendingSeek = target;
+    _dragValue = target.inMilliseconds.toDouble();
+    _pendingSeekTimer?.cancel();
+    // 兜底：seek 未产生可识别的位置事件时，短暂等待后恢复跟随真实进度。
+    _pendingSeekTimer = Timer(const Duration(seconds: 1), () {
+      if (!mounted || _pendingSeek == null) return;
+      setState(() {
+        _pendingSeek = null;
+        _dragValue = null;
+      });
+    });
+    widget.onSeek(target);
   }
 
   void _showPreview(double ratio) {
@@ -2290,6 +2329,12 @@ class _PreviewTimelineBarState extends State<_PreviewTimelineBar> {
     if (_previewVisible) setState(() => _previewVisible = false);
   }
 
+  @override
+  void dispose() {
+    _pendingSeekTimer?.cancel();
+    super.dispose();
+  }
+
   double _pointerRatio(double localX, double width) {
     final inset = width > _sliderHorizontalInset * 2
         ? _sliderHorizontalInset
@@ -2315,8 +2360,9 @@ class _PreviewTimelineBarState extends State<_PreviewTimelineBar> {
         .toDouble()
         .clamp(1, double.infinity)
         .toDouble();
-    final current = widget.position.inMilliseconds
-        .toDouble()
+    // 拖动与跳转落地期间使用临时位置，其余时间跟随真实播放进度。
+    final current = (_pendingMilliseconds ??
+            widget.position.inMilliseconds.toDouble())
         .clamp(0, max)
         .toDouble();
     return SizedBox(
@@ -2362,16 +2408,23 @@ class _PreviewTimelineBarState extends State<_PreviewTimelineBar> {
                     onChangeStart: widget.duration > Duration.zero
                         ? (value) => _showPreview(value / max)
                         : null,
+                    // 按住拖动时只滚动预览图并移动滑块，正在播放的画面保持原进度。
                     onChanged: widget.duration > Duration.zero
                         ? (value) {
+                            if (_dragValue != value) {
+                              setState(() => _dragValue = value);
+                            }
                             _showPreview(value / max);
-                            widget.onSeek(
+                          }
+                        : null,
+                    // 松手后才按最终落点跳转，播放器只 seek 一次。
+                    onChangeEnd: widget.duration > Duration.zero
+                        ? (value) {
+                            _hidePreview();
+                            _commitSeek(
                               Duration(milliseconds: value.round()),
                             );
                           }
-                        : null,
-                    onChangeEnd: widget.duration > Duration.zero
-                        ? (_) => _hidePreview()
                         : null,
                   ),
                 ),
