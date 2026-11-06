@@ -446,11 +446,7 @@ class _ItemMetadataDialogState extends State<_ItemMetadataDialog> {
       if (mounted) Navigator.pop(context, true);
     } catch (error) {
       if (!mounted) return;
-      EmbyPcToast.show(
-        context,
-        error.toString(),
-        type: EmbyPcToastType.error,
-      );
+      EmbyPcToast.show(context, error.toString(), type: EmbyPcToastType.error);
       setState(() => _saving = false);
     }
   }
@@ -1103,59 +1099,6 @@ class _SidebarSectionTitle extends StatelessWidget {
         fontWeight: FontWeight.w500,
       ),
     ),
-  );
-}
-
-class _LibraryOrderDialog extends StatefulWidget {
-  final List<EmbyPcItem> libraries;
-
-  const _LibraryOrderDialog({required this.libraries});
-
-  @override
-  State<_LibraryOrderDialog> createState() => _LibraryOrderDialogState();
-}
-
-class _LibraryOrderDialogState extends State<_LibraryOrderDialog> {
-  late final List<EmbyPcItem> _libraries = List.of(widget.libraries);
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('调整媒体库顺序'),
-    content: SizedBox(
-      width: 420,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxHeight: 500),
-        child: _libraries.isEmpty
-            ? const Text('暂无媒体库')
-            : ReorderableListView.builder(
-                shrinkWrap: true,
-                itemCount: _libraries.length,
-                onReorder: (oldIndex, newIndex) {
-                  setState(() {
-                    if (newIndex > oldIndex) newIndex -= 1;
-                    final item = _libraries.removeAt(oldIndex);
-                    _libraries.insert(newIndex, item);
-                  });
-                },
-                itemBuilder: (context, index) => ListTile(
-                  key: ValueKey(_libraries[index].id),
-                  leading: const Icon(Icons.folder_outlined),
-                  title: Text(_libraries[index].name),
-                  trailing: const Icon(Icons.drag_handle),
-                ),
-              ),
-      ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('取消'),
-      ),
-      FilledButton(
-        onPressed: () => Navigator.pop(context, _libraries),
-        child: const Text('保存'),
-      ),
-    ],
   );
 }
 

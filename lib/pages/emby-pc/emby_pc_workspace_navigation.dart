@@ -497,12 +497,9 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
 
   // 设置页由侧栏进入；返回后统一处理会话失效、头像与媒体库变更。
   Future<void> _openSettings() async {
-    await Navigator.of(context).push(
-      embyPcFadeRoute(
-        context,
-        (_) => SettingsPage(onAdjustLibraryOrder: _openOrderDialog),
-      ),
-    );
+    await Navigator.of(
+      context,
+    ).push(embyPcFadeRoute(context, (_) => const SettingsPage()));
     if (!mounted) return;
     // 设置页可以改服务器地址，改完当前会话立即作废，直接回登录页。
     if (!EmbyPcService.instance.isLoggedIn) {
@@ -511,7 +508,10 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
     }
     // 设置页可能修改用户头像或媒体库，返回后同步刷新侧边栏与头像地址。
     _onWorkspaceChanged();
-    await _reloadLibraries();
+    // 媒体库管理里改过排序号，返回时按已保存的顺序重排侧栏。
+    final order = (await EmbyPcService.instance.readPreferences()).libraryOrder;
+    if (!mounted) return;
+    await _reloadLibraries(order: order);
     // 媒体库管理页可能批量生成过海报/封面，返回后刷新当前列表的图片标记。
     await _reloadMediaAfterChange();
   }

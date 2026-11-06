@@ -140,7 +140,9 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
     // 头像加载失败后服务层通知一次，立即重建切回占位图标，不再重复请求。
     EmbyPcService.instance.avatarRevision.addListener(_onWorkspaceChanged);
     // 401 集中拦截：任何请求发现令牌失效都由服务层通知一次，这里统一回登录页。
-    EmbyPcService.instance.unauthorizedRevision.addListener(_handleSessionExpired);
+    EmbyPcService.instance.unauthorizedRevision.addListener(
+      _handleSessionExpired,
+    );
     _initialize();
   }
 
@@ -652,22 +654,20 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
       EmbyPcToast.show(context, message, type: EmbyPcToastType.success);
     } catch (error) {
       if (!mounted) return;
-      EmbyPcToast.show(
-        context,
-        error.toString(),
-        type: EmbyPcToastType.error,
-      );
+      EmbyPcToast.show(context, error.toString(), type: EmbyPcToastType.error);
     } finally {
       if (mounted) setState(() => _libraryActionBusyIds.remove(libraryId));
     }
   }
 
   // 图像、媒体库增删改都会改变侧边栏结构，统一重新拉取 Views。
-  Future<void> _reloadLibraries() async {
+  // order 为空时沿用当前内存顺序；外部改过排序号时传入已保存的顺序。
+  Future<void> _reloadLibraries({List<String>? order}) async {
     try {
       final libraries = await EmbyPcService.instance.getLibraries();
       if (!mounted) return;
-      final currentOrder = _c.libraries.map((item) => item.id).toList();
+      final currentOrder =
+          order ?? _c.libraries.map((item) => item.id).toList();
       setState(
         () => _c.libraries = _c.applyLibraryOrder(libraries, currentOrder),
       );
@@ -680,25 +680,6 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
         );
       }
     }
-  }
-
-  Future<void> _openOrderDialog() async {
-    final draft = List<EmbyPcItem>.of(_c.libraries);
-    final saved = await showDialog<List<EmbyPcItem>>(
-      context: context,
-      builder: (context) => _LibraryOrderDialog(libraries: draft),
-    );
-    if (saved == null || !mounted) return;
-    await EmbyPcService.instance.saveLibraryOrder(
-      saved.map((item) => item.id).toList(),
-    );
-    setState(() {
-      _c.libraries = saved;
-      if (_c.view == 'library' &&
-          !_c.libraries.any((item) => item.id == _c.activeId)) {
-        _c.activeId = _c.libraries.isEmpty ? '' : _c.libraries.first.id;
-      }
-    });
   }
 
   Future<void> _logout() async {
@@ -723,15 +704,10 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
       );
       return;
     }
-    Navigator.of(
-      context,
-    ).push(
+    Navigator.of(context).push(
       embyPcFadeRoute(
         context,
-        (_) => EmbyPcDetailPage(
-          item: item,
-          onMediaAction: _handleMediaAction,
-        ),
+        (_) => EmbyPcDetailPage(item: item, onMediaAction: _handleMediaAction),
       ),
     );
   }
@@ -780,12 +756,11 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
         );
         return Scaffold(
           key: _workspaceScaffoldKey,
-          drawer:
-              mobileWorkspace
-                  ? _EmbyPcWorkspaceNavigation(
-                    this,
-                  )._buildMobileNavigationDrawer(context)
-                  : null,
+          drawer: mobileWorkspace
+              ? _EmbyPcWorkspaceNavigation(
+                  this,
+                )._buildMobileNavigationDrawer(context)
+              : null,
           body: _c.error.isNotEmpty && _c.libraries.isEmpty
               ? _WorkspaceError(
                   message: _c.error,

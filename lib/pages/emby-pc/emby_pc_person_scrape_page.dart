@@ -9,7 +9,10 @@ import 'emby_pc_toast.dart';
 // 设置页入口：从 TMDB 批量刮削演员资料（简介/生日/性别/Tmdb 与 IMDb 编号）与图片。
 // 刮削只在服务端手动触发，本页负责提交范围参数并轮询进度。
 class EmbyPcPersonScrapePage extends StatefulWidget {
-  const EmbyPcPersonScrapePage({super.key});
+  // embedded 为 true 时只输出内容区，供设置页内嵌显示，不再套一层 Scaffold。
+  final bool embedded;
+
+  const EmbyPcPersonScrapePage({super.key, this.embedded = false});
 
   @override
   State<EmbyPcPersonScrapePage> createState() => _EmbyPcPersonScrapePageState();
@@ -178,6 +181,7 @@ class _EmbyPcPersonScrapePageState extends State<EmbyPcPersonScrapePage> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.embedded) return _buildBody();
     return Scaffold(
       appBar: AppBar(title: const Text('演员刮削')),
       body: _buildBody(),
@@ -207,10 +211,7 @@ class _EmbyPcPersonScrapePageState extends State<EmbyPcPersonScrapePage> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
       children: [
-        if (!_configured) ...[
-          _buildConfigHint(),
-          const SizedBox(height: 20),
-        ],
+        if (!_configured) ...[_buildConfigHint(), const SizedBox(height: 20)],
         const _ScrapeSectionTitle('刮削设置'),
         _buildSetupCard(),
         const SizedBox(height: 20),

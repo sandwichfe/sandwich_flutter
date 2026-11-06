@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
-import 'emby-pc/emby_pc_detail_page.dart';
 import 'emby-pc/emby_pc_library_admin_page.dart';
 import 'emby-pc/emby_pc_person_scrape_page.dart';
 import 'emby-pc/emby_pc_service.dart';
@@ -12,7 +11,6 @@ import '../utils/theme_manager.dart';
 enum _SettingId {
   server,
   avatar,
-  libraryOrder,
   libraryAdmin,
   thumbnail,
   personScrape,
@@ -25,7 +23,6 @@ extension _SettingMeta on _SettingId {
   IconData get icon => switch (this) {
     _SettingId.server => Icons.dns_outlined,
     _SettingId.avatar => Icons.person_outline,
-    _SettingId.libraryOrder => Icons.swap_vert,
     _SettingId.libraryAdmin => Icons.video_library_outlined,
     _SettingId.thumbnail => Icons.movie_filter_outlined,
     _SettingId.personScrape => Icons.person_search_outlined,
@@ -37,7 +34,6 @@ extension _SettingMeta on _SettingId {
   String get title => switch (this) {
     _SettingId.server => '服务器地址',
     _SettingId.avatar => '修改头像',
-    _SettingId.libraryOrder => '调整媒体库顺序',
     _SettingId.libraryAdmin => '媒体库管理',
     _SettingId.thumbnail => '进度条缩略图',
     _SettingId.personScrape => '演员刮削',
@@ -50,8 +46,7 @@ extension _SettingMeta on _SettingId {
   String get description => switch (this) {
     _SettingId.server => 'Emby 服务端地址只保存在本地，修改后需要重新登录。',
     _SettingId.avatar => '头像上传到 Emby 服务端账号，客户端只做裁剪与压缩。',
-    _SettingId.libraryOrder => '自定义侧栏中媒体库的排列顺序，仅影响当前设备展示。',
-    _SettingId.libraryAdmin => '新建、编辑、删除与扫描媒体库，需要管理员权限。',
+    _SettingId.libraryAdmin => '新建、编辑、删除与扫描媒体库，右侧「排序」可直接调整侧栏顺序，需要管理员权限。',
     _SettingId.thumbnail => '按媒体库批量预生成进度条缩略图，可控抽帧间隔并查看进度。',
     _SettingId.personScrape => '从 TMDB 补齐演员简介、生日与头像写真，按需手动触发。',
     _SettingId.darkMode => '深色模式同时影响页面画布、卡片与导航的明暗层次。',
@@ -63,7 +58,6 @@ extension _SettingMeta on _SettingId {
 const Map<String, List<_SettingId>> _settingGroups = {
   '账户': [_SettingId.server, _SettingId.avatar],
   '媒体库': [
-    _SettingId.libraryOrder,
     _SettingId.libraryAdmin,
     _SettingId.thumbnail,
     _SettingId.personScrape,
@@ -79,9 +73,7 @@ String _hexOf(Color color) {
 }
 
 class SettingsPage extends StatefulWidget {
-  final Future<void> Function() onAdjustLibraryOrder;
-
-  const SettingsPage({super.key, required this.onAdjustLibraryOrder});
+  const SettingsPage({super.key});
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -142,10 +134,6 @@ class _SettingsPageState extends State<SettingsPage> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(const SnackBar(content: Text('头像已更新')));
-  }
-
-  void _openPage(Widget page) {
-    Navigator.of(context).push(embyPcFadeRoute(context, (_) => page));
   }
 
   @override
@@ -247,100 +235,97 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildDetail(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 640),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: colors.secondaryContainer.withValues(alpha: 0.6),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(
-                      _selected.icon,
-                      size: 20,
-                      color: colors.onSecondaryContainer,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _selected.title,
-                          style: Theme.of(
-                            context,
-                          ).textTheme.titleLarge?.copyWith(fontSize: 16),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _selected.description,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                color: colors.onSurfaceVariant,
-                                height: 1.5,
-                              ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              _buildDetailBody(context),
-            ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 640),
+              child: _buildDetailHeader(context),
+            ),
           ),
         ),
-      ),
+        Expanded(child: _buildDetailBody(context)),
+      ],
     );
   }
 
+  Widget _buildDetailHeader(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: colors.secondaryContainer.withValues(alpha: 0.6),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(
+            _selected.icon,
+            size: 20,
+            color: colors.onSecondaryContainer,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _selected.title,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontSize: 16),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _selected.description,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colors.onSurfaceVariant,
+                  height: 1.5,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // 右侧直接渲染操作区：媒体库类设置内嵌整页内容，其余设置就地编辑。
   Widget _buildDetailBody(BuildContext context) => switch (_selected) {
-    _SettingId.server => _buildServerPane(context),
-    _SettingId.avatar => _buildAvatarPane(context),
-    _SettingId.libraryOrder => _buildActionPane(
+    _SettingId.server => _scrollable(context, _buildServerPane(context)),
+    _SettingId.avatar => _scrollable(context, _buildAvatarPane(context)),
+    // 内嵌页面自带滚动与工具栏，这里不再套滚动容器。
+    _SettingId.libraryAdmin => const EmbyPcLibraryAdminPage(embedded: true),
+    _SettingId.thumbnail => const EmbyPcThumbnailJobPage(embedded: true),
+    _SettingId.personScrape => const EmbyPcPersonScrapePage(embedded: true),
+    _SettingId.darkMode => _scrollable(context, _buildDarkModePane(context)),
+    _SettingId.backgroundColor => _scrollable(
       context,
-      description: '排序结果保存在本地，仅在当前设备生效。',
-      actionLabel: '调整顺序',
-      actionIcon: Icons.swap_vert,
-      onPressed: widget.onAdjustLibraryOrder,
+      _buildColorPane(context, isBackground: true),
     ),
-    _SettingId.libraryAdmin => _buildActionPane(
+    _SettingId.seedColor => _scrollable(
       context,
-      description: '需要管理员账号，非管理员进入后只能查看现有媒体库。',
-      actionLabel: '打开媒体库管理',
-      actionIcon: Icons.video_library_outlined,
-      onPressed: () => _openPage(const EmbyPcLibraryAdminPage()),
+      _buildColorPane(context, isBackground: false),
     ),
-    _SettingId.thumbnail => _buildActionPane(
-      context,
-      description: '任务在服务端后台执行，可随时离开页面，进度会持续更新。',
-      actionLabel: '打开缩略图任务',
-      actionIcon: Icons.movie_filter_outlined,
-      onPressed: () => _openPage(const EmbyPcThumbnailJobPage()),
-    ),
-    _SettingId.personScrape => _buildActionPane(
-      context,
-      description: '刮削为联网操作，仅在手动触发时执行，不影响正常扫描。',
-      actionLabel: '打开演员刮削',
-      actionIcon: Icons.person_search_outlined,
-      onPressed: () => _openPage(const EmbyPcPersonScrapePage()),
-    ),
-    _SettingId.darkMode => _buildDarkModePane(context),
-    _SettingId.backgroundColor => _buildColorPane(context, isBackground: true),
-    _SettingId.seedColor => _buildColorPane(context, isBackground: false),
   };
+
+  // 就地编辑类设置统一加滚动与最大宽度，保持与内嵌页面一致的留白。
+  Widget _scrollable(BuildContext context, Widget child) =>
+      SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 640),
+            child: child,
+          ),
+        ),
+      );
 
   Widget _buildServerPane(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
@@ -440,44 +425,6 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildActionPane(
-    BuildContext context, {
-    required String description,
-    required String actionLabel,
-    required IconData actionIcon,
-    required VoidCallback onPressed,
-  }) {
-    final colors = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: colors.surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: colors.outlineVariant),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            description,
-            style: TextStyle(
-              fontSize: 13,
-              height: 1.6,
-              color: colors.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: onPressed,
-            icon: Icon(actionIcon, size: 18),
-            label: Text(actionLabel),
-          ),
-        ],
-      ),
     );
   }
 

@@ -10,7 +10,10 @@ import 'emby_pc_toast.dart';
 // 媒体库管理页直接对接 Emby 的 VirtualFolders 接口：
 // 列表只读，所有写操作都由后端校验管理员权限。
 class EmbyPcLibraryAdminPage extends StatefulWidget {
-  const EmbyPcLibraryAdminPage({super.key});
+  // embedded 为 true 时只输出工具栏 + 列表，供设置页内嵌显示。
+  final bool embedded;
+
+  const EmbyPcLibraryAdminPage({super.key, this.embedded = false});
 
   @override
   State<EmbyPcLibraryAdminPage> createState() => _EmbyPcLibraryAdminPageState();
@@ -36,6 +39,8 @@ enum _LibraryAdminAction {
 
 class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
   List<EmbyPcVirtualFolder> _folders = const [];
+  // 侧栏排序号由本地保存，列表按它展示，改号即写入偏好。
+  List<String> _order = const [];
   bool _loading = true;
   String _error = '';
   bool _creating = false;
@@ -75,8 +80,17 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
     try {
       final folders = await EmbyPcService.instance.getVirtualFolders();
       if (!mounted) return;
+      final savedOrder =
+          (await EmbyPcService.instance.readPreferences()).libraryOrder;
+      if (!mounted) return;
+      final order = _reconcileOrder(savedOrder, folders);
+      // 新建或删除库后补齐排序号，保证侧栏和列表用的是同一份顺序。
+      if (order.join(',') != savedOrder.join(',')) {
+        unawaited(EmbyPcService.instance.saveLibraryOrder(order));
+      }
       setState(() {
         _folders = folders;
+        _order = order;
         _loading = false;
         _error = '';
       });
@@ -343,39 +357,110 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
     }
   }
 
+  // 已保存的顺序里可能缺新库、也可能残留已删除的库，统一补齐后返回完整顺序。
+  List<String> _reconcileOrder(
+    List<String> saved,
+    List<EmbyPcVirtualFolder> folders,
+  ) {
+    final ids = folders.map((folder) => folder.id).toSet();
+    final order = <String>[
+      for (final id in saved)
+        if (ids.contains(id)) id,
+    ];
+    // 新库按接口返回顺序追加到末尾，避免列表跳动。
+    for (final folder in folders) {
+      if (!order.contains(folder.id)) order.add(folder.id);
+    }
+    return order;
+  }
+
+  // 列表按排序号展示；排序号在 1 起算，直接对应界面上可编辑的数字。
+  List<EmbyPcVirtualFolder> get _orderedFolders {
+    final position = {for (var i = 0; i < _order.length; i++) _order[i]: i};
+    final list = List<EmbyPcVirtualFolder>.of(_folders);
+    list.sort(
+      (a, b) =>
+          (position[a.id] ?? 1 << 30).compareTo(position[b.id] ?? 1 << 30),
+    );
+    return list;
+  }
+
+  int _orderOf(String id) {
+    final index = _order.indexOf(id);
+    return index < 0 ? _order.length + 1 : index + 1;
+  }
+
+  // 直接改排序号：把该库移动到目标位置后立即写入本地偏好。
+  void _moveLibraryTo(String id, int target) {
+    final order = List<String>.of(_order);
+    final from = order.indexOf(id);
+    if (from < 0) return;
+    final to = (target - 1).clamp(0, order.length - 1);
+    if (from == to) {
+      // 输入越界或没变化时重建一次，把输入框还原成真实排序号。
+      setState(() {});
+      return;
+    }
+    final moved = order.removeAt(from);
+    order.insert(to, moved);
+    setState(() => _order = order);
+    unawaited(EmbyPcService.instance.saveLibraryOrder(order));
+    _toast(
+      '「${_folders.firstWhere((item) => item.id == id).name}」排序号已改为 ${to + 1}',
+    );
+  }
+
+  List<Widget> _buildToolbarActions() => [
+    IconButton(
+      tooltip: '刷新列表',
+      onPressed: () => _load(),
+      icon: const Icon(Icons.refresh),
+    ),
+    // 扫描是重操作，用带文字的按钮和"刷新列表"的图标区分开。
+    TextButton.icon(
+      onPressed: (_scanningAll || _scanPolling) ? null : _scanAll,
+      icon: _scanningAll || _scanPolling
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.radar_outlined, size: 18),
+      label: Text(_scanPolling ? '扫描中' : '扫描全部'),
+    ),
+    IconButton(
+      tooltip: '新建媒体库',
+      onPressed: _creating ? null : _createLibrary,
+      icon: const Icon(Icons.add),
+    ),
+  ];
+
   @override
   Widget build(BuildContext context) {
+    if (widget.embedded) {
+      final colors = Theme.of(context).colorScheme;
+      return Column(
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: colors.outlineVariant)),
+            ),
+            child: Wrap(
+              alignment: WrapAlignment.end,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: _buildToolbarActions(),
+            ),
+          ),
+          Expanded(child: _buildBody()),
+        ],
+      );
+    }
     return Scaffold(
       appBar: AppBar(
         title: const Text('媒体库管理'),
-        actions: [
-          IconButton(
-            tooltip: '刷新列表',
-            onPressed: () => _load(),
-            icon: const Icon(Icons.refresh),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            // 扫描是重操作，用带文字的按钮和"刷新列表"的图标区分开。
-            child: TextButton.icon(
-              onPressed: (_scanningAll || _scanPolling) ? null : _scanAll,
-              icon: _scanningAll || _scanPolling
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.radar_outlined, size: 18),
-              label: Text(_scanPolling ? '扫描中' : '扫描全部'),
-            ),
-          ),
-          IconButton(
-            tooltip: '新建媒体库',
-            onPressed: _creating ? null : _createLibrary,
-            icon: const Icon(Icons.add),
-          ),
-          const SizedBox(width: 8),
-        ],
+        actions: [..._buildToolbarActions(), const SizedBox(width: 8)],
       ),
       body: _buildBody(),
     );
@@ -429,23 +514,41 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
       );
     }
 
+    final folders = _orderedFolders;
+    final theme = Theme.of(context);
     return Column(
       children: [
         if (_scanPolling) _ScanStatusBanner(status: _scanStatus),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+          child: Text(
+            '排序号同步到侧栏，直接改数字即可保存。',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
         Expanded(
           child: ListView.separated(
             padding: const EdgeInsets.symmetric(vertical: 8),
-            itemCount: _folders.length,
+            itemCount: folders.length,
             separatorBuilder: (_, _) => const Divider(height: 1, indent: 72),
-            itemBuilder: (context, index) =>
-                _buildTile(context, _folders[index]),
+            itemBuilder: (context, index) => _buildTile(
+              context,
+              folders[index],
+              _orderOf(folders[index].id),
+            ),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildTile(BuildContext context, EmbyPcVirtualFolder folder) {
+  Widget _buildTile(
+    BuildContext context,
+    EmbyPcVirtualFolder folder,
+    int order,
+  ) {
     final busy = _busyIds.contains(folder.id);
     final locations = folder.locations;
     final theme = Theme.of(context);
@@ -475,13 +578,24 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
         ],
       ),
       isThreeLine: true,
-      trailing: busy
-          ? const SizedBox(
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 排序号就地编辑，避免为了一次调序再开弹窗。
+          _LibraryOrderField(
+            value: order,
+            maxValue: _folders.length,
+            onSubmitted: (value) => _moveLibraryTo(folder.id, value),
+          ),
+          const SizedBox(width: 4),
+          if (busy)
+            const SizedBox(
               width: 18,
               height: 18,
               child: CircularProgressIndicator(strokeWidth: 2),
             )
-          : PopupMenuButton<_LibraryAdminAction>(
+          else
+            PopupMenuButton<_LibraryAdminAction>(
               tooltip: '媒体库操作',
               onSelected: (action) {
                 switch (action) {
@@ -546,6 +660,8 @@ class _EmbyPcLibraryAdminPageState extends State<EmbyPcLibraryAdminPage> {
                 ),
               ],
             ),
+        ],
+      ),
     );
   }
 
@@ -1092,6 +1208,85 @@ class _ScanStatusBanner extends StatelessWidget {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+// 排序号输入框：回车或失焦时提交，超出范围由父级还原成真实序号。
+class _LibraryOrderField extends StatefulWidget {
+  final int value;
+  final int maxValue;
+  final ValueChanged<int> onSubmitted;
+
+  const _LibraryOrderField({
+    required this.value,
+    required this.maxValue,
+    required this.onSubmitted,
+  });
+
+  @override
+  State<_LibraryOrderField> createState() => _LibraryOrderFieldState();
+}
+
+class _LibraryOrderFieldState extends State<_LibraryOrderField> {
+  late final TextEditingController _controller = TextEditingController(
+    text: '${widget.value}',
+  );
+  late final FocusNode _focusNode = FocusNode()
+    ..addListener(_handleFocusChange);
+
+  @override
+  void didUpdateWidget(covariant _LibraryOrderField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 父级重排后序号会变，输入框跟随刷新；正在输入时不打断用户。
+    if (widget.value != oldWidget.value && !_focusNode.hasFocus) {
+      _controller.text = '${widget.value}';
+    }
+  }
+
+  @override
+  void dispose() {
+    _focusNode.removeListener(_handleFocusChange);
+    _focusNode.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  // 只接受 1..库数量之间的整数，越界或非法输入直接还原成真实序号。
+  void _submit() {
+    final parsed = int.tryParse(_controller.text.trim()) ?? widget.value;
+    final upper = widget.maxValue < 1 ? 1 : widget.maxValue;
+    final value = parsed.clamp(1, upper);
+    _controller.text = '$value';
+    widget.onSubmitted(value);
+  }
+
+  void _handleFocusChange() {
+    if (_focusNode.hasFocus) return;
+    _submit();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return SizedBox(
+      width: 58,
+      child: TextField(
+        controller: _controller,
+        focusNode: _focusNode,
+        textAlign: TextAlign.center,
+        keyboardType: TextInputType.number,
+        textInputAction: TextInputAction.done,
+        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        decoration: InputDecoration(
+          isDense: true,
+          labelText: '排序',
+          labelStyle: TextStyle(fontSize: 11, color: colors.onSurfaceVariant),
+          contentPadding: const EdgeInsets.fromLTRB(6, 12, 6, 8),
+          border: const OutlineInputBorder(),
+        ),
+        onSubmitted: (_) => _submit(),
       ),
     );
   }

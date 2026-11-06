@@ -9,7 +9,10 @@ import 'emby_pc_toast.dart';
 // 设置页入口：按媒体库批量预生成进度条缩略图（BIF）。
 // 抽帧在服务端后台执行，本页只负责提交参数并按固定间隔轮询进度。
 class EmbyPcThumbnailJobPage extends StatefulWidget {
-  const EmbyPcThumbnailJobPage({super.key});
+  // embedded 为 true 时只输出内容区，供设置页内嵌显示，不再套一层 Scaffold。
+  final bool embedded;
+
+  const EmbyPcThumbnailJobPage({super.key, this.embedded = false});
 
   @override
   State<EmbyPcThumbnailJobPage> createState() => _EmbyPcThumbnailJobPageState();
@@ -214,6 +217,7 @@ class _EmbyPcThumbnailJobPageState extends State<EmbyPcThumbnailJobPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.embedded) return _buildBody();
     return Scaffold(
       appBar: AppBar(title: const Text('进度条缩略图')),
       body: _buildBody(),
