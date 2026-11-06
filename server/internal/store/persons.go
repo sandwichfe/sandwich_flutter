@@ -195,7 +195,14 @@ func personImageTag(person dto.PersonDto) string {
 // Persons 从 persons 主表分页查询演员，只取列表需要的轻量字段。
 // favoriteOnly 为 true 时只返回被标记收藏的演员
 // （客户端"收藏 - 演员"计数走的就是这条路径）。
+// 默认按姓名升序；需要切换排序时调用 PersonsSorted。
 func (s *Store) Persons(ctx context.Context, userID, searchTerm string, favoriteOnly bool, startIndex, limit int) ([]dto.BaseItemDto, int, error) {
+	return s.PersonsSorted(ctx, userID, searchTerm, favoriteOnly, "SortName", "Ascending", startIndex, limit)
+}
+
+// PersonsSorted 在 Persons 之上接住客户端传来的排序字段
+// （演员列表支持名称/年龄/出道日期/罩杯）。
+func (s *Store) PersonsSorted(ctx context.Context, userID, searchTerm string, favoriteOnly bool, sortBy, sortOrder string, startIndex, limit int) ([]dto.BaseItemDto, int, error) {
 	// 列表只展示有作品的演员；没有作品的演员仍在 persons 里可查。
 	where := []string{"p.item_count > 0"}
 	args := make([]any, 0, 2)
@@ -228,7 +235,7 @@ func (s *Store) Persons(ctx context.Context, userID, searchTerm string, favorite
 
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT p.person_id, p.name, p.image_tag, p.item_count FROM persons p`+whereSQL+
-			` ORDER BY p.name COLLATE NOCASE ASC, p.person_id ASC LIMIT ? OFFSET ?`,
+			` ORDER BY `+personOrderBy(sortBy, sortOrder)+` LIMIT ? OFFSET ?`,
 		append(args, limit, offset)...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("查询演员失败: %w", err)
@@ -244,6 +251,46 @@ func (s *Store) Persons(ctx context.Context, userID, searchTerm string, favorite
 		persons = append(persons, row.toDto())
 	}
 	return persons, total, rows.Err()
+}
+
+// personOrderBy 把客户端的排序字段映射成 persons 表的列，白名单同时防注入。
+// 生日、出道日期、罩杯允许为空，这些字段排序时把空值压到最后，
+// 避免没录资料的演员挤在列表头部。
+func personOrderBy(sortBy, sortOrder string) string {
+	direction := "ASC"
+	if strings.EqualFold(sortOrder, "Descending") {
+		direction = "DESC"
+	}
+
+	column, ok := map[string]string{
+		"SortName":     "p.sort_name COLLATE NOCASE",
+		"Name":         "p.name COLLATE NOCASE",
+		"BirthDate":    "p.birth_date",
+		"Age":          "p.birth_date",
+		"PremiereDate": "p.premiere_date",
+		"CupSize":      "p.cup_size COLLATE NOCASE",
+	}[sortBy]
+	if !ok || column == "" {
+		column = "p.sort_name COLLATE NOCASE"
+	}
+	// 年龄是生日的变形：生日越晚越年轻，升序要反过来查。
+	if strings.EqualFold(sortBy, "Age") {
+		if direction == "ASC" {
+			direction = "DESC"
+		} else {
+			direction = "ASC"
+		}
+	}
+
+	parts := make([]string, 0, 3)
+	switch column {
+	case "p.birth_date", "p.premiere_date", "p.cup_size COLLATE NOCASE":
+		parts = append(parts, "("+column+" = '') ASC")
+	}
+	parts = append(parts, column+" "+direction)
+	// 追加密钥保证分页结果稳定，否则同值行的顺序可能每次不同。
+	parts = append(parts, "p.person_id ASC")
+	return strings.Join(parts, ", ")
 }
 
 // PersonByID 按 ID 查演员详情。演员不随影片删除，所以作品数为 0 时依然返回。

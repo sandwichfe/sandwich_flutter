@@ -490,7 +490,9 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
     BuildContext context, {
     bool compact = false,
   }) {
-    const sortOptions = {
+    // 演员没有评分/分辨率等影片字段，排序项改为人物资料属性。
+    final peopleList = _c.view == 'people' || _c.view == 'favorite-people';
+    const mediaSortOptions = {
       'CommunityRating': '评分',
       'Height': '分辨率',
       'DateCreated': '加入日期',
@@ -499,6 +501,14 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
       'Runtime': '播放时长',
       'SortName': '文件名',
     };
+    const peopleSortOptions = {
+      'SortName': '名称',
+      // 年龄由生日派生，升序即“从年轻到年长”。
+      'Age': '年龄',
+      'PremiereDate': '出道日期',
+      'CupSize': '罩杯',
+    };
+    final sortOptions = peopleList ? peopleSortOptions : mediaSortOptions;
     final availableWidth = MediaQuery.sizeOf(context).width - 24;
     final panelWidth = availableWidth > 320 ? 320.0 : availableWidth;
     final colors = Theme.of(context).colorScheme;

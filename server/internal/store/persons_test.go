@@ -134,6 +134,73 @@ func TestPersonsReadsPersonsTable(t *testing.T) {
 	}
 }
 
+// TestPersonsSortedByProfileFields 覆盖演员列表的四种排序字段。
+// 资料为空的演员在任何方向都应排在最后，否则没录资料的演员会占满首屏。
+func TestPersonsSortedByProfileFields(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	item := movieItem("i1", "Alpha", nil, nil, nil, []dto.PersonDto{
+		actor("p1", "张三"),
+		actor("p2", "李四"),
+		actor("p3", "王五"),
+	})
+	if err := st.UpsertItem(ctx, item); err != nil {
+		t.Fatalf("写入条目失败: %v", err)
+	}
+	// 张三：1990 出生 / 2010 出道 / C；李四：2000 出生 / 2015 出道 / A；王五全部留空。
+	metadata := map[string]map[string]any{
+		"p1": {"BirthDate": "1990-01-01", "PremiereDate": "2010-05-01", "CupSize": "C"},
+		"p2": {"BirthDate": "2000-01-01", "PremiereDate": "2015-05-01", "CupSize": "A"},
+		"p3": {},
+	}
+	for id, payload := range metadata {
+		if len(payload) == 0 {
+			continue
+		}
+		if err := st.UpdatePersonMetadata(ctx, id, payload); err != nil {
+			t.Fatalf("更新人物 %s 失败: %v", id, err)
+		}
+	}
+
+	names := func(sortBy, sortOrder string) []string {
+		t.Helper()
+		list, _, err := st.PersonsSorted(ctx, "u1", "", false, sortBy, sortOrder, 0, 10)
+		if err != nil {
+			t.Fatalf("%s/%s 排序失败: %v", sortBy, sortOrder, err)
+		}
+		result := make([]string, 0, len(list))
+		for _, person := range list {
+			result = append(result, person.Name)
+		}
+		return result
+	}
+	assertOrder := func(sortBy, sortOrder string, want ...string) {
+		t.Helper()
+		got := names(sortBy, sortOrder)
+		if len(got) != len(want) {
+			t.Fatalf("%s/%s 返回 %d 人，期望 %d 人: %v", sortBy, sortOrder, len(got), len(want), got)
+		}
+		for index := range want {
+			if got[index] != want[index] {
+				t.Fatalf("%s/%s 排序 = %v，期望 %v", sortBy, sortOrder, got, want)
+			}
+		}
+	}
+
+	// 名称：中文按字节序，与默认排序一致。
+	assertOrder("SortName", "Ascending", "张三", "李四", "王五")
+	// 年龄升序 = 生日降序（越年轻越靠前），资料为空的排最后。
+	assertOrder("Age", "Ascending", "李四", "张三", "王五")
+	assertOrder("Age", "Descending", "张三", "李四", "王五")
+	// 出道日期：新出道的靠前，空值仍然垫底。
+	assertOrder("PremiereDate", "Descending", "李四", "张三", "王五")
+	assertOrder("PremiereDate", "Ascending", "张三", "李四", "王五")
+	// 罩杯：A < C，空值排最后。
+	assertOrder("CupSize", "Ascending", "李四", "张三", "王五")
+	assertOrder("CupSize", "Descending", "张三", "李四", "王五")
+}
+
 func TestQueryItemsPersonAndFacetFilters(t *testing.T) {
 	st := openTestStore(t)
 	ctx := context.Background()

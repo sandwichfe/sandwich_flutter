@@ -311,6 +311,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
       // 切库必须清空旧列表，避免上一个媒体库的内容短暂显示在新标题下。
       _c.clearItems();
       _resetQueryControllers();
+      _restoreMediaSort();
     });
     await _c.loadItems(reset: true);
     _restoreScrollOffset();
@@ -324,6 +325,13 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
       _c.activeId = '';
       _c.clearItems();
       _resetQueryControllers();
+      // 收藏演员与演员列表共用人物排序，避免继承影片浏览时的排序字段。
+      if (view == 'favorite-people') {
+        _c.sortBy = 'SortName';
+        _c.sortOrder = 'Ascending';
+      } else {
+        _restoreMediaSort();
+      }
     });
     await _c.loadItems(reset: true);
     _restoreScrollOffset();
@@ -381,6 +389,15 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
   Future<void> _clearAllFilters() async {
     setState(_resetQueryControllers);
     await _applyQuery();
+  }
+
+  // 演员专用的排序字段（年龄/罩杯）在影片列表里没有对应列，
+  // 切回影片视图时恢复默认排序，避免列表静默地按名称排列。
+  void _restoreMediaSort() {
+    if (_c.sortBy == 'Age' || _c.sortBy == 'CupSize') {
+      _c.sortBy = 'PremiereDate';
+      _c.sortOrder = 'Descending';
+    }
   }
 
   void _resetQueryControllers() {

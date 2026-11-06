@@ -20,8 +20,13 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 	// 人物不是 items 表的行，由演职人员字段聚合而来。
 	// 注意 Filters 必须一并传下去，否则"收藏 - 演员"会返回全部人物。
 	if len(query.IncludeTypes) == 1 && strings.EqualFold(query.IncludeTypes[0], "Person") {
-		persons, total, err := s.store.Persons(
-			r.Context(), userID, query.SearchTerm, query.FavoriteOnly, query.StartIndex, query.Limit)
+		sortBy := "SortName"
+		if len(query.SortBy) > 0 {
+			sortBy = query.SortBy[0]
+		}
+		persons, total, err := s.store.PersonsSorted(
+			r.Context(), userID, query.SearchTerm, query.FavoriteOnly,
+			sortBy, query.SortOrder, query.StartIndex, query.Limit)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "查询人物失败")
 			return
@@ -182,9 +187,10 @@ func (s *Server) handlePersons(w http.ResponseWriter, r *http.Request) {
 	userID := r.URL.Query().Get("UserId")
 	params := r.URL.Query()
 
-	persons, total, err := s.store.Persons(
+	persons, total, err := s.store.PersonsSorted(
 		r.Context(), userID, params.Get("SearchTerm"),
 		contains(splitCSV(params.Get("Filters")), "IsFavorite"),
+		params.Get("SortBy"), params.Get("SortOrder"),
 		atoi(params.Get("StartIndex")), atoi(params.Get("Limit")),
 	)
 	if err != nil {
