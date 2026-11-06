@@ -25,7 +25,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
       child: Text(
         _c.loading && _c.items.isEmpty
             ? '加载中'
-            : '已加载 ${_c.items.length} 条 /  $_c.total 条',
+            : '已加载 ${_c.items.length} 条 /  ${_c.total} 条',
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
@@ -432,7 +432,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                       Align(
                         alignment: Alignment.centerLeft,
                         child: InputChip(
-                          label: Text('演员：$_c.personFilterName'),
+                          label: Text('演员：${_c.personFilterName}'),
                           onDeleted: _c.loading ? null : _clearPersonFilter,
                         ),
                       ),
