@@ -61,7 +61,10 @@ SortBy, SortOrder, StartIndex, Limit, Filters, VideoTypes, SearchTerm, Years, Pe
 - `IncludeItemTypes` 实际用到：`Movie, Series, Video, Person, Episode`
 - `Filters` 实际用到：`IsFavorite`
 - `SortBy` 实际用到且需支持逗号多字段：`CommunityRating, Height, DateCreated,
-  PremiereDate, DatePlayed, Runtime, SortName`
+  PremiereDate, DatePlayed, Runtime, SortName, Random`
+- `SortBy=Random` 由服务端真随机抽样（`ORDER BY RANDOM()`）：每次请求都重新洗牌，
+  默认只返回 50 条，取到的样本不重复；`StartIndex` 在随机模式下被忽略
+  （随机结果的“第二页”没有意义）。`/Items/Resume` 同样接受该参数。
 - `TotalRecordCount` 必须准确，否则分页 UI 失效
 
 `Fields` 参数不是装饰，模型直接读取，必须能返回：

@@ -46,6 +46,9 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
   String sortBy = 'PremiereDate';
   String sortOrder = 'Descending';
   String imageStyle = 'backdrop';
+  // 随机播放：由服务端 RANDOM() 真随机抽样，每次点按都换一批，只取一页。
+  static const int randomPlayLimit = 50;
+  bool randomMode = false;
   // 搜索词与年份输入框由页面持有，这里只保存查询时的取值快照。
   String searchTerm = '';
   int? productionYear;
@@ -233,10 +236,16 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
 
   // 列表与分页共用同一份查询快照，reset 为 false 时按当前条数追加。
   Future<void> loadItems({required bool reset}) async {
+    // 随机模式只保留当前这一批样本：继续翻页等于再抽一次，与列表语义冲突。
+    if (randomMode && !reset) return;
     if ((!reset && loadingMore) ||
         (!reset && items.length >= total && total > 0)) {
       return;
     }
+    // 随机模式下排序固定交给服务端 RANDOM()，条数固定一页，不影响用户保存的排序偏好。
+    final activeSortBy = randomMode ? 'Random' : sortBy;
+    final activeSortOrder = randomMode ? 'Ascending' : sortOrder;
+    final pageLimit = randomMode ? randomPlayLimit : 100;
     final requestVersion = reset ? ++queryVersion : queryVersion;
     if (reset) {
       // 已有数据时保留列表，用顶部细进度条提示刷新，避免每次筛选都白屏闪一下。
@@ -261,18 +270,19 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
           : view == 'recently-played'
           ? await _service.getResumeItems(
               startIndex: startIndex,
-              limit: 100,
+              limit: pageLimit,
               itemType: itemType,
               searchTerm: searchTerm,
               productionYear: productionYear,
-              sortBy: sortBy,
-              sortOrder: sortOrder,
+              sortBy: activeSortBy,
+              sortOrder: activeSortOrder,
             )
           : await _service.getItems(
               libraryId: view == 'library' ? activeId : '',
               favoriteOnly:
                   view == 'favorite-movies' || view == 'favorite-people',
               startIndex: startIndex,
+              limit: pageLimit,
               itemType: view == 'favorite-people' ? 'Person' : itemType,
               filters: view == 'favorite-movies' || view == 'favorite-people'
                   ? ''
@@ -292,8 +302,8 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
                 if (personFilter.isNotEmpty) personFilter,
               ],
               minCommunityRating: favoriteView ? null : minRating,
-              sortBy: sortBy,
-              sortOrder: sortOrder,
+              sortBy: activeSortBy,
+              sortOrder: activeSortOrder,
             );
       if (_disposed || requestVersion != queryVersion) return;
       if (reset) {
@@ -332,6 +342,19 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
     items = <EmbyPcItem>[];
     total = 0;
     error = '';
+  }
+
+  // 随机播放：由服务端 RANDOM() 抽样，点一次换一批，只取一页固定条数。
+  Future<void> shuffleItemsRandom() async {
+    if (view == 'people' || view == 'favorite-people') return;
+    randomMode = true;
+    await loadItems(reset: true);
+  }
+
+  // 手动指定排序或切换视图后退出随机模式，恢复常规列表。
+  void exitRandomMode() {
+    if (!randomMode) return;
+    randomMode = false;
   }
 
   // 首页单个媒体库换一批：按 Random 排序只替换该分区，不影响其它分区。
@@ -440,6 +463,8 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
     minRating = null;
     searchTerm = '';
     productionYear = null;
+    // 随机播放绑定在当前视图的这批样本上，切视图即退出。
+    randomMode = false;
   }
 
   // 用新条目替换列表与首页快照中的同一条内容，避免整页重拉。

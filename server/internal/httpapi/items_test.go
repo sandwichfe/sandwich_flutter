@@ -61,6 +61,31 @@ func TestParseItemQuery(t *testing.T) {
 	}
 }
 
+// TestRandomItemsRoute 随机播放：SortBy=Random 由服务端真随机抽样，
+// 单次只返回一页样本，TotalRecordCount 仍是筛选后的总数。
+func TestRandomItemsRoute(t *testing.T) {
+	env := newTestEnv(t)
+	seedItems(t, env.store)
+
+	listPath := "/emby/Users/" + env.userID + "/Items?SortBy=Random&SortOrder=Ascending&Limit=1"
+	recorder := doRequest(env.server, http.MethodGet, listPath, env.token, "")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("随机列表状态码 = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var page dto.QueryResult
+	decodeBody(t, recorder, &page)
+	if len(page.Items) != 1 || page.TotalRecordCount != 2 {
+		t.Fatalf("随机列表 items=%d total=%d", len(page.Items), page.TotalRecordCount)
+	}
+
+	// 随机结果的第二条没有意义，越界 StartIndex 也要照常返回样本。
+	recorder = doRequest(env.server, http.MethodGet, listPath+"&StartIndex=99", env.token, "")
+	decodeBody(t, recorder, &page)
+	if len(page.Items) != 1 {
+		t.Fatalf("随机抽样忽略了分页偏移，应仍返回 1 条，得到 %d", len(page.Items))
+	}
+}
+
 // TestFieldsNeedDetail 列表默认瘦身，只有显式要详情字段时才输出完整形态。
 func TestFieldsNeedDetail(t *testing.T) {
 	cases := []struct {

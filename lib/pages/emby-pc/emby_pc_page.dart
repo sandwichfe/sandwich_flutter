@@ -241,6 +241,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
   // 接近底部时加载下一页：单飞去抖，快速滚动只保留最后一次请求。
   void _onScroll() {
     if (_c.view == 'home') return;
+    // 随机播放只有当前这一批样本，继续翻页会变成再抽一批。
+    if (_c.randomMode) return;
     if (_c.loading || _c.loadingMore || _c.refreshing) return;
     if (_scrollController.position.extentAfter > 700) return;
     _loadMoreDebounceTimer?.cancel();

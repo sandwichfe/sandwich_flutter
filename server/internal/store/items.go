@@ -192,15 +192,24 @@ func (s *Store) QueryItems(ctx context.Context, q ItemQuery) ([]dto.BaseItemDto,
 		}
 	}
 
+	// 随机抽样每次请求都重新洗牌，默认只给一页，避免拉了整库却只用到几十条。
+	random := usesRandomSort(q.SortBy)
 	limit := q.Limit
 	if limit <= 0 {
 		limit = 100
+		if random {
+			limit = RandomSampleSize
+		}
 	}
 	if limit > 500 {
 		limit = 500
 	}
 	offset := q.StartIndex
 	if offset < 0 {
+		offset = 0
+	}
+	if random {
+		// 随机排序下“第 N 页”每次都是另一批条目，偏移没有意义，固定取首页。
 		offset = 0
 	}
 
@@ -223,6 +232,20 @@ func (s *Store) QueryItems(ctx context.Context, q ItemQuery) ([]dto.BaseItemDto,
 		items = append(items, item.ToDto(data, q.Detail))
 	}
 	return items, total, rows.Err()
+}
+
+// RandomSampleSize 是随机播放的默认取样条数：客户端点一次只换一小批，
+// 不必把整库都传回去。
+const RandomSampleSize = 50
+
+// usesRandomSort 判断本次查询是否走服务端随机抽样（SortBy=Random）。
+func usesRandomSort(sortBy []string) bool {
+	for _, name := range sortBy {
+		if name == "Random" {
+			return true
+		}
+	}
+	return false
 }
 
 func buildOrderBy(sortBy []string, sortOrder string) string {

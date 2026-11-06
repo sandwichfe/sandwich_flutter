@@ -25,6 +25,9 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
       child: Text(
         _c.loading && _c.items.isEmpty
             ? '加载中'
+            // 随机模式只展示当前这批样本，总数仍是筛选后的全量。
+            : _c.randomMode
+            ? '随机 ${_c.items.length} 条 / 共 ${_c.total} 条'
             : '已加载 ${_c.items.length} 条 /  ${_c.total} 条',
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
@@ -231,6 +234,16 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                   context,
                   compact: compactMobileToolbar,
                 ),
+                // 随机播放只对媒体列表有意义，人物列表不展示该入口。
+                if (!peopleList) ...[
+                  SizedBox(width: compactMobileToolbar ? 6 : 8),
+                  _buildShuffleButton(
+                    context,
+                    compact: compactMobileToolbar,
+                    // 每次点击都会重新请求；请求在途时禁用，避免连点堆叠。
+                    enabled: !_c.loading && !_c.refreshing && !_c.loadingMore,
+                  ),
+                ],
                 const Spacer(),
                 if (!peopleList)
                   _buildLayoutControl(
@@ -561,6 +574,8 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                               ? null
                               : () {
                             setState(() {
+                              // 手动指定排序即退出随机播放，回到常规列表。
+                              _c.exitRandomMode();
                               if (active) {
                                 _c.sortOrder =
                                 ascending
@@ -637,6 +652,64 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
         controller.isOpen
             ? controller.close()
             : controller.open(),
+      ),
+    );
+  }
+
+  // 随机播放：向服务端重新要一批随机条目（每次点按都换一批），并回到顶部。
+  Future<void> _shuffleMediaItems() async {
+    _syncQueryInput();
+    await _c.shuffleItemsRandom();
+    if (!mounted || !_scrollController.hasClients) return;
+    _scrollController.jumpTo(_scrollController.position.minScrollExtent);
+  }
+
+  Widget _buildShuffleButton(
+    BuildContext context, {
+    required bool compact,
+    required bool enabled,
+  }) {
+    final colors = Theme.of(context).colorScheme;
+    final active = _c.randomMode;
+    const tooltip = '随机播放：服务端重新抽取 50 条';
+    final side = BorderSide(
+      color: active ? colors.primary : colors.outlineVariant,
+    );
+    if (compact) {
+      // 移动端工具栏空间有限，只用图标，含义由 Tooltip 补充。
+      return IconButton.outlined(
+        tooltip: tooltip,
+        onPressed: enabled ? () => unawaited(_shuffleMediaItems()) : null,
+        style: IconButton.styleFrom(
+          minimumSize: const Size(0, 38),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          foregroundColor: active ? colors.primary : colors.onSurface,
+          backgroundColor:
+              active ? colors.primary.withValues(alpha: 0.10) : colors.surface,
+          side: side,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        ),
+        icon: const Icon(Icons.shuffle_rounded, size: 19),
+      );
+    }
+    return Tooltip(
+      message: tooltip,
+      child: OutlinedButton.icon(
+        onPressed: enabled ? () => unawaited(_shuffleMediaItems()) : null,
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(0, 38),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          foregroundColor: active ? colors.primary : colors.onSurface,
+          backgroundColor:
+              active ? colors.primary.withValues(alpha: 0.10) : colors.surface,
+          side: side,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        ),
+        icon: const Icon(Icons.shuffle_rounded, size: 17),
+        label: const Text(
+          '随机播放',
+          style: TextStyle(fontWeight: FontWeight.w500),
+        ),
       ),
     );
   }

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"testing"
 )
 
@@ -143,5 +144,48 @@ func TestQueryItemsSortWhitelist(t *testing.T) {
 	}
 	if first[0].ID != "i1" || first[1].ID != "i3" {
 		t.Fatalf("同值排序未按 id 兜底: %s, %s", first[0].ID, first[1].ID)
+	}
+}
+
+// TestQueryItemsRandomSort 随机播放依赖服务端真随机（ORDER BY RANDOM()）：
+// 每次请求重新抽样，偏移没有意义，且默认只返回一页样本。
+func TestQueryItemsRandomSort(t *testing.T) {
+	st := openTestStore(t)
+	seedItems(t, st)
+	ctx := context.Background()
+
+	if got := buildOrderBy([]string{"Random"}, "Descending"); got != "RANDOM(), i.id ASC" {
+		t.Fatalf("Random 排序拼接结果 = %q", got)
+	}
+
+	// 偏移被忽略：即使传越界的 StartIndex，也要返回随机样本而不是空列表。
+	list, total, err := st.QueryItems(ctx, ItemQuery{
+		UserID: "u1", SortBy: []string{"Random"}, StartIndex: 99, Limit: 2,
+	})
+	if err != nil || total != 3 || len(list) != 2 {
+		t.Fatalf("随机抽样 list=%d total=%d err=%v", len(list), total, err)
+	}
+
+	// 未显式给 Limit 时随机模式默认只取 RandomSampleSize 条。
+	for index := 0; index < 60; index++ {
+		name := fmt.Sprintf("Random%02d", index)
+		if err := st.UpsertItem(ctx, &Item{
+			ID: name, LibraryID: "lib1", ParentID: "lib1", Type: "Movie",
+			Name: name, SortName: name,
+		}); err != nil {
+			t.Fatalf("写入条目 %s 失败: %v", name, err)
+		}
+	}
+	list, total, err = st.QueryItems(ctx, ItemQuery{UserID: "u1", SortBy: []string{"Random"}})
+	if err != nil || total != 63 || len(list) != RandomSampleSize {
+		t.Fatalf("随机默认取样 list=%d total=%d err=%v", len(list), total, err)
+	}
+	// 抽样结果不能重复（SQL 层面就是一次洗牌后的前 N 条）。
+	seen := make(map[string]bool, len(list))
+	for _, item := range list {
+		if seen[item.ID] {
+			t.Fatalf("随机结果出现重复条目 %s", item.ID)
+		}
+		seen[item.ID] = true
 	}
 }

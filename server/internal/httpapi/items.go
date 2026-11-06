@@ -136,17 +136,26 @@ func (s *Server) handleResume(w http.ResponseWriter, r *http.Request) {
 	userID := r.PathValue("userId")
 	params := r.URL.Query()
 
+	// Emby Web 默认按最近播放时间倒序；客户端显式传排序时（如随机播放）按传入值走。
+	sortBy := splitCSV(params.Get("SortBy"))
+	if len(sortBy) == 0 {
+		sortBy = []string{"DatePlayed"}
+	}
+	sortOrder := params.Get("SortOrder")
+	if sortOrder == "" {
+		sortOrder = "Descending"
+	}
+
 	query := store.ItemQuery{
 		UserID:       userID,
 		IncludeTypes: splitCSV(params.Get("IncludeItemTypes")),
 		SearchTerm:   params.Get("SearchTerm"),
 		Years:        parseIntList(splitCSV(params.Get("Years"))),
 		OnlyResume:   true,
-		// Emby Web 默认按最近播放时间倒序。
-		SortBy:     []string{"DatePlayed"},
-		SortOrder:  "Descending",
-		StartIndex: atoi(params.Get("StartIndex")),
-		Limit:      atoi(params.Get("Limit")),
+		SortBy:       sortBy,
+		SortOrder:    sortOrder,
+		StartIndex:   atoi(params.Get("StartIndex")),
+		Limit:        atoi(params.Get("Limit")),
 	}
 	if len(query.IncludeTypes) == 0 {
 		query.IncludeTypes = []string{"Movie", "Series", "Video", "Episode"}
