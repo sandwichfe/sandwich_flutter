@@ -96,30 +96,38 @@ CREATE TABLE IF NOT EXISTS play_sessions (
     updated_at     TEXT NOT NULL
 );
 
--- 人物关联表：把 items.people 的 JSON 拆成可索引的行，供人物筛选与作品聚合。
--- items.people 仍是展示用的权威数据，这里只是查询副本，入库时同步写入。
+-- 演员主表：演员是独立主体，入库时没有就新建、有了就更新信息。
+-- 条目被删除时只清关联，这一行永远保留（作品数归零后不再出现在列表里）。
+-- items.people 的 JSON 退化为入库快照，展示以这张表为准。
+CREATE TABLE IF NOT EXISTS persons (
+    person_id  TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    sort_name  TEXT NOT NULL DEFAULT '',
+    image_tag  TEXT NOT NULL DEFAULT '',
+    -- item_count 是 item_people 的派生值，关联变化时重算，避免列表页做全表聚合。
+    item_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_persons_name ON persons(name COLLATE NOCASE);
+
+-- 演员×条目关联表：同一演员在一条内容里可能既是导演又是编剧，
+-- 所以 (item_id, person_id, type, role) 才是唯一键。
 CREATE TABLE IF NOT EXISTS item_people (
     item_id    TEXT NOT NULL,
     person_id  TEXT NOT NULL,
     role       TEXT NOT NULL DEFAULT '',
     type       TEXT NOT NULL DEFAULT '',
-    sort_order INTEGER NOT NULL DEFAULT 0
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (item_id, person_id, type, role)
 );
 
-CREATE INDEX IF NOT EXISTS idx_item_people_item ON item_people(item_id);
 CREATE INDEX IF NOT EXISTS idx_item_people_person ON item_people(person_id);
 
--- 图片锁：锁上的条目/人物/媒体库，扫描导入与自动重拼封面都不会覆盖其图片。
--- 单独一张表而不是 items 加列，因为锁要覆盖三类实体（items / person_view / libraries）。
+-- 图片锁：锁上的条目/演员/媒体库，扫描导入与自动重拼封面都不会覆盖其图片。
+-- 单独一张表而不是 items 加列，因为锁要覆盖三类实体（items / persons / libraries）。
 CREATE TABLE IF NOT EXISTS image_locks (
     entity_id  TEXT PRIMARY KEY,
     created_at TEXT NOT NULL
-);
-
--- 人物汇总表：/Persons 直接分页查它，不再读全表 people JSON 再在内存里排序。
-CREATE TABLE IF NOT EXISTS person_view (
-    person_id  TEXT PRIMARY KEY,
-    name       TEXT NOT NULL,
-    image_tag  TEXT NOT NULL DEFAULT '',
-    item_count INTEGER NOT NULL DEFAULT 0
 );

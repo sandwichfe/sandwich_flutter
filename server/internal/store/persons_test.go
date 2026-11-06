@@ -42,7 +42,7 @@ func actor(id, name string) dto.PersonDto {
 
 // BenchmarkPersonsFromView 用 2000 部片子 / 700 位演职员验证 /Persons 的分页开销。
 // 旧实现要读全表 people JSON 再在 Go 侧去重排序，数据量越大越慢；
-// 这里走 person_view，耗时与条目数基本无关。
+// 这里走 persons 主表，耗时与条目数基本无关。
 func BenchmarkPersonsFromView(b *testing.B) {
 	st, err := Open(filepath.Join(b.TempDir(), "embyx.db"))
 	if err != nil {
@@ -72,7 +72,7 @@ func BenchmarkPersonsFromView(b *testing.B) {
 	}
 }
 
-func TestPersonsReadsPersonView(t *testing.T) {
+func TestPersonsReadsPersonsTable(t *testing.T) {
 	st := openTestStore(t)
 	ctx := context.Background()
 	studio := []dto.NameIDPair{{ID: "studio1", Name: "A24"}}
@@ -230,7 +230,7 @@ func TestQueryItemsPersonAndFacetFilters(t *testing.T) {
 	}
 }
 
-func TestDeleteItemCleansPeople(t *testing.T) {
+func TestDeleteItemKeepsPersons(t *testing.T) {
 	st := openTestStore(t)
 	ctx := context.Background()
 
@@ -256,7 +256,69 @@ func TestDeleteItemCleansPeople(t *testing.T) {
 	if err := st.DeleteItems(ctx, []string{"i1"}); err != nil {
 		t.Fatalf("删除条目失败: %v", err)
 	}
+	// 列表不再展示没有作品的演员……
 	if _, total, err := st.Persons(ctx, "u1", "", false, 0, 10); err != nil || total != 0 {
-		t.Fatalf("全部删除后人物 total=%d err=%v，期望 0", total, err)
+		t.Fatalf("全部删除后列表 total=%d err=%v，期望 0", total, err)
+	}
+	// ……但演员主表与关联表的行为是：演员留着、关联清空。
+	var persons, links int
+	if err := st.DB().QueryRow(`SELECT COUNT(*) FROM persons`).Scan(&persons); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DB().QueryRow(`SELECT COUNT(*) FROM item_people`).Scan(&links); err != nil {
+		t.Fatal(err)
+	}
+	if persons != 2 || links != 0 {
+		t.Fatalf("演员行=%d 关联行=%d，期望 2 / 0（删片不删演员）", persons, links)
+	}
+	// 演员详情仍然可查，只是作品数归零。
+	if person, err := st.PersonByID(ctx, "p1"); err != nil || *person.ChildCount != 0 {
+		t.Fatalf("删除后仍应能查到张三且作品数为 0: %+v err=%v", person, err)
+	}
+}
+
+// TestPersonInfoUpdatedByRescan 验证重复入库时演员信息会被更新，
+// 且空头像不会擦掉已导入的头像。
+func TestPersonInfoUpdatedByRescan(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	withImage := actor("p1", "张三")
+	withImage.PrimaryImageTag = "tag-v1"
+	if err := st.UpsertItem(ctx, movieItem("i1", "Alpha", nil, nil, nil, []dto.PersonDto{withImage})); err != nil {
+		t.Fatal(err)
+	}
+
+	noImage := actor("p1", "张三")
+	if err := st.UpsertItem(ctx, movieItem("i1", "Alpha", nil, nil, nil, []dto.PersonDto{noImage})); err != nil {
+		t.Fatal(err)
+	}
+	person, err := st.PersonByID(ctx, "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if person.PrimaryImageTag != "tag-v1" {
+		t.Fatalf("空头像不应覆盖已有头像，得到 %q", person.PrimaryImageTag)
+	}
+
+	withNewImage := actor("p1", "张三")
+	withNewImage.PrimaryImageTag = "tag-v2"
+	if err := st.UpsertItem(ctx, movieItem("i1", "Alpha", nil, nil, nil, []dto.PersonDto{withNewImage})); err != nil {
+		t.Fatal(err)
+	}
+	if person, err = st.PersonByID(ctx, "p1"); err != nil || person.PrimaryImageTag != "tag-v2" {
+		t.Fatalf("新头像应写入演员主表: %+v err=%v", person, err)
+	}
+
+	// 条目详情里的演员信息取自主表：演员改名后立刻反映到关联影片上。
+	if _, err := st.DB().Exec(`UPDATE persons SET name = ? WHERE person_id = ?`, "张三丰", "p1"); err != nil {
+		t.Fatal(err)
+	}
+	detail, err := st.GetItem(ctx, "u1", "i1")
+	if err != nil {
+		t.Fatalf("查询条目失败: %v", err)
+	}
+	if len(detail.People) != 1 || detail.People[0].Name != "张三丰" {
+		t.Fatalf("详情演员应来自 persons 主表: %+v", detail.People)
 	}
 }

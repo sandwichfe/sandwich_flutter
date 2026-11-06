@@ -11,7 +11,7 @@ cmd/embyx/main.go          进程入口：配置 → 数据库 → 路由 → �
 internal/config            配置加载（YAML + 环境变量）
 internal/dto               与 Emby 协议对齐的 JSON 结构
 internal/httpapi           路由、鉴权中间件、各接口处理器
-internal/store             SQLite 读写（users / items / item_people / person_view / user_data / libraries）
+internal/store             SQLite 读写（users / items / persons / item_people / user_data / libraries）
 internal/media             ffprobe 探测、NFO 解析、图片匹配与缩放、BIF
 ```
 
@@ -191,8 +191,8 @@ file:<path>?_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=forei
 | `tokens` | 登录令牌 | `token → user_id`，当前**没有过期机制** |
 | `libraries` | 媒体库 | 界面创建的库，一行可挂多个目录（`paths` JSON 列） |
 | `items` | 媒体条目 | 一部视频一行，复杂结构用 JSON 列 |
-| `item_people` | 条目×人物 | `items.people` 拆出来的查询副本，供按人物筛选与聚合 |
-| `person_view` | 人物汇总 | 姓名、头像 tag、作品数，`/Persons` 直接分页查它 |
+| `persons` | 演员主表 | 演员是独立主体：姓名、头像 tag、作品数，`/Persons` 直接分页查它；**删片不删演员** |
+| `item_people` | 演员×条目 | 纯关联表，`(item_id, person_id, type, role)` 唯一；`items.people` 的 JSON 只作入库快照 |
 | `user_data` | 用户×条目 | 收藏、已看、播放进度、播放次数、最后播放时间 |
 | `play_sessions` | 播放会话 | 目前只写不读，为后续"正在播放"看板预留 |
 
@@ -305,9 +305,9 @@ ListenAndServe :8096
    │    → "标题 (2023)" / "标题.2023.1080p" → 标题 + 年份
    ↓ FindArtwork + FindActorImages
    │    → 图片转码落盘，得到 tag
-   ↓ store.UpsertItem（单事务：items + item_people + person_view）
+   ↓ store.UpsertItem（单事务：items + persons + item_people）
    ↓
-items / item_people / person_view
+items / persons / item_people
 ```
 
 **幂等性**：条目 ID 有外部编号时由编号派生，没有时由「库 ID + 相对库根路径」派生，重复扫描只会 UPDATE。改名后：ID 不变时只纠正路径；ID 变了则旧条目会在下次扫描时因为源文件不存在被清理（连同图片、BIF 缓存与用户数据）。
@@ -353,7 +353,7 @@ GET /emby/Users/{userId}/Items?ParentId=…&IncludeItemTypes=Movie&SortBy=…&Li
 
 `ParentId` 过滤写成 `parent_id = ? OR library_id = ?`，是为了兼容早期数据——老条目只有 `library_id`，`parent_id` 是空的。
 
-**人物不再读 JSON**：`IncludeItemTypes=Person` 与 `/Persons` 都走 `person_view`（SQL 分页 + `name LIKE`），`PersonIds` 过滤走 `item_people` 的 `EXISTS` 子查询。`items.people` 的 JSON 只作为详情页展示与扫描写入的权威数据保留。`Filters=IsFavorite` 仍是先在 `user_data` 里取收藏集合再过滤。
+**演员以主表为准**：`IncludeItemTypes=Person` 与 `/Persons` 都走 `persons`（SQL 分页 + `name LIKE`，只列 `item_count > 0` 的），`PersonIds` 过滤走 `item_people` 的 `EXISTS` 子查询。入库时演员「没有就新建、有了就更新信息并重建关联」；条目详情里的演职人员同样从 `persons` + `item_people` 读，`items.people` 的 JSON 退化为扫描快照。删除条目只删关联行，演员行与头像缓存都保留。`Filters=IsFavorite` 仍是先在 `user_data` 里取收藏集合再过滤。
 
 `GenreIds` / `TagIds` 用 `json_each` 匹配名称，`StudioIds` 匹配 JSON 里的 `Id`；`Filters` 另外支持 `IsPlayed` / `IsUnplayed` / `IsResumable`，`MinCommunityRating` 为可选浮点阈值。
 

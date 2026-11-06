@@ -274,6 +274,15 @@ func (s *Store) GetItem(ctx context.Context, userID, itemID string) (*dto.BaseIt
 	}
 	// 详情接口是编辑弹窗与详情页的唯一数据源，必须带齐全部字段。
 	result := item.ToDto(data, true)
+	// 演职人员以 persons 主表为准：条目里的 people JSON 只是入库时的快照，
+	// 演员改名或换头像后，所有关联影片的详情页都应立刻反映最新信息。
+	people, err := s.ItemPeople(ctx, itemID)
+	if err != nil {
+		return nil, err
+	}
+	if len(people) > 0 {
+		result.People = people
+	}
 	return &result, nil
 }
 
@@ -457,7 +466,7 @@ func (s *Store) UpsertItem(ctx context.Context, item *Item) error {
 		return fmt.Errorf("写入条目失败: %w", err)
 	}
 
-	// 人物拆表：people JSON 是权威展示数据，item_people/person_view 是查询索引。
+	// 演员拆表：persons 是演员主表，item_people 是演员×条目关联，people JSON 只是入库快照。
 	if err := syncItemPeople(ctx, tx, item.ID, item.People); err != nil {
 		return err
 	}

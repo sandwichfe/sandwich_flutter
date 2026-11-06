@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,5 +97,89 @@ func TestOpenRejectsMismatchedSchemaVersion(t *testing.T) {
 
 	if _, err := Open(path); err == nil {
 		t.Fatal("版本不一致时应当拒绝启动")
+	}
+}
+
+// TestMigrationToPersons 模拟 5 → 6 升级：person_view 的数据搬到 persons 主表，
+// 老 item_people 的重复关联被去重并补上唯一约束。
+func TestMigrationToPersons(t *testing.T) {
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "old.db")))
+	if err != nil {
+		t.Fatalf("打开旧库失败: %v", err)
+	}
+	defer db.Close()
+
+	setup := []string{
+		`CREATE TABLE person_view (
+			person_id  TEXT PRIMARY KEY,
+			name       TEXT NOT NULL,
+			image_tag  TEXT NOT NULL DEFAULT '',
+			item_count INTEGER NOT NULL DEFAULT 0
+		)`,
+		`CREATE TABLE item_people (
+			item_id    TEXT NOT NULL,
+			person_id  TEXT NOT NULL,
+			role       TEXT NOT NULL DEFAULT '',
+			type       TEXT NOT NULL DEFAULT '',
+			sort_order INTEGER NOT NULL DEFAULT 0
+		)`,
+		`INSERT INTO person_view (person_id, name, image_tag, item_count)
+		 VALUES ('p1', '张三', 'tag1', 2)`,
+		`INSERT INTO item_people (item_id, person_id, role, type, sort_order)
+		 VALUES ('i1', 'p1', '主演', 'Actor', 0), ('i1', 'p1', '主演', 'Actor', 1)`,
+	}
+	for _, statement := range setup {
+		if _, err := db.Exec(statement); err != nil {
+			t.Fatalf("准备旧库失败: %v", err)
+		}
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range schemaMigrations[5] {
+		if _, err := tx.Exec(statement); err != nil {
+			_ = tx.Rollback()
+			t.Fatalf("执行升级语句失败: %v", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	var (
+		name     string
+		imageTag string
+		count    int
+	)
+	if err := db.QueryRow(
+		`SELECT name, image_tag, item_count FROM persons WHERE person_id = 'p1'`,
+	).Scan(&name, &imageTag, &count); err != nil {
+		t.Fatalf("演员主表未迁移: %v", err)
+	}
+	if name != "张三" || imageTag != "tag1" || count != 2 {
+		t.Fatalf("迁移结果不符: name=%q image_tag=%q count=%d", name, imageTag, count)
+	}
+
+	var exists int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'person_view'`,
+	).Scan(&exists); err != nil || exists != 0 {
+		t.Fatalf("person_view 应被删除: %d err=%v", exists, err)
+	}
+
+	var links int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM item_people`).Scan(&links); err != nil || links != 1 {
+		t.Fatalf("重复关联应被去重: %d err=%v", links, err)
+	}
+	// 唯一约束生效后，重复插入只会被忽略。
+	if _, err := db.Exec(
+		`INSERT OR IGNORE INTO item_people (item_id, person_id, role, type, sort_order)
+		 VALUES ('i1', 'p1', '主演', 'Actor', 9)`); err != nil {
+		t.Fatalf("唯一约束写入失败: %v", err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM item_people`).Scan(&links); err != nil || links != 1 {
+		t.Fatalf("唯一约束未生效: %d err=%v", links, err)
 	}
 }

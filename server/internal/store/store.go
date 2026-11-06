@@ -34,7 +34,7 @@ type Store struct {
 
 // schemaVersion 对应 schema.sql 的表结构版本号。
 // 改表结构时递增，并在 schemaMigrations 里补上「上一版 → 这一版」的语句。
-const schemaVersion = 5
+const schemaVersion = 6
 
 // schemaMigrations 是「版本 N → N+1」的升级语句。
 // 新库按 schema.sql 一次建到最新；老库按 PRAGMA user_version 逐级补齐，
@@ -51,6 +51,34 @@ var schemaMigrations = map[int][]string{
 			entity_id  TEXT PRIMARY KEY,
 			created_at TEXT NOT NULL
 		)`,
+	},
+	// 5 → 6：演员独立成 persons 主表，item_people 退化为纯关联表（加唯一约束）。
+	5: {
+		// person_view 曾在本版本内补建，老库可能没有这张表，先兜一个空表再迁移。
+		`CREATE TABLE IF NOT EXISTS person_view (
+			person_id  TEXT PRIMARY KEY,
+			name       TEXT NOT NULL,
+			image_tag  TEXT NOT NULL DEFAULT '',
+			item_count INTEGER NOT NULL DEFAULT 0
+		)`,
+		`CREATE TABLE IF NOT EXISTS persons (
+			person_id  TEXT PRIMARY KEY,
+			name       TEXT NOT NULL,
+			sort_name  TEXT NOT NULL DEFAULT '',
+			image_tag  TEXT NOT NULL DEFAULT '',
+			item_count INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL DEFAULT ''
+		)`,
+		`INSERT OR IGNORE INTO persons (person_id, name, sort_name, image_tag, item_count, created_at, updated_at)
+		 SELECT person_id, name, name, image_tag, item_count, '', '' FROM person_view`,
+		`DROP TABLE IF EXISTS person_view`,
+		// 老表没有主键，可能有同一条关联的重复行；先去重再加唯一约束。
+		`DELETE FROM item_people WHERE rowid NOT IN (
+			SELECT MIN(rowid) FROM item_people GROUP BY item_id, person_id, type, role)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_item_people_unique
+			ON item_people(item_id, person_id, type, role)`,
+		`CREATE INDEX IF NOT EXISTS idx_persons_name ON persons(name COLLATE NOCASE)`,
 	},
 }
 

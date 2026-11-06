@@ -26,9 +26,9 @@ func (s *Store) CacheOwners(ctx context.Context) (map[string]string, error) {
 	}
 	rows.Close()
 
-	// 人物头像缓存同样落在 cache/images/{personID}，漏掉这里会把演员头像当孤儿删掉。
+	// 演员头像缓存同样落在 cache/images/{personID}，漏掉这里会把演员头像当孤儿删掉。
 	// 用户头像的缩放缓存也复用同一目录结构，一并登记。
-	for _, query := range []string{`SELECT person_id FROM person_view`, `SELECT id FROM users`} {
+	for _, query := range []string{`SELECT person_id FROM persons`, `SELECT id FROM users`} {
 		rows, err := s.db.QueryContext(ctx, query)
 		if err != nil {
 			return nil, err
