@@ -72,6 +72,12 @@ type BaseItemDto struct {
 	Studios []NameIDPair `json:"Studios,omitempty"`
 	People  []PersonDto  `json:"People,omitempty"`
 
+	// 演员(人物)详情字段：条目不会用到，只在 /Items/{personId} 里输出。
+	// BirthDate 是出生年月日，PremiereDate 是首映/出道日期，两者互不影响。
+	BirthDate string `json:"BirthDate,omitempty"`
+	Gender    string `json:"Gender,omitempty"`
+	CupSize   string `json:"CupSize,omitempty"`
+
 	MediaSources []MediaSourceInfo `json:"MediaSources,omitempty"`
 	Chapters     []ChapterInfo     `json:"Chapters,omitempty"`
 
@@ -103,6 +109,9 @@ type PersonDto struct {
 	Type            string            `json:"Type,omitempty"`
 	PrimaryImageTag string            `json:"PrimaryImageTag,omitempty"`
 	ImageTags       map[string]string `json:"ImageTags,omitempty"`
+
+	// 写真 tag 来自本地 .actors 目录，扫描时随关联一起写入演员主表。
+	BackdropImageTags []string `json:"BackdropImageTags,omitempty"`
 }
 
 type ExternalURL struct {

@@ -277,6 +277,184 @@ func TestDeleteItemKeepsPersons(t *testing.T) {
 	}
 }
 
+// TestScanCreatesPersonThenOnlyLinks 验证扫描的两条分支：
+// 演员表里没有这个人就新增一行，已经有了就只加一条影片关联（不重复建行）。
+func TestScanCreatesPersonThenOnlyLinks(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	counts := func() (persons, links int) {
+		t.Helper()
+		if err := st.DB().QueryRow(`SELECT COUNT(*) FROM persons`).Scan(&persons); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.DB().QueryRow(`SELECT COUNT(*) FROM item_people`).Scan(&links); err != nil {
+			t.Fatal(err)
+		}
+		return persons, links
+	}
+
+	// 第一部片：演员表里没有张三 → 新增演员 + 一条关联。
+	if err := st.UpsertItem(ctx, movieItem("i1", "Alpha", nil, nil, nil,
+		[]dto.PersonDto{actor("p1", "张三")})); err != nil {
+		t.Fatal(err)
+	}
+	if persons, links := counts(); persons != 1 || links != 1 {
+		t.Fatalf("首次入库 演员=%d 关联=%d，期望 1 / 1", persons, links)
+	}
+
+	// 第二部片：张三已存在 → 只加一条影片关联。
+	if err := st.UpsertItem(ctx, movieItem("i2", "Beta", nil, nil, nil,
+		[]dto.PersonDto{actor("p1", "张三")})); err != nil {
+		t.Fatal(err)
+	}
+	if persons, links := counts(); persons != 1 || links != 2 {
+		t.Fatalf("再次入库 演员=%d 关联=%d，期望 1 / 2（只加关联）", persons, links)
+	}
+	if person, err := st.PersonByID(ctx, "p1"); err != nil || *person.ChildCount != 2 {
+		t.Fatalf("张三作品数应为 2: %+v err=%v", person, err)
+	}
+
+	// 同一部片重复扫描不应叠加关联。
+	if err := st.UpsertItem(ctx, movieItem("i2", "Beta", nil, nil, nil,
+		[]dto.PersonDto{actor("p1", "张三")})); err != nil {
+		t.Fatal(err)
+	}
+	if persons, links := counts(); persons != 1 || links != 2 {
+		t.Fatalf("重复扫描 演员=%d 关联=%d，期望 1 / 2", persons, links)
+	}
+
+	// 同一条目里导演 + 演员是两条关联，但演员仍然只有一行。
+	if err := st.UpsertItem(ctx, movieItem("i3", "Gamma", nil, nil, nil, []dto.PersonDto{
+		{ID: "p1", Name: "张三", Type: "Director"},
+		actor("p1", "张三"),
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if persons, links := counts(); persons != 1 || links != 4 {
+		t.Fatalf("导演兼演员 演员=%d 关联=%d，期望 1 / 4", persons, links)
+	}
+}
+
+// TestScanOnlyUpdatesItemPeople 验证入库只维护演员关联与本地图片：
+// 演员资料（生日/简介/性别/外部编号）既不会被扫描写入，也不会被重扫覆盖。
+func TestScanOnlyUpdatesItemPeople(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	// 扫描阶段能提供的就是姓名、角色与本地 .actors 图片。
+	person := actor("p1", "张三")
+	person.PrimaryImageTag = "tag-1"
+	person.BackdropImageTags = []string{"bd-1", "bd-2"}
+	if err := st.UpsertItem(ctx, movieItem("i1", "Alpha", nil, nil, nil, []dto.PersonDto{person})); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := st.PersonByID(ctx, "p1")
+	if err != nil {
+		t.Fatalf("查询演员失败: %v", err)
+	}
+	if got.PrimaryImageTag != "tag-1" || len(got.BackdropImageTags) != 2 {
+		t.Fatalf("本地图片应随入库写入: 头像=%q 写真=%v", got.PrimaryImageTag, got.BackdropImageTags)
+	}
+	if got.BirthDate != "" || got.PremiereDate != "" || got.Gender != "" ||
+		got.CupSize != "" || got.Overview != "" || len(got.ProviderIDs) != 0 {
+		t.Fatalf("演员资料不应由扫描写入: %+v", got)
+	}
+
+	// 资料由编辑接口维护。
+	if err := st.UpdatePersonMetadata(ctx, "p1", map[string]any{
+		"BirthDate":   "1985-06-01",
+		"Overview":    "演员介绍",
+		"Gender":      "Female",
+		"ProviderIds": map[string]any{"Tmdb": "123"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 另一部片子重新入库（只有姓名）：资料与已有图片都必须保住。
+	if err := st.UpsertItem(ctx, movieItem("i2", "Beta", nil, nil, nil,
+		[]dto.PersonDto{actor("p1", "张三")})); err != nil {
+		t.Fatal(err)
+	}
+	got, err = st.PersonByID(ctx, "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.BirthDate != "1985-06-01" || got.Overview != "演员介绍" ||
+		got.Gender != "Female" || got.ProviderIDs["Tmdb"] != "123" {
+		t.Fatalf("扫描不应覆盖演员资料: %+v", got)
+	}
+	if got.PrimaryImageTag != "tag-1" || len(got.BackdropImageTags) != 2 {
+		t.Fatalf("无图条目不应擦掉已有图片: %+v", got)
+	}
+	if count := got.ChildCount; count == nil || *count != 2 {
+		t.Fatalf("作品数应为 2: %v", count)
+	}
+
+	// 上传/删除图片后，标记要能回写演员主表。
+	if err := st.SetPersonImageTag(ctx, "p1", "Backdrop", 2, "bd-3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetPersonImageTag(ctx, "p1", "Primary", 0, "tag-2"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = st.PersonByID(ctx, "p1"); err != nil || got.PrimaryImageTag != "tag-2" || len(got.BackdropImageTags) != 3 {
+		t.Fatalf("图片标记回写失败: %+v err=%v", got, err)
+	}
+	// 非演员实体（媒体库等）不应报错。
+	if err := st.SetPersonImageTag(ctx, "lib1", "Primary", 0, "x"); err != nil {
+		t.Fatalf("非演员实体应静默跳过: %v", err)
+	}
+}
+
+// TestUpdatePersonMetadata 验证演员信息的可编辑字段，以及改名后关联影片跟随。
+func TestUpdatePersonMetadata(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	if err := st.UpsertItem(ctx, movieItem("i1", "Alpha", nil, nil, nil,
+		[]dto.PersonDto{actor("p1", "张三")})); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := st.UpdatePersonMetadata(ctx, "p1", map[string]any{
+		"Name":         "张三丰",
+		"Overview":     "演员介绍",
+		"BirthDate":    "1980-02-03",
+		"PremiereDate": "2001-01-01",
+		"Gender":       "Male",
+		"CupSize":      "B",
+		"ProviderIds":  map[string]any{"Tmdb": 42, "Imdb": "nm1"},
+	}); err != nil {
+		t.Fatalf("更新演员信息失败: %v", err)
+	}
+
+	person, err := st.PersonByID(ctx, "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if person.Name != "张三丰" || person.SortName != "张三丰" {
+		t.Fatalf("改名后姓名/排序名不符: %+v", person)
+	}
+	if person.Overview != "演员介绍" || person.BirthDate != "1980-02-03" ||
+		person.PremiereDate != "2001-01-01" || person.Gender != "Male" || person.CupSize != "B" {
+		t.Fatalf("演员字段未更新: %+v", person)
+	}
+	if person.ProviderIDs["Tmdb"] != "42" || person.ProviderIDs["Imdb"] != "nm1" {
+		t.Fatalf("演员外部编号未更新: %v", person.ProviderIDs)
+	}
+
+	// 详情页演员表取自主表，改名与作品数都不受影响。
+	detail, err := st.GetItem(ctx, "u1", "i1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.People) != 1 || detail.People[0].Name != "张三丰" {
+		t.Fatalf("关联影片演员表未跟随改名: %+v", detail.People)
+	}
+}
+
 // TestPersonInfoUpdatedByRescan 验证重复入库时演员信息会被更新，
 // 且空头像不会擦掉已导入的头像。
 func TestPersonInfoUpdatedByRescan(t *testing.T) {

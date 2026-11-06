@@ -46,9 +46,16 @@ type NFOData struct {
 	Episode int
 }
 
+// NFOActor 是归一化后的演员信息。
+//
+// NFO 只负责回答「谁参演了这部片、演什么角色」，所以这里只保留关联需要的字段。
+// 演员自身的资料（生日、简介、性别、Tmdb/Imdb、写真…）一律不从 NFO 写库，
+// 由人物编辑接口或外部刮削维护，避免每次扫描把人工整理的信息冲掉。
+// 标准 Kodi <actor> 只有 name / role / order / thumb；type 是 Emby/Jellyfin 的扩展写法。
 type NFOActor struct {
 	Name  string
 	Role  string
+	Type  string
 	Order int
 }
 
@@ -132,10 +139,16 @@ func ParseNFO(path string) (*NFOData, error) {
 		if name == "" {
 			continue
 		}
+		// Kodi 用 <order>，Jellyfin/Emby 导出常用 <sortorder>，两者都认。
+		order := actor.Order
+		if order == 0 && actor.SortOrder > 0 {
+			order = actor.SortOrder
+		}
 		data.Actors = append(data.Actors, NFOActor{
 			Name:  name,
 			Role:  cleanText(actor.Role),
-			Order: actor.Order,
+			Type:  cleanText(actor.Type),
+			Order: order,
 		})
 	}
 
@@ -230,9 +243,11 @@ type nfoRating struct {
 }
 
 type nfoActor struct {
-	Name  string `xml:"name"`
-	Role  string `xml:"role"`
-	Order int    `xml:"order"`
+	Name      string `xml:"name"`
+	Role      string `xml:"role"`
+	Type      string `xml:"type"`
+	Order     int    `xml:"order"`
+	SortOrder int    `xml:"sortorder"`
 }
 
 func pickRating(ratings nfoRatings) *nfoRating {

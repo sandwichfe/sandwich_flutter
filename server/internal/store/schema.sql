@@ -103,7 +103,17 @@ CREATE TABLE IF NOT EXISTS persons (
     person_id  TEXT PRIMARY KEY,
     name       TEXT NOT NULL,
     sort_name  TEXT NOT NULL DEFAULT '',
-    image_tag  TEXT NOT NULL DEFAULT '',
+    -- image_tag 是 Primary（头像），backdrop_tags 是写真/背景图（JSON 字符串数组）。
+    image_tag     TEXT NOT NULL DEFAULT '',
+    backdrop_tags TEXT NOT NULL DEFAULT '[]',
+    -- 出生年月日与首映(出道)日期分开存，来源与语义都不一样。
+    birth_date    TEXT NOT NULL DEFAULT '',
+    premiere_date TEXT NOT NULL DEFAULT '',
+    gender        TEXT NOT NULL DEFAULT '',
+    cup_size      TEXT NOT NULL DEFAULT '',
+    overview      TEXT NOT NULL DEFAULT '',
+    -- provider_ids 与 items 同构：{"Tmdb":"123","Imdb":"nm456"}。
+    provider_ids  TEXT NOT NULL DEFAULT '{}',
     -- item_count 是 item_people 的派生值，关联变化时重算，避免列表页做全表聚合。
     item_count INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT '',

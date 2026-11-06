@@ -205,6 +205,88 @@ func FindActorImages(videoPath string) map[string]string {
 	return readActorIndex(filepath.Dir(videoPath))
 }
 
+// actorArtworkSuffixes 是 .actors 目录里演员写真的命名后缀。
+var actorArtworkSuffixes = []string{"-fanart", "-backdrop"}
+
+// FindActorFanarts 读取 .actors 目录里 <演员名>-fanart*.jpg / <演员名>-backdrop*.jpg
+// 这类写真，返回「演员名 → 写真路径（自然序）」。
+func FindActorFanarts(videoPath string) map[string][]string {
+	return readActorFanartIndex(filepath.Dir(videoPath))
+}
+
+func readActorFanartIndex(videoDir string) map[string][]string {
+	dir := filepath.Join(videoDir, ".actors")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+
+	result := make(map[string][]string, 4)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		ext := filepath.Ext(entry.Name())
+		if !artworkExtensions[strings.ToLower(ext)] {
+			continue
+		}
+		actor, ok := splitActorArtworkName(strings.TrimSuffix(entry.Name(), ext))
+		if !ok {
+			continue
+		}
+		result[actor] = append(result[actor], filepath.Join(dir, entry.Name()))
+	}
+	for actor := range result {
+		paths := result[actor]
+		// 先按后缀分组（-fanart 在前，-backdrop 在后），组内按自然序，
+		// 保证「fanart、fanart2、backdrop1」这样的顺序稳定。
+		sort.Slice(paths, func(i, j int) bool {
+			left, right := actorArtworkRank(paths[i]), actorArtworkRank(paths[j])
+			if left != right {
+				return left < right
+			}
+			return naturalLess(filepath.Base(paths[i]), filepath.Base(paths[j]))
+		})
+	}
+	return result
+}
+
+// actorArtworkRank 返回写真后缀的优先级，越小的排在越前面。
+func actorArtworkRank(path string) int {
+	name := strings.ToLower(filepath.Base(path))
+	for index, suffix := range actorArtworkSuffixes {
+		if strings.Contains(name, suffix) {
+			return index
+		}
+	}
+	return len(actorArtworkSuffixes)
+}
+
+// splitActorArtworkName 从 "张三-fanart2" 里取出演员名 "张三"。
+// 后缀是纯 ASCII，先剥掉尾部数字再做大小写无关比较，避免整串转小写导致的下标错位。
+func splitActorArtworkName(stem string) (string, bool) {
+	end := len(stem)
+	for end > 0 && isASCIIDigit(stem[end-1]) {
+		end--
+	}
+	base := stem[:end]
+	for _, suffix := range actorArtworkSuffixes {
+		if len(base) <= len(suffix) {
+			continue
+		}
+		tail := base[len(base)-len(suffix):]
+		if !strings.EqualFold(tail, suffix) {
+			continue
+		}
+		actor := strings.TrimSpace(base[:len(base)-len(suffix)])
+		if actor == "" {
+			return "", false
+		}
+		return actor, true
+	}
+	return "", false
+}
+
 // readActorIndex 枚举目录下的 .actors 子目录，返回「演员名 → 头像路径」。
 func readActorIndex(videoDir string) map[string]string {
 	dir := filepath.Join(videoDir, ".actors")
@@ -224,6 +306,10 @@ func readActorIndex(videoDir string) map[string]string {
 		}
 		name := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
 		if name == "" {
+			continue
+		}
+		// 写真文件（<演员名>-fanart*.jpg）不算头像，交给 readActorFanartIndex。
+		if _, isFanart := splitActorArtworkName(name); isFanart {
 			continue
 		}
 		result[name] = filepath.Join(dir, entry.Name())

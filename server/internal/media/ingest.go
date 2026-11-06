@@ -75,34 +75,50 @@ func buildPeople(nfo *NFOData) []dto.PersonDto {
 	people := make([]dto.PersonDto, 0, len(nfo.Actors)+len(nfo.Directors)+len(nfo.Writers))
 	seen := map[string]bool{}
 
-	appendPerson := func(name, role, kind string) {
-		name = strings.TrimSpace(name)
-		if name == "" {
+	appendPerson := func(person dto.PersonDto) {
+		person.Name = strings.TrimSpace(person.Name)
+		if person.Name == "" {
 			return
 		}
-		key := kind + ":" + name
+		key := person.Type + ":" + person.Name + ":" + person.Role
 		if seen[key] {
 			return
 		}
 		seen[key] = true
-		people = append(people, dto.PersonDto{
-			ID:   store.StableID("person:" + name),
-			Name: name,
-			Role: role,
-			Type: kind,
-		})
+		person.ID = store.StableID("person:" + person.Name)
+		people = append(people, person)
 	}
 
 	for _, director := range nfo.Directors {
-		appendPerson(director, "", "Director")
+		appendPerson(dto.PersonDto{Name: director, Type: "Director"})
 	}
 	for _, writer := range nfo.Writers {
-		appendPerson(writer, "", "Writer")
+		appendPerson(dto.PersonDto{Name: writer, Type: "Writer"})
 	}
 	for _, actor := range nfo.Actors {
-		appendPerson(actor.Name, actor.Role, "Actor")
+		// 只带关联需要的字段：演员资料不在这里更新。
+		appendPerson(dto.PersonDto{
+			Name: actor.Name,
+			Role: actor.Role,
+			Type: normalizePersonType(actor.Type, "Actor"),
+		})
 	}
 	return people
+}
+
+// normalizePersonType 统一 NFO 里的 <type> 写法，认不出时退回默认值。
+func normalizePersonType(value, fallback string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "actor":
+		return "Actor"
+	case "director":
+		return "Director"
+	case "writer", "author", "screenwriter":
+		return "Writer"
+	case "gueststar", "guest":
+		return "GuestStar"
+	}
+	return fallback
 }
 
 // normalizeProviderIDs 把 NFO 的 uniqueid 类型转换成 Emby 的键名（Tmdb / Imdb / Tvdb）。
@@ -227,6 +243,32 @@ func (s *Scanner) importArtwork(item *store.Item, videoPath string, logf func(st
 			}
 			item.People[index].PrimaryImageTag = tag
 			item.People[index].ImageTags = map[string]string{"Primary": tag}
+		}
+	}
+
+	// .actors/<演员名>-fanart.jpg 一类文件是演员写真，按序号写进 Backdrop 槽位。
+	for name, paths := range snapshot.actorFanarts {
+		personID := store.StableID("person:" + name)
+		if s.entityLocked(personID) {
+			continue
+		}
+		tags := make([]string, 0, len(paths))
+		for index, path := range paths {
+			tag, err := s.saveArtwork(personID, "Backdrop", index, path)
+			if err != nil {
+				// 后面的槽位没有意义，保留已导入的部分即可。
+				break
+			}
+			tags = append(tags, tag)
+		}
+		if len(tags) == 0 {
+			continue
+		}
+		for index := range item.People {
+			if item.People[index].Name != name {
+				continue
+			}
+			item.People[index].BackdropImageTags = tags
 		}
 	}
 }

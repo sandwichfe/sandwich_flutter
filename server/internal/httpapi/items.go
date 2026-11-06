@@ -232,7 +232,19 @@ func (s *Server) handleUpdateItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.store.UpdateItemMetadata(r.Context(), r.PathValue("itemId"), payload); err != nil {
+	itemID := r.PathValue("itemId")
+	// 演员不在 items 表里，编辑演员详情（生日、简介、性别、外部编号…）走 persons 主表。
+	// 两套 ID 由不同种子派生，先查演员命中率更高也不会误伤条目。
+	if _, err := s.store.PersonByID(r.Context(), itemID); err == nil {
+		if err := s.store.UpdatePersonMetadata(r.Context(), itemID, payload); err != nil {
+			writeError(w, http.StatusInternalServerError, "保存演员信息失败")
+			return
+		}
+		writeNoContent(w)
+		return
+	}
+
+	if err := s.store.UpdateItemMetadata(r.Context(), itemID, payload); err != nil {
 		writeError(w, http.StatusInternalServerError, "保存元数据失败")
 		return
 	}

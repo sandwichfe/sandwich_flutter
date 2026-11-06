@@ -145,13 +145,92 @@ func TestFindActorImages(t *testing.T) {
 	video := filepath.Join(dir, "Avatar (2009).mkv")
 	writeFile(t, video, "x")
 	writeFile(t, filepath.Join(dir, ".actors", "萨姆·沃辛顿.jpg"), "x")
+	// 写真不能被当成头像。
+	writeFile(t, filepath.Join(dir, ".actors", "萨姆·沃辛顿-fanart.jpg"), "x")
 
 	images := FindActorImages(video)
 	if len(images) != 1 {
-		t.Fatalf("演员头像数量 = %d", len(images))
+		t.Fatalf("演员头像数量 = %d, 期望 1（写真不算头像）", len(images))
 	}
 	if _, ok := images["萨姆·沃辛顿"]; !ok {
 		t.Errorf("未找到中文演员名: %v", images)
+	}
+}
+
+func TestFindActorFanarts(t *testing.T) {
+	dir := t.TempDir()
+	video := filepath.Join(dir, "Avatar (2009).mkv")
+	writeFile(t, video, "x")
+	actors := filepath.Join(dir, ".actors")
+	writeFile(t, filepath.Join(actors, "萨姆·沃辛顿.jpg"), "x")
+	writeFile(t, filepath.Join(actors, "萨姆·沃辛顿-fanart.jpg"), "x")
+	writeFile(t, filepath.Join(actors, "萨姆·沃辛顿-fanart2.jpg"), "x")
+	writeFile(t, filepath.Join(actors, "萨姆·沃辛顿-backdrop1.jpg"), "x")
+	// 演员名自带数字与连字符时也要能正确还原。
+	writeFile(t, filepath.Join(actors, "让-马克2-fanart3.png"), "x")
+
+	fanarts := FindActorFanarts(video)
+	if len(fanarts["萨姆·沃辛顿"]) != 3 {
+		t.Fatalf("写真数量 = %d, 期望 3: %v", len(fanarts["萨姆·沃辛顿"]), fanarts)
+	}
+	// 自然序：fanart.jpg 排在 fanart2 前面。
+	first := filepath.Base(fanarts["萨姆·沃辛顿"][0])
+	if first != "萨姆·沃辛顿-fanart.jpg" {
+		t.Errorf("写真排序不符: %v", fanarts["萨姆·沃辛顿"])
+	}
+	if len(fanarts["让-马克2"]) != 1 {
+		t.Errorf("带数字的演员名解析失败: %v", fanarts)
+	}
+}
+
+// TestBuildPeopleCarriesRelationOnly 验证 buildPeople 只带关联字段，
+// 演员资料留给人物编辑接口维护，不从 NFO 写库。
+func TestBuildPeopleCarriesRelationOnly(t *testing.T) {
+	people := buildPeople(&NFOData{
+		Actors: []NFOActor{{Name: "张三", Role: "主演", Type: "actor"}},
+	})
+	if len(people) != 1 {
+		t.Fatalf("演员数量 = %d, 期望 1", len(people))
+	}
+	person := people[0]
+	if person.Name != "张三" || person.Role != "主演" || person.Type != "Actor" {
+		t.Fatalf("关联字段不符: %+v", person)
+	}
+	if person.ID == "" {
+		t.Fatal("演员 ID 应由姓名派生")
+	}
+}
+
+// TestParseNFOActorTypeAndSortOrder 覆盖 NFO 里与关联有关的两种扩展写法。
+func TestParseNFOActorTypeAndSortOrder(t *testing.T) {
+	dir := t.TempDir()
+	nfoPath := filepath.Join(dir, "movie.nfo")
+	content := `<movie>
+  <title>测试</title>
+  <actor>
+    <name>张三</name>
+    <role>主演</role>
+    <type>Writer</type>
+    <sortorder>3</sortorder>
+  </actor>
+</movie>`
+	if err := os.WriteFile(nfoPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("写入 nfo 失败: %v", err)
+	}
+
+	data, err := ParseNFO(nfoPath)
+	if err != nil {
+		t.Fatalf("解析 nfo 失败: %v", err)
+	}
+	if len(data.Actors) != 1 {
+		t.Fatalf("演员数量 = %d", len(data.Actors))
+	}
+	actor := data.Actors[0]
+	if actor.Order != 3 {
+		t.Errorf("sortorder 未生效: %d", actor.Order)
+	}
+	if actor.Type != "Writer" {
+		t.Errorf("type 未生效: %q", actor.Type)
 	}
 }
 

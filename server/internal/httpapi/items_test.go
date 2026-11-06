@@ -144,6 +144,46 @@ func TestListOmitsDetailFields(t *testing.T) {
 	}
 }
 
+// TestUpdatePersonMetadataRoute 演员编辑复用 POST /emby/Items/{personId}：
+// 新字段要能在人物详情读到，改名也要立刻反映到关联影片的演员表。
+func TestUpdatePersonMetadataRoute(t *testing.T) {
+	env := newTestEnv(t)
+	seedItems(t, env.store)
+
+	body := `{"Name":"张三丰","Overview":"演员介绍","BirthDate":"1985-06-01",` +
+		`"PremiereDate":"2005-01-01","Gender":"Female","CupSize":"D","ProviderIds":{"Tmdb":"123"}}`
+	if recorder := doRequest(env.server, http.MethodPost, "/emby/Items/p1", env.token, body); recorder.Code != http.StatusNoContent {
+		t.Fatalf("保存演员信息状态码 = %d: %s", recorder.Code, recorder.Body.String())
+	}
+
+	recorder := doRequest(env.server, http.MethodGet, "/emby/Users/"+env.userID+"/Items/p1", env.token, "")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("人物详情状态码 = %d", recorder.Code)
+	}
+	var person dto.BaseItemDto
+	decodeBody(t, recorder, &person)
+	if person.Name != "张三丰" || person.Overview != "演员介绍" || person.Gender != "Female" {
+		t.Fatalf("演员详情未更新: %+v", person)
+	}
+	if person.BirthDate != "1985-06-01" || person.PremiereDate != "2005-01-01" || person.CupSize != "D" {
+		t.Fatalf("演员日期/罩杯字段不符: %+v", person)
+	}
+	if person.ProviderIDs["Tmdb"] != "123" {
+		t.Fatalf("演员外部编号不符: %v", person.ProviderIDs)
+	}
+
+	// 条目详情里的演员表取自主表，改名后应立刻生效。
+	recorder = doRequest(env.server, http.MethodGet, "/emby/Users/"+env.userID+"/Items/i1", env.token, "")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("条目详情状态码 = %d", recorder.Code)
+	}
+	var item dto.BaseItemDto
+	decodeBody(t, recorder, &item)
+	if len(item.People) == 0 || item.People[0].Name != "张三丰" {
+		t.Fatalf("关联影片的演员表未跟随更新: %+v", item.People)
+	}
+}
+
 // TestLogoutInvalidatesToken 登出后令牌立即失效。
 func TestLogoutInvalidatesToken(t *testing.T) {
 	env := newTestEnv(t)

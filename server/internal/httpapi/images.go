@@ -269,13 +269,14 @@ func (s *Server) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
 	writeNoContent(w)
 }
 
-// syncImageTags 把落盘结果同步回条目的 ImageTags / BackdropImageTags，
+// syncImageTags 把落盘结果同步回实体的图片标记，
 // 客户端靠这些标记决定是否发起图片请求。
 func (s *Server) syncImageTags(r *http.Request, itemID, imageType string, index int, tag string) error {
 	item, err := s.store.GetItem(r.Context(), currentUser(r).ID, itemID)
 	if errors.Is(err, store.ErrNotFound) {
-		// 媒体库、人物等实体不在 items 表里，没有可回写的标记，视为成功。
-		return nil
+		// 演员不在 items 表里，头像/写真标记写进 persons 主表；
+		// 媒体库等其它实体没有可回写的标记，该方法会直接返回 nil。
+		return s.store.SetPersonImageTag(r.Context(), itemID, imageType, index, tag)
 	}
 	if err != nil {
 		return err

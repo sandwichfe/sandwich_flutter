@@ -34,7 +34,7 @@ type Store struct {
 
 // schemaVersion 对应 schema.sql 的表结构版本号。
 // 改表结构时递增，并在 schemaMigrations 里补上「上一版 → 这一版」的语句。
-const schemaVersion = 6
+const schemaVersion = 7
 
 // schemaMigrations 是「版本 N → N+1」的升级语句。
 // 新库按 schema.sql 一次建到最新；老库按 PRAGMA user_version 逐级补齐，
@@ -79,6 +79,16 @@ var schemaMigrations = map[int][]string{
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_item_people_unique
 			ON item_people(item_id, person_id, type, role)`,
 		`CREATE INDEX IF NOT EXISTS idx_persons_name ON persons(name COLLATE NOCASE)`,
+	},
+	// 6 → 7：演员补充详情字段（生日/首映日期/性别/罩杯/介绍/外部编号/写真）。
+	6: {
+		`ALTER TABLE persons ADD COLUMN backdrop_tags TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE persons ADD COLUMN birth_date TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE persons ADD COLUMN premiere_date TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE persons ADD COLUMN gender TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE persons ADD COLUMN cup_size TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE persons ADD COLUMN overview TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE persons ADD COLUMN provider_ids TEXT NOT NULL DEFAULT '{}'`,
 	},
 }
 

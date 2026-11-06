@@ -156,18 +156,23 @@ w.Write(rendered)
 
 `handleImage` 同时接受 `maxWidth` 和 `MaxWidth` 两种写法（条目图片用小写，用户头像用大写，不同接口约定不一致）。
 
-### 2.6 演员头像
+### 2.6 演员头像与写真
 
 和条目图片是同一套机制，只是目录换了：
 
 ```
-.actors/萨姆·沃辛顿.jpg
+.actors/萨姆·沃辛顿.jpg              → 头像 Primary
+.actors/萨姆·沃辛顿-fanart.jpg       → 写真 Backdrop 0
+.actors/萨姆·沃辛顿-fanart2.jpg      → 写真 Backdrop 1
+.actors/萨姆·沃辛顿-backdrop1.jpg    → 写真 Backdrop 2（-fanart 系列优先，组内自然序）
    ↓ personID = sha1("person:" + 姓名) 前 16 字节 → 32 hex
-   ↓ data/images/{personID}/primary/0.jpg
-   ↓ tag 写回 items.people 里该人物的 PrimaryImageTag / ImageTags
+   ↓ data/images/{personID}/primary/0.jpg 与 /backdrop/{n}.jpg
+   ↓ tag 写回 persons.image_tag 与 persons.backdrop_tags
 ```
 
-因为人物 ID 由姓名派生，同一演员在多部片子里是同一个 ID，头像只存一份。客户端请求 `/Items/{personID}/Images/Primary` 就能拿到。
+因为人物 ID 由姓名派生，同一演员在多部片子里是同一个 ID，头像与写真只存一份。客户端请求 `/Items/{personID}/Images/Primary`、`/Images/Backdrop/{n}` 就能拿到。
+
+写真文件不会被当成头像（`readActorIndex` 会跳过 `-fanart` / `-backdrop` 后缀）。手动上传/删除走同一套图片接口：`POST|DELETE /emby/Items/{personId}/Images/{Primary|Backdrop}/{index}`，落盘后会回写 `persons` 的图片标记。
 
 ---
 
@@ -191,7 +196,7 @@ file:<path>?_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=forei
 | `tokens` | 登录令牌 | `token → user_id`，当前**没有过期机制** |
 | `libraries` | 媒体库 | 界面创建的库，一行可挂多个目录（`paths` JSON 列） |
 | `items` | 媒体条目 | 一部视频一行，复杂结构用 JSON 列 |
-| `persons` | 演员主表 | 演员是独立主体：姓名、头像 tag、作品数，`/Persons` 直接分页查它；**删片不删演员** |
+| `persons` | 演员主表 | 演员是独立主体：姓名、头像 tag、写真、生日、首映日期、性别、罩杯、简介、`provider_ids`（Tmdb/Imdb）、作品数；`/Persons` 直接分页查它，**删片不删演员** |
 | `item_people` | 演员×条目 | 纯关联表，`(item_id, person_id, type, role)` 唯一；`items.people` 的 JSON 只作入库快照 |
 | `user_data` | 用户×条目 | 收藏、已看、播放进度、播放次数、最后播放时间 |
 | `play_sessions` | 播放会话 | 目前只写不读，为后续"正在播放"看板预留 |
@@ -215,7 +220,7 @@ file:<path>?_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=forei
 | `container` / `size` / `bitrate` | ffprobe `format` | |
 | `media_streams` | ffprobe 全量流信息 | JSON，转成 `MediaStreams` 返回 |
 | `genres` / `tags` / `studios` | NFO | JSON |
-| `people` | NFO `actor`/`director`/`credits` | JSON，含角色、类型、头像 tag |
+| `people` | NFO `actor`/`director`/`credits` | JSON 快照；展示以 `persons` 主表为准 |
 | `chapters` | 未实现 | 恒为 `[]` |
 | `provider_ids` | NFO `uniqueid` | JSON，键名归一为 `Tmdb`/`Imdb`/`Tvdb` |
 | `external_urls` | 未实现 | 恒为 `[]` |
@@ -224,6 +229,21 @@ file:<path>?_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=forei
 | `screenshot_tags` | 未实现 | 恒为 `[]` |
 | `fingerprint` | 扫描时算 `size:mtime` + `extrafanart` 摘要 | 重复扫描命中就跳过 ffprobe 与图片导入 |
 | `nfo_mtime` | NFO 修改时间（纳秒） | 视频没动但 NFO 改了也要重新入库 |
+
+#### persons 字段与扫描的关系
+
+**扫描只维护「演员 × 条目」的关联，不写演员资料。** 标准 NFO 的 `<actor>` 本来只有
+`name` / `role` / `order` / `thumb`，`<type>` 是 Emby/Jellyfin 的扩展写法；生日、简介、
+性别、罩杯、Tmdb/Imdb 这些要么没有，要么只有少数刮削器写，靠它入库只会把人工整理好的
+信息越扫越少。所以职责这样分：
+
+| 数据 | 来源 | 说明 |
+|---|---|---|
+| `name` / `role` / `item_people.type` / `sort_order` | 扫描 | `name` 同时是演员 ID 的种子；`type` 认不出时按 Actor，排序兼容 `<order>` 与 `<sortorder>` |
+| `image_tag` / `backdrop_tags` | 扫描（本地文件） | 来自 `.actors/` 下的头像与写真，有值才覆盖 |
+| `item_people` 的增删 | 扫描 | 每次入库按当前 NFO 重建该条目的关联 |
+| `birth_date` / `premiere_date` / `gender` / `cup_size` / `overview` / `provider_ids` | 人物编辑接口 | `POST /emby/Items/{personId}`；重扫永远不会改动这些列 |
+| 演员行本身 | 只增不删 | 删片只清关联，演员与头像缓存保留 |
 
 ### 3.3 一条真实记录长什么样
 
@@ -303,8 +323,8 @@ ListenAndServe :8096
    │    → 时长、容器、码率、宽高、完整流信息（编码/色彩/声道…）
    ↓ parseFileName（文件名兜底）
    │    → "标题 (2023)" / "标题.2023.1080p" → 标题 + 年份
-   ↓ FindArtwork + FindActorImages
-   │    → 图片转码落盘，得到 tag
+   ↓ FindArtwork + FindActorImages + FindActorFanarts
+   │    → 条目图片、演员头像与写真转码落盘，得到 tag
    ↓ store.UpsertItem（单事务：items + persons + item_people）
    ↓
 items / persons / item_people
@@ -353,7 +373,7 @@ GET /emby/Users/{userId}/Items?ParentId=…&IncludeItemTypes=Movie&SortBy=…&Li
 
 `ParentId` 过滤写成 `parent_id = ? OR library_id = ?`，是为了兼容早期数据——老条目只有 `library_id`，`parent_id` 是空的。
 
-**演员以主表为准**：`IncludeItemTypes=Person` 与 `/Persons` 都走 `persons`（SQL 分页 + `name LIKE`，只列 `item_count > 0` 的），`PersonIds` 过滤走 `item_people` 的 `EXISTS` 子查询。入库时演员「没有就新建、有了就更新信息并重建关联」；条目详情里的演职人员同样从 `persons` + `item_people` 读，`items.people` 的 JSON 退化为扫描快照。删除条目只删关联行，演员行与头像缓存都保留。`Filters=IsFavorite` 仍是先在 `user_data` 里取收藏集合再过滤。
+**演员以主表为准**：`IncludeItemTypes=Person` 与 `/Persons` 都走 `persons`（SQL 分页 + `name LIKE`，只列 `item_count > 0` 的），`PersonIds` 过滤走 `item_people` 的 `EXISTS` 子查询。入库时只做「缺演员就建行 + 重建关联 + 有本地图片就更新」，演员资料不在扫描里改；条目详情里的演职人员同样从 `persons` + `item_people` 读，`items.people` 的 JSON 退化为扫描快照。删除条目只删关联行，演员行与头像缓存都保留。`Filters=IsFavorite` 仍是先在 `user_data` 里取收藏集合再过滤。
 
 `GenreIds` / `TagIds` 用 `json_each` 匹配名称，`StudioIds` 匹配 JSON 里的 `Id`；`Filters` 另外支持 `IsPlayed` / `IsUnplayed` / `IsResumable`，`MinCommunityRating` 为可选浮点阈值。
 

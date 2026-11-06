@@ -183,3 +183,63 @@ func TestMigrationToPersons(t *testing.T) {
 		t.Fatalf("唯一约束未生效: %d err=%v", links, err)
 	}
 }
+
+// TestMigrationToPersonDetails 验证 6 → 7 给演员表补详情列，老数据取默认值。
+func TestMigrationToPersonDetails(t *testing.T) {
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "v6.db")))
+	if err != nil {
+		t.Fatalf("打开旧库失败: %v", err)
+	}
+	defer db.Close()
+
+	setup := []string{
+		`CREATE TABLE persons (
+			person_id  TEXT PRIMARY KEY,
+			name       TEXT NOT NULL,
+			sort_name  TEXT NOT NULL DEFAULT '',
+			image_tag  TEXT NOT NULL DEFAULT '',
+			item_count INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL DEFAULT ''
+		)`,
+		`INSERT INTO persons (person_id, name, sort_name, image_tag, item_count)
+		 VALUES ('p1', '张三', '张三', 'tag1', 1)`,
+	}
+	for _, statement := range setup {
+		if _, err := db.Exec(statement); err != nil {
+			t.Fatalf("准备旧库失败: %v", err)
+		}
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range schemaMigrations[6] {
+		if _, err := tx.Exec(statement); err != nil {
+			_ = tx.Rollback()
+			t.Fatalf("执行升级语句失败: %v", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	var backdrop, birthDate, premiereDate, gender, cupSize, overview, providerIDs string
+	if err := db.QueryRow(`
+		SELECT backdrop_tags, birth_date, premiere_date, gender, cup_size, overview, provider_ids
+		FROM persons WHERE person_id = 'p1'`,
+	).Scan(&backdrop, &birthDate, &premiereDate, &gender, &cupSize, &overview, &providerIDs); err != nil {
+		t.Fatalf("新增列不可用: %v", err)
+	}
+	if backdrop != "[]" || providerIDs != "{}" || gender != "" {
+		t.Fatalf("新增列默认值不符: 写真=%q 编号=%q 性别=%q", backdrop, providerIDs, gender)
+	}
+
+	// 老数据必须保留。
+	var name, imageTag string
+	if err := db.QueryRow(`SELECT name, image_tag FROM persons WHERE person_id = 'p1'`).
+		Scan(&name, &imageTag); err != nil || name != "张三" || imageTag != "tag1" {
+		t.Fatalf("老数据被破坏: name=%q imageTag=%q err=%v", name, imageTag, err)
+	}
+}

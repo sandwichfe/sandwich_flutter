@@ -213,6 +213,8 @@ type dirSnapshot struct {
 	images map[string]string
 	// actors 来自 .actors 子目录，演员名 → 头像路径。
 	actors map[string]string
+	// actorFanarts 同样来自 .actors，演员名 → 写真路径（自然序）。
+	actorFanarts map[string][]string
 	// extraFanart 来自 extrafanart / <视频名>-extrafanart 子目录，
 	// 小写目录名 → 按自然序排好的图片路径。
 	extraFanart map[string][]string
@@ -281,9 +283,10 @@ func (s *Scanner) snapshotDir(dir string) *dirSnapshot {
 	}
 
 	snapshot = &dirSnapshot{
-		images:      readImageIndex(dir),
-		actors:      readActorIndex(dir),
-		extraFanart: readExtraFanartIndex(dir),
+		images:       readImageIndex(dir),
+		actors:       readActorIndex(dir),
+		actorFanarts: readActorFanartIndex(dir),
+		extraFanart:  readExtraFanartIndex(dir),
 	}
 
 	s.dirMu.Lock()
