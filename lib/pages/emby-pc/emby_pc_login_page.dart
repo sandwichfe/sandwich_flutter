@@ -18,6 +18,8 @@ class _EmbyPcLoginPageState extends State<EmbyPcLoginPage> {
   bool _rememberPassword = false;
   bool _passwordVisible = false;
   bool _loading = false;
+  // 登录成功过的服务器地址，供服务器输入框下拉选择。
+  List<String> _serverHistory = const [];
   String _error = '';
 
   @override
@@ -29,13 +31,23 @@ class _EmbyPcLoginPageState extends State<EmbyPcLoginPage> {
   // 登录页只恢复用户主动保存的账号信息，会话恢复由入口页负责。
   Future<void> _restoreSavedLogin() async {
     final saved = await EmbyPcService.instance.readSavedLogin();
+    final history = await EmbyPcService.instance.readServerHistory();
     if (!mounted) return;
     setState(() {
       _serverController.text = saved.serverUrl;
       _usernameController.text = saved.username;
       _passwordController.text = saved.password;
       _rememberPassword = saved.rememberPassword;
+      _serverHistory = history;
     });
+  }
+
+  // 选中历史地址后光标移到末尾，继续输入时不会覆盖整段地址。
+  void _useServerAddress(String value) {
+    _serverController.value = TextEditingValue(
+      text: value,
+      selection: TextSelection.collapsed(offset: value.length),
+    );
   }
 
   Future<void> _login() async {
@@ -121,11 +133,33 @@ class _EmbyPcLoginPageState extends State<EmbyPcLoginPage> {
                               controller: _serverController,
                               enabled: !_loading,
                               autofillHints: const [AutofillHints.url],
-                              decoration: const InputDecoration(
+                              decoration: InputDecoration(
                                 labelText: '服务器地址',
                                 hintText: 'http://192.168.1.10:8096',
-                                prefixIcon: Icon(Icons.dns_outlined),
-                                border: OutlineInputBorder(),
+                                prefixIcon: const Icon(Icons.dns_outlined),
+                                // 登录成功过的地址都保留下来，点箭头即可换一个。
+                                suffixIcon: _serverHistory.isEmpty
+                                    ? null
+                                    : PopupMenuButton<String>(
+                                        tooltip: '历史服务器地址',
+                                        enabled: !_loading,
+                                        icon: const Icon(Icons.arrow_drop_down),
+                                        onSelected: _useServerAddress,
+                                        itemBuilder: (context) => [
+                                          for (final server in _serverHistory)
+                                            PopupMenuItem<String>(
+                                              value: server,
+                                              child: Text(
+                                                server,
+                                                style: const TextStyle(
+                                                  fontFamily:
+                                                      'Microsoft YaHei UI',
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                border: const OutlineInputBorder(),
                               ),
                             ),
                             const SizedBox(height: 16),

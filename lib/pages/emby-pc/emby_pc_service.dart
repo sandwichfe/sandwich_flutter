@@ -26,6 +26,9 @@ class EmbyPcService {
   bool _expiringSession = false;
 
   static const _serverKey = 'emby_pc_server';
+  // 登录成功过的服务器地址列表，最近使用的排在最前，供登录页下拉选择。
+  static const _serverHistoryKey = 'emby_pc_server_history';
+  static const _serverHistoryLimit = 10;
   static const _userIdKey = 'emby_pc_user_id';
   static const _tokenKey = 'emby_pc_token';
   static const _userNameKey = 'emby_pc_user_name';
@@ -96,6 +99,25 @@ class EmbyPcService {
     );
   }
 
+  // 登录成功过的服务器地址，按最近使用顺序返回，登录页用它填充下拉列表。
+  Future<List<String>> readServerHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    final history = prefs.getStringList(_serverHistoryKey) ?? const <String>[];
+    return history.where((value) => value.isNotEmpty).toList();
+  }
+
+  // 去重后插入队首并限制条数，避免下拉列表无限增长。
+  Future<void> _rememberServerUrl(String server) async {
+    final prefs = await SharedPreferences.getInstance();
+    final history = prefs.getStringList(_serverHistoryKey) ?? <String>[];
+    history.removeWhere((value) => value.isEmpty || value == server);
+    history.insert(0, server);
+    if (history.length > _serverHistoryLimit) {
+      history.removeRange(_serverHistoryLimit, history.length);
+    }
+    await prefs.setStringList(_serverHistoryKey, history);
+  }
+
   Future<void> login({
     required String server,
     required String username,
@@ -142,6 +164,7 @@ class EmbyPcService {
     await prefs.setString(_userAvatarTagKey, currentUserAvatarTag);
     await prefs.setString(_loginNameKey, username.trim());
     await prefs.setBool(_rememberKey, rememberPassword);
+    await _rememberServerUrl(serverUrl);
     if (rememberPassword) {
       await prefs.setString(_passwordKey, password);
     } else {
