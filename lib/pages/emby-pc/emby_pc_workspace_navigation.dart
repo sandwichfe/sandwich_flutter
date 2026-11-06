@@ -365,6 +365,18 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
                     collapsed: _sidebarCollapsed,
                     onPressed: () => _selectFavorites('favorite-people'),
                   ),
+                  // 统计数字不跟随定时刷新，由用户在这里显式重新统计。
+                  Divider(height: _sidebarCollapsed ? 18 : 28),
+                  _SidebarButton(
+                    icon: Icons.refresh_rounded,
+                    title: '刷新统计',
+                    count: null,
+                    showCount: false,
+                    active: false,
+                    loading: _c.countsRefreshing,
+                    collapsed: _sidebarCollapsed,
+                    onPressed: _refreshCounts,
+                  ),
                 ],
               ),
             ),
@@ -493,6 +505,17 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
                           () => _selectFavorites('favorite-people'),
                         ),
                   ),
+                  // 抽屉同样提供手动刷新入口，与桌面侧栏保持一致。
+                  const Divider(height: 28),
+                  _SidebarButton(
+                    icon: Icons.refresh_rounded,
+                    title: '刷新统计',
+                    count: null,
+                    showCount: false,
+                    active: false,
+                    loading: _c.countsRefreshing,
+                    onPressed: _refreshCounts,
+                  ),
                 ],
               ),
             ),
@@ -500,6 +523,13 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
         ),
       ),
     );
+  }
+
+  // 手动刷新侧栏统计：重新请求媒体库条目数与收藏影片/演员数量。
+  // 请求期间按钮显示转圈并忽略重复点击，避免一次点击打出多轮请求。
+  void _refreshCounts() {
+    if (_c.countsRefreshing) return;
+    unawaited(_c.loadCounts());
   }
 
   Widget _buildSidebarToggle(BuildContext context) {

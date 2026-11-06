@@ -22,6 +22,10 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
   final Map<String, int?> libraryCounts = {};
   int? favoriteMovieCount;
   int? favoritePeopleCount;
+  // 计数刷新可能并发（首次加载、侧栏手动刷新），用版本号丢弃过期响应。
+  int _countsVersion = 0;
+  // 侧栏“刷新统计”按钮的进行中状态，按钮据此显示转圈并避免重复点击。
+  bool countsRefreshing = false;
 
   // ---- 当前查询条件 ----
   String activeId = '';
@@ -102,7 +106,7 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
     error = '';
     errorDetail = '';
     _notify();
-    loadCounts();
+    unawaited(loadCounts());
     await loadHome();
   }
 
@@ -149,54 +153,83 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
     }
   }
 
-  void loadCounts() {
-    countsLoading = true;
-    favoriteMovieLoading = true;
-    favoritePeopleLoading = true;
+  // 侧栏计数统一刷新入口：首次进入与侧栏“刷新统计”按钮都走这里。
+  // 刷新期间保留已有数字，只有从未取到过的条目才显示占位符，避免侧栏数字闪空。
+  Future<void> loadCounts() async {
+    final version = ++_countsVersion;
     final snapshot = List<EmbyPcItem>.of(libraries);
+    // 已删除的媒体库不再保留旧计数，避免侧栏出现幽灵数字。
+    libraryCounts.removeWhere(
+      (id, _) => !snapshot.any((library) => library.id == id),
+    );
+    countsLoading =
+        snapshot.isNotEmpty &&
+        snapshot.any((library) => !libraryCounts.containsKey(library.id));
+    favoriteMovieLoading = favoriteMovieCount == null;
+    favoritePeopleLoading = favoritePeopleCount == null;
+    countsRefreshing = true;
     _notify();
-    for (final library in snapshot) {
-      unawaited(_loadLibraryCount(library.id));
+    try {
+      await Future.wait<void>([
+        ...snapshot.map((library) => _loadLibraryCount(library.id, version)),
+        _loadFavoriteCounts(version),
+      ]);
+    } finally {
+      // 并发刷新时只让最后一次请求结束刷新态，避免按钮提前停止转圈。
+      if (!_disposed && version == _countsVersion) {
+        countsRefreshing = false;
+        _notify();
+      }
     }
-    unawaited(_loadFavoriteCounts());
   }
 
-  Future<void> _loadLibraryCount(String libraryId) async {
+  Future<void> _loadLibraryCount(String libraryId, int version) async {
     try {
       final page = await _service.getItems(libraryId: libraryId, limit: 1);
-      if (_disposed) return;
+      if (_disposed || version != _countsVersion) return;
       libraryCounts[libraryId] = page.total;
       _notify();
     } catch (_) {
-      if (_disposed) return;
-      libraryCounts[libraryId] = null;
+      // 刷新失败时保留上一次的数字，首次失败才保持占位符。
+      if (_disposed || version != _countsVersion) return;
       _notify();
     }
   }
 
-  Future<void> _loadFavoriteCounts() async {
+  Future<void> _loadFavoriteCounts(int version) async {
     try {
       final results = await Future.wait<dynamic>([
         _service.getItems(favoriteOnly: true, limit: 1),
         _service.getItems(favoriteOnly: true, itemType: 'Person', limit: 1),
       ]);
-      if (_disposed) return;
+      if (_disposed || version != _countsVersion) return;
       favoriteMovieCount = (results[0] as EmbyPcPage).total;
       favoritePeopleCount = (results[1] as EmbyPcPage).total;
+      countsLoading = false;
       favoriteMovieLoading = false;
       favoritePeopleLoading = false;
-      countsLoading = false;
       _notify();
     } catch (_) {
-      if (_disposed) return;
-      favoriteMovieCount = null;
-      favoritePeopleCount = null;
+      // 网络抖动时保留旧数字，避免侧栏计数被清成占位符。
+      if (_disposed || version != _countsVersion) return;
+      countsLoading = false;
       favoriteMovieLoading = false;
       favoritePeopleLoading = false;
-      countsLoading = false;
       _notify();
     }
   }
+
+  // 列表带筛选时 total 只是筛选结果的条数，不能当作媒体库条目总数。
+  bool get _hasItemFilters =>
+      itemType.isNotEmpty ||
+      statusFilter.isNotEmpty ||
+      markFilter.isNotEmpty ||
+      videoType.isNotEmpty ||
+      genreFilter.isNotEmpty ||
+      personFilter.isNotEmpty ||
+      minRating != null ||
+      productionYear != null ||
+      searchTerm.trim().isNotEmpty;
 
   // 列表与分页共用同一份查询快照，reset 为 false 时按当前条数追加。
   Future<void> loadItems({required bool reset}) async {
@@ -270,6 +303,16 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
         items.addAll(page.items);
       }
       total = page.total;
+      // 列表总数与侧栏计数同源：浏览媒体库/收藏列表时顺手同步，不再多发一次请求。
+      if (reset && !_hasItemFilters) {
+        if (view == 'library' && activeId.isNotEmpty) {
+          libraryCounts[activeId] = total;
+        } else if (view == 'favorite-movies') {
+          favoriteMovieCount = total;
+        } else if (view == 'favorite-people') {
+          favoritePeopleCount = total;
+        }
+      }
       loading = false;
       loadingMore = false;
       refreshing = false;
@@ -430,17 +473,20 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
       items = items.where((entry) => entry.id != item.id).toList();
       total = (total - 1).clamp(0, 1 << 30).toInt();
     }
-    if (view == 'favorite-movies' && favoriteMovieCount != null) {
-      favoriteMovieCount = (favoriteMovieCount! + (value ? 1 : -1))
-          .clamp(0, 1 << 30)
-          .toInt();
-    }
-    // 从演员列表修改收藏时，同步侧栏的收藏演员数量。
-    if ((view == 'favorite-people' || view == 'people') &&
-        favoritePeopleCount != null) {
-      favoritePeopleCount = (favoritePeopleCount! + (value ? 1 : -1))
-          .clamp(0, 1 << 30)
-          .toInt();
+    // 计数按条目类型同步，与当前停留在哪个视图无关：
+    // 之前只认收藏/演员视图，在首页或媒体库里收藏影片后侧栏数字要重登才会变。
+    // 人物接口偶尔省略 type 字段，演员相关视图作为兜底判断。
+    final isPerson =
+        item.type == 'Person' || view == 'people' || view == 'favorite-people';
+    final current = isPerson ? favoritePeopleCount : favoriteMovieCount;
+    // 计数还没取到时不做加减，等 loadCounts 拿回准确值。
+    if (current != null) {
+      final next = (current + (value ? 1 : -1)).clamp(0, 1 << 30).toInt();
+      if (isPerson) {
+        favoritePeopleCount = next;
+      } else {
+        favoriteMovieCount = next;
+      }
     }
     _notify();
   }
