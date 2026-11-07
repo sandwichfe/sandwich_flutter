@@ -92,12 +92,9 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
     );
   }
 
-  Widget _buildAccountMenu(
-    BuildContext context, {
-    bool sidebar = false,
-    bool collapsed = false,
-    bool header = false,
-  }) {
+  // 页头账号入口：头像 + 昵称 + 账号标识，点按展开账号菜单。
+  // 设置已独立成页头按钮，菜单只保留账号相关的退出登录。
+  Widget _buildAccountMenu(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final skin = EmbyPcSkin.of(context);
     final service = EmbyPcService.instance;
@@ -123,73 +120,67 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
       ),
     );
     final avatar = buildAvatar(14);
-    // 页头账号入口：头像 + 昵称 + 账号标识，点按展开同一个账号菜单。
-    final headerPill = header
-        ? Semantics(
-            button: true,
-            label: '用户 $displayName，打开账号菜单',
-            child: Container(
-              height: 40,
-              padding: const EdgeInsets.fromLTRB(4, 4, 10, 4),
-              decoration: BoxDecoration(
-                color: skin.surfaceAlt.withValues(alpha: skin.dark ? 0.62 : 1),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: skin.hairline),
+    final pill = Semantics(
+      button: true,
+      label: '用户 $displayName，打开账号菜单',
+      child: Container(
+        height: 40,
+        padding: const EdgeInsets.fromLTRB(4, 4, 10, 4),
+        decoration: BoxDecoration(
+          color: skin.surfaceAlt.withValues(alpha: skin.dark ? 0.62 : 1),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: skin.hairline),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            avatar,
+            // 窄窗口只留头像，避免账号区挤占搜索框。
+            if (MediaQuery.sizeOf(context).width >= 1100) ...[
+              const SizedBox(width: 9),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 110),
+                child: Text(
+                  displayName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontFamily: 'Microsoft YaHei UI',
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: skin.scheme.onSurface,
+                  ),
+                ),
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  avatar,
-                  // 窄窗口只留头像，避免账号区挤占搜索框。
-                  if (MediaQuery.sizeOf(context).width >= 1100) ...[
-                    const SizedBox(width: 9),
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 110),
-                      child: Text(
-                        displayName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontFamily: 'Microsoft YaHei UI',
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: skin.scheme.onSurface,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 7),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        gradient: skin.accentFill,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: const Text(
-                        'EMBY',
-                        style: TextStyle(
-                          fontSize: 8.5,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.8,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 3),
-                    Icon(
-                      Icons.keyboard_arrow_down_rounded,
-                      size: 16,
-                      color: skin.textSecondary,
-                    ),
-                  ],
-                ],
+              const SizedBox(width: 7),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  gradient: skin.accentFill,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: const Text(
+                  'EMBY',
+                  style: TextStyle(
+                    fontSize: 8.5,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
+                    color: Colors.white,
+                  ),
+                ),
               ),
-            ),
-          )
-        : null;
-    // 账号菜单只承载账号相关的退出登录，设置入口独立放在侧栏导航里。
+              const SizedBox(width: 3),
+              Icon(
+                Icons.keyboard_arrow_down_rounded,
+                size: 16,
+                color: skin.textSecondary,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+    // 账号菜单只承载账号相关的退出登录，设置入口已放到页头。
     final menu = PopupMenuButton<String>(
       tooltip: '账号：$displayName',
       padding: EdgeInsets.zero,
@@ -204,7 +195,6 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
         borderRadius: BorderRadius.circular(14),
         side: BorderSide(color: colors.outlineVariant.withValues(alpha: 0.8)),
       ),
-      icon: sidebar || header ? null : avatar,
       onSelected: (value) {
         if (value == 'logout') _logout();
       },
@@ -264,73 +254,9 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
           ),
         ),
       ],
-      child: sidebar
-          ? Semantics(
-              button: true,
-              label: '用户 $displayName，打开账号菜单',
-              child: SizedBox(
-                width: double.infinity,
-                height: 44,
-                child: Row(
-                  mainAxisAlignment: collapsed
-                      ? MainAxisAlignment.center
-                      : MainAxisAlignment.start,
-                  children: [
-                    SizedBox(width: collapsed ? 0 : 12),
-                    avatar,
-                    if (!collapsed) ...[
-                      const SizedBox(width: 11),
-                      Expanded(
-                        child: Text(
-                          displayName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontFamily: 'Microsoft YaHei UI',
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                      Icon(
-                        Icons.more_horiz,
-                        size: 19,
-                        color: colors.onSurfaceVariant,
-                      ),
-                      const SizedBox(width: 12),
-                    ],
-                  ],
-                ),
-              ),
-            )
-          : headerPill,
+      child: pill,
     );
-
-    if (header && headerPill != null) return headerPill;
-    if (!sidebar) {
-      // 顶部账号入口做成圆形玻璃按钮，和搜索框、圆形角标形成同一套语言。
-      return SizedBox.square(
-        dimension: 44,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: skin.surfaceAlt.withValues(alpha: skin.dark ? 0.78 : 1),
-            border: Border.all(color: skin.hairline),
-            shape: BoxShape.circle,
-          ),
-          child: menu,
-        ),
-      );
-    }
-    // 侧栏底部账号卡：独立成块，避免和导航条目混在一起。
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 4, 10, 12),
-      child: Material(
-        color: skin.surfaceAlt.withValues(alpha: skin.dark ? 0.62 : 1),
-        borderRadius: BorderRadius.circular(14),
-        clipBehavior: Clip.antiAlias,
-        child: menu,
-      ),
-    );
+    return menu;
   }
 
   Widget _buildSidebar(BuildContext context) {
@@ -439,32 +365,8 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
                     collapsed: _sidebarCollapsed,
                     onPressed: _refreshCounts,
                   ),
-                  // 设置入口从账号菜单提到侧栏，与刷新统计同组作为全局功能。
-                  _SidebarButton(
-                    icon: Icons.settings_rounded,
-                    title: '设置',
-                    count: null,
-                    showCount: false,
-                    active: false,
-                    collapsed: _sidebarCollapsed,
-                    onPressed: _openSettings,
-                  ),
                 ],
               ),
-            ),
-            Padding(
-              padding: EdgeInsets.fromLTRB(
-                _sidebarCollapsed ? 12 : 18,
-                2,
-                _sidebarCollapsed ? 12 : 18,
-                0,
-              ),
-              child: Divider(height: 1, color: skin.hairline),
-            ),
-            _buildAccountMenu(
-              context,
-              sidebar: true,
-              collapsed: _sidebarCollapsed,
             ),
           ],
         ),

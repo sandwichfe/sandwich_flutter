@@ -64,9 +64,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                     onPressed: () => unawaited(_openSettings()),
                   ),
                 const SizedBox(width: 8),
-                _EmbyPcWorkspaceNavigation(
-                  this,
-                )._buildAccountMenu(context, header: true),
+                _EmbyPcWorkspaceNavigation(this)._buildAccountMenu(context),
               ],
             ),
           ),
