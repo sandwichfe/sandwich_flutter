@@ -208,8 +208,16 @@ class _TitleBar extends StatelessWidget {
 /// 独立的最小化/最大化/关闭按钮组，供全局标题栏与页面内嵌页头复用。
 class WindowsCaptionButtons extends StatefulWidget {
   final double height;
+  // 深色页面（如播放器）可以显式指定浅色图标与悬停底色。
+  final Color? foregroundColor;
+  final Color? hoverColor;
 
-  const WindowsCaptionButtons({super.key, this.height = 44});
+  const WindowsCaptionButtons({
+    super.key,
+    this.height = 44,
+    this.foregroundColor,
+    this.hoverColor,
+  });
 
   @override
   State<WindowsCaptionButtons> createState() => _WindowsCaptionButtonsState();
@@ -274,6 +282,8 @@ class _WindowsCaptionButtonsState extends State<WindowsCaptionButtons>
         _WindowButton(
           tooltip: '最小化',
           icon: Icons.remove_rounded,
+          foregroundColor: widget.foregroundColor,
+          hoverColor: widget.hoverColor,
           onPressed: windowManager.minimize,
         ),
         _WindowButton(
@@ -282,12 +292,16 @@ class _WindowsCaptionButtonsState extends State<WindowsCaptionButtons>
               ? Icons.filter_none_rounded
               : Icons.crop_square_rounded,
           iconSize: _isMaximized ? 14 : 13,
+          foregroundColor: widget.foregroundColor,
+          hoverColor: widget.hoverColor,
           onPressed: _toggleMaximize,
         ),
         _WindowButton(
           tooltip: '关闭',
           icon: Icons.close_rounded,
           isClose: true,
+          foregroundColor: widget.foregroundColor,
+          hoverColor: widget.hoverColor,
           onPressed: windowManager.close,
         ),
       ],
@@ -322,6 +336,8 @@ class _WindowButton extends StatefulWidget {
   final IconData icon;
   final double iconSize;
   final bool isClose;
+  final Color? foregroundColor;
+  final Color? hoverColor;
   final VoidCallback onPressed;
 
   const _WindowButton({
@@ -330,6 +346,8 @@ class _WindowButton extends StatefulWidget {
     required this.onPressed,
     this.iconSize = 16,
     this.isClose = false,
+    this.foregroundColor,
+    this.hoverColor,
   });
 
   @override
@@ -344,10 +362,10 @@ class _WindowButtonState extends State<_WindowButton> {
     final colors = Theme.of(context).colorScheme;
     final hoverColor = widget.isClose
         ? const Color(0xFFC42B1C)
-        : colors.onSurface.withAlpha(18);
+        : (widget.hoverColor ?? colors.onSurface.withAlpha(18));
     final foregroundColor = widget.isClose && _isHovered
         ? Colors.white
-        : colors.onSurfaceVariant;
+        : (widget.foregroundColor ?? colors.onSurfaceVariant);
 
     // 标题栏位于全局 Navigator 外层，避免使用依赖 Overlay 的 Tooltip。
     return MouseRegion(

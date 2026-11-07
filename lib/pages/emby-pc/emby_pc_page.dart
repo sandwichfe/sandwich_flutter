@@ -839,22 +839,14 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
   Future<void> _playItem(EmbyPcItem item) async {
     // 播放返回后会刷新列表，通过统一的播放上下文起播并记住当前位置。
     _rememberScrollOffset();
-    // 播放页没有自绘窗口按钮，播放期间交回全局标题栏。
-    if (_usesWindowsChrome) WindowsTitleBar.embedded.value = false;
-    bool played;
-    try {
-      played = await openEmbyPcPlayer(
-        context,
-        EmbyPcPlaybackRequest(
-          item: item,
-          startPositionTicks: item.playbackPositionTicks,
-        ),
-      );
-    } finally {
-      if (mounted && _usesWindowsChrome) {
-        WindowsTitleBar.embedded.value = true;
-      }
-    }
+    // 播放器自绘顶栏已包含窗口按钮，全程保持全局标题栏隐藏。
+    final played = await openEmbyPcPlayer(
+      context,
+      EmbyPcPlaybackRequest(
+        item: item,
+        startPositionTicks: item.playbackPositionTicks,
+      ),
+    );
     // 直接播放返回后刷新当前工作台视图，避免继续显示旧的播放进度。
     if (!played || !mounted) return;
     await _reloadMediaAfterChange();
