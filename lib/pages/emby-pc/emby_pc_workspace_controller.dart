@@ -15,7 +15,8 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
   List<EmbyPcItem> libraries = const [];
   // 列表可变，分页时原地追加，避免每次滚动加载都复制整个列表。
   List<EmbyPcItem> items = <EmbyPcItem>[];
-  List<EmbyPcItem> recentlyPlayed = const [];
+  // 首页“观看历史”摘要：最近播放的若干条，列表视图另有完整分页。
+  List<EmbyPcItem> watchHistory = const [];
   // 首页“最新入库”跨媒体库聚合，单独保存便于“换一批/刷新”时只重拉这一块。
   List<EmbyPcItem> homeLatest = const [];
   Map<String, List<EmbyPcItem>> homeLibraryItems = const {};
@@ -129,16 +130,16 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
     homeError = '';
     _notify();
     try {
-      // 首页数据彼此独立，首次进入时并行获取继续观看、最新入库和各媒体库前十条。
+      // 首页数据彼此独立，首次进入时并行获取观看历史、最新入库和各媒体库前十条。
       final results = await Future.wait<dynamic>([
-        _service.getResumeItems(),
+        _service.getWatchedItems(limit: 20),
         _service.getLatestItems(limit: 24),
         ...snapshot.map(
           (library) => _service.getItems(libraryId: library.id, limit: 10),
         ),
       ]);
       if (_disposed) return;
-      recentlyPlayed = (results[0] as EmbyPcPage).items;
+      watchHistory = (results[0] as EmbyPcPage).items;
       homeLatest = results[1] as List<EmbyPcItem>;
       homeLibraryItems = {
         for (var index = 0; index < snapshot.length; index++)
@@ -267,8 +268,8 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
               sortBy: sortBy,
               sortOrder: sortOrder,
             )
-          : view == 'recently-played'
-          ? await _service.getResumeItems(
+          : view == 'watch-history'
+          ? await _service.getWatchedItems(
               startIndex: startIndex,
               limit: pageLimit,
               itemType: itemType,
@@ -287,7 +288,7 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
               filters: view == 'favorite-movies' || view == 'favorite-people'
                   ? ''
                   : <String>[
-                      // 非继续观看列表保留原有的状态和标记筛选。
+                      // 非观看历史列表保留原有的状态和标记筛选。
                       statusFilter,
                       markFilter,
                     ].where((value) => value.isNotEmpty).join(','),
@@ -471,7 +472,7 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
   void _replaceItemEverywhere(EmbyPcItem updated) {
     final index = items.indexWhere((entry) => entry.id == updated.id);
     if (index >= 0) items[index] = updated;
-    recentlyPlayed = _replaceInList(recentlyPlayed, updated);
+    watchHistory = _replaceInList(watchHistory, updated);
     homeLatest = _replaceInList(homeLatest, updated);
     homeLibraryItems = {
       for (final library in homeLibraryItems.entries)
@@ -516,7 +517,7 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
     _notify();
   }
 
-  // 标记已看后本地立即同步：列表角标与继续观看分区都不需要重新请求。
+  // 标记已看后本地立即同步：列表角标与首页观看历史分区都不需要重新请求。
   void applyPlayedResult(EmbyPcItem item, bool value) {
     _replaceItemEverywhere(
       item.copyWith(
@@ -525,11 +526,7 @@ class EmbyPcWorkspaceController extends ChangeNotifier {
         playbackPositionTicks: value ? 0 : item.playbackPositionTicks,
       ),
     );
-    // 继续观看只保留未看完的条目，标记已看后应立即从当前视图移除。
-    if (value && view == 'recently-played') {
-      items = items.where((entry) => entry.id != item.id).toList();
-      total = (total - 1).clamp(0, 1 << 30).toInt();
-    }
+    // 观看历史保留所有播放过的条目，标记已看/未看都不需要从当前视图移除。
     _notify();
   }
 

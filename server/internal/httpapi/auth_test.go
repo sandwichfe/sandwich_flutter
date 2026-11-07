@@ -43,7 +43,7 @@ func TestAuthAnonymousRejectedEverywhere(t *testing.T) {
 		target string
 	}{
 		{http.MethodGet, "/emby/Users/" + env.userID + "/Items"},
-		{http.MethodGet, "/emby/Users/" + env.userID + "/Items/Resume"},
+		{http.MethodGet, "/emby/Users/" + env.userID + "/Items/Watched"},
 		{http.MethodGet, "/emby/Library/ScanStatus"},
 		{http.MethodPost, "/emby/Library/Refresh"},
 		{http.MethodGet, "/emby/Videos/item1/stream"},

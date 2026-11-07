@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS user_data (
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_data_played ON user_data(user_id, last_played_date);
--- 「继续观看」的播放位置过滤复用不到上面那条索引，单独补一条
+-- 「观看历史」按 last_played_date 过滤，复用不到上面那条索引，单独补一条
 CREATE INDEX IF NOT EXISTS idx_user_data_resume ON user_data(user_id, played, last_played_date);
 
 CREATE TABLE IF NOT EXISTS play_sessions (

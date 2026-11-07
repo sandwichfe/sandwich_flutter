@@ -132,11 +132,13 @@ func (s *Server) handleLatestItems(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items)
 }
 
-func (s *Server) handleResume(w http.ResponseWriter, r *http.Request) {
+// handleWatched 对应 GET /Users/{id}/Items/Watched：观看历史。
+// 与原来的「继续观看」不同，已看完的条目也保留，只按最近播放时间倒序排列。
+func (s *Server) handleWatched(w http.ResponseWriter, r *http.Request) {
 	userID := r.PathValue("userId")
 	params := r.URL.Query()
 
-	// Emby Web 默认按最近播放时间倒序；客户端显式传排序时（如随机播放）按传入值走。
+	// 默认按最近播放时间倒序；客户端显式传排序时（如随机播放）按传入值走。
 	sortBy := splitCSV(params.Get("SortBy"))
 	if len(sortBy) == 0 {
 		sortBy = []string{"DatePlayed"}
@@ -151,7 +153,7 @@ func (s *Server) handleResume(w http.ResponseWriter, r *http.Request) {
 		IncludeTypes: splitCSV(params.Get("IncludeItemTypes")),
 		SearchTerm:   params.Get("SearchTerm"),
 		Years:        parseIntList(splitCSV(params.Get("Years"))),
-		OnlyResume:   true,
+		OnlyWatched:  true,
 		SortBy:       sortBy,
 		SortOrder:    sortOrder,
 		StartIndex:   atoi(params.Get("StartIndex")),
@@ -163,7 +165,7 @@ func (s *Server) handleResume(w http.ResponseWriter, r *http.Request) {
 
 	items, total, err := s.store.QueryItems(r.Context(), query)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "查询继续观看失败")
+		writeError(w, http.StatusInternalServerError, "查询观看历史失败")
 		return
 	}
 	writeJSON(w, http.StatusOK, dto.QueryResult{Items: items, TotalRecordCount: total})

@@ -4,7 +4,7 @@ part of 'emby_pc_page.dart';
 extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
   String get _pageTitle {
     if (_c.view == 'home') return '首页';
-    if (_c.view == 'recently-played') return '继续观看';
+    if (_c.view == 'watch-history') return '观看历史';
     if (_c.view == 'latest') return '最新入库';
     if (_c.view == 'people') return '演员列表';
     if (_c.view == 'part-groups') return '分片影片';
@@ -270,12 +270,12 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
                   ),
                   _SidebarButton(
                     icon: Icons.history_rounded,
-                    title: '继续观看',
+                    title: '观看历史',
                     count: null,
                     showCount: false,
-                    active: _c.view == 'recently-played',
+                    active: _c.view == 'watch-history',
                     collapsed: _sidebarCollapsed,
-                    onPressed: _selectRecentlyPlayed,
+                    onPressed: _selectWatchHistory,
                   ),
                   Divider(height: _sidebarCollapsed ? 18 : 28),
                   if (!_sidebarCollapsed) const _SidebarSectionTitle('媒体库'),
@@ -417,13 +417,13 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
                   ),
                   _SidebarButton(
                     icon: Icons.history_rounded,
-                    // 与侧栏、页面标题统一为“继续观看”，避免同一视图多种叫法。
-                    title: '继续观看',
+                    // 与侧栏、页面标题统一为“观看历史”，避免同一视图多种叫法。
+                    title: '观看历史',
                     count: null,
                     showCount: false,
-                    active: _c.view == 'recently-played',
+                    active: _c.view == 'watch-history',
                     onPressed: () =>
-                        _selectFromMobileNavigation(_selectRecentlyPlayed),
+                        _selectFromMobileNavigation(_selectWatchHistory),
                   ),
                   const Divider(height: 28),
                   const _SidebarSectionTitle('媒体库'),

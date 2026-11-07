@@ -170,8 +170,8 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
       onSelected: (value) {
         if (value == 'home') {
           _selectHome();
-        } else if (value == 'recently-played') {
-          _selectRecentlyPlayed();
+        } else if (value == 'watch-history') {
+          _selectWatchHistory();
         } else if (value == 'people') {
           _selectPeople();
         } else if (value == 'part-groups') {
@@ -186,8 +186,8 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
           (_) => [
             const PopupMenuItem(value: 'home', child: Text('首页')),
             const PopupMenuItem(
-              value: 'recently-played',
-              child: Text('播放记录'),
+              value: 'watch-history',
+              child: Text('观看历史'),
             ),
             const PopupMenuDivider(),
             ..._c.libraries.map(
@@ -321,7 +321,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
     final showAdvancedFilters =
         _c.view != 'favorite-movies' &&
             _c.view != 'favorite-people' &&
-            _c.view != 'recently-played';
+            _c.view != 'watch-history';
 
     // 多组低频筛选集中放入弹出面板，选中后仍按原逻辑立即刷新列表。
     return MenuAnchor(

@@ -716,8 +716,8 @@ class EmbyPcService {
     return EmbyPcPage.fromJson(data).items;
   }
 
-  // Keep the continue-watching request aligned with Emby Web's Items/Resume endpoint.
-  Future<EmbyPcPage> getResumeItems({
+  // 观看历史：所有播放过的条目，服务端按最近播放时间倒序返回。
+  Future<EmbyPcPage> getWatchedItems({
     int startIndex = 0,
     int? limit,
     String itemType = '',
@@ -740,14 +740,14 @@ class EmbyPcService {
     if (itemType.isNotEmpty) query['IncludeItemTypes'] = itemType;
     if (searchTerm.trim().isNotEmpty) query['SearchTerm'] = searchTerm.trim();
     if (productionYear != null) query['Years'] = '$productionYear';
-    // DatePlayed descending is Emby Web's default Resume ordering.
+    // DatePlayed 倒序是服务端观看历史的默认排序，无需重复传。
     if (sortBy.isNotEmpty &&
         !(sortBy == 'DatePlayed' && sortOrder == 'Descending')) {
       query['SortBy'] = sortBy;
       if (sortOrder.isNotEmpty) query['SortOrder'] = sortOrder;
     }
     return EmbyPcPage.fromJson(
-      await _get('/emby/Users/$userId/Items/Resume', query: query),
+      await _get('/emby/Users/$userId/Items/Watched', query: query),
     );
   }
 

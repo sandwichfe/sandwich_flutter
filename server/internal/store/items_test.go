@@ -35,10 +35,10 @@ func seedItems(t *testing.T, st *Store) {
 		}
 	}
 
-	// 用户数据：i2 收藏，i3 看到一半。
+	// 用户数据：i2 只收藏（没播放过），i3 看到一半。
 	if _, err := st.DB().Exec(
-		`INSERT INTO user_data (user_id, item_id, is_favorite, played, playback_position_ticks) VALUES
-		 ('u1', 'i2', 1, 0, 0), ('u1', 'i3', 0, 0, 500)`); err != nil {
+		`INSERT INTO user_data (user_id, item_id, is_favorite, played, playback_position_ticks, last_played_date) VALUES
+		 ('u1', 'i2', 1, 0, 0, ''), ('u1', 'i3', 0, 0, 500, '2024-05-01T10:00:00.0000000Z')`); err != nil {
 		t.Fatalf("写入用户数据失败: %v", err)
 	}
 }
@@ -62,7 +62,7 @@ func TestQueryItemsFilters(t *testing.T) {
 		{"指定 ID", ItemQuery{ItemIDs: []string{"i1", "i3"}}, 2},
 		{"排除 ID", ItemQuery{ExcludeIDs: []string{"i1"}}, 2},
 		{"收藏", ItemQuery{FavoriteOnly: true}, 1},
-		{"可续播", ItemQuery{OnlyResume: true}, 1},
+		{"观看历史", ItemQuery{OnlyWatched: true}, 1},
 		{"组合条件", ItemQuery{ParentID: "lib1", IncludeTypes: []string{"Movie"}, Years: []int{2020}}, 1},
 		// 空搜索词不应产生 LIKE 条件，否则会排除 name 为空的条目。
 		{"空搜索词", ItemQuery{SearchTerm: "   "}, 3},

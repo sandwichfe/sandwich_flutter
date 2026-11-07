@@ -454,8 +454,8 @@ media_kit 打开 GET /Videos/{id}/stream?static=true&api_key=…
    ↓ store.SavePlaybackProgress
    ↓ user_data 更新 playback_position_ticks / last_played_date / played
       ↓
-客户端「继续观看」= GET /Users/{id}/Items/Resume
-   ↓ 筛选 playback_position_ticks > 0 AND played = 0，按 last_played_date 倒序
+客户端「观看历史」= GET /Users/{id}/Items/Watched
+   ↓ 筛选 last_played_date 非空（看没看完都保留），按 last_played_date 倒序
 ```
 
 播放进度规则：`Stopped` 时位置达到 90% 视为看完，`played=1` 且续播位置清零。

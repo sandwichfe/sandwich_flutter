@@ -86,10 +86,11 @@ type ItemQuery struct {
 	TagIDs       []string
 	StudioIDs    []string
 	FavoriteOnly bool
-	OnlyResume   bool
-	IsPlayed     bool
-	IsUnplayed   bool
-	IsResumable  bool
+	// OnlyWatched 只看有观看记录的条目（继续观看列表已改为观看历史）。
+	OnlyWatched bool
+	IsPlayed    bool
+	IsUnplayed  bool
+	IsResumable bool
 	// MinCommunityRating 为 nil 表示不按评分过滤。
 	MinCommunityRating *float64
 
@@ -174,8 +175,9 @@ func (s *Store) QueryItems(ctx context.Context, q ItemQuery) ([]dto.BaseItemDto,
 	if q.FavoriteOnly {
 		where = append(where, "COALESCE(ud.is_favorite, 0) = 1")
 	}
-	if q.OnlyResume {
-		where = append(where, "COALESCE(ud.playback_position_ticks, 0) > 0 AND COALESCE(ud.played, 0) = 0")
+	if q.OnlyWatched {
+		// 观看历史：只要播放过就算，看过或没看完都保留。
+		where = append(where, "COALESCE(ud.last_played_date, '') <> ''")
 	}
 	if q.IsPlayed {
 		where = append(where, "COALESCE(ud.played, 0) = 1")

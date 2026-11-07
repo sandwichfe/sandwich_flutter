@@ -127,7 +127,7 @@ func (s *Server) routes() {
 
 	// 条目查询
 	s.mux.HandleFunc("GET /emby/Users/{userId}/Items", s.handleItems)
-	s.mux.HandleFunc("GET /emby/Users/{userId}/Items/Resume", s.handleResume)
+	s.mux.HandleFunc("GET /emby/Users/{userId}/Items/Watched", s.handleWatched)
 	// Latest 是字面量路由，优先级高于下面的 {itemId}，不会互相抢。
 	s.mux.HandleFunc("GET /emby/Users/{userId}/Items/Latest", s.handleLatestItems)
 	s.mux.HandleFunc("GET /emby/Users/{userId}/Items/{itemId}", s.handleItemDetail)

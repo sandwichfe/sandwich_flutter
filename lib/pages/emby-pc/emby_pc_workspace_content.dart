@@ -91,7 +91,7 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
                                       secondaryLabel:
                                           peopleList
                                               ? _personBirthYear(item)
-                                              : _c.view == 'recently-played'
+                                              : _c.view == 'watch-history'
                                               ? item.lastPlayedLabel
                                               : '',
                                       hideDefaultMetadata: peopleList,
@@ -190,10 +190,10 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
         SliverToBoxAdapter(
           child: _buildHomeMediaSection(
             context,
-            title: '继续观看',
-            items: _c.recentlyPlayed,
+            title: '观看历史',
+            items: _c.watchHistory,
             showLastPlayedTime: true,
-            onOpenSection: _selectRecentlyPlayed,
+            onOpenSection: _selectWatchHistory,
           ),
         ),
         // 最新入库聚合全部媒体库，避免只在各库分区里各看十条。

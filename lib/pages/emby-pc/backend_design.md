@@ -44,7 +44,7 @@
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/Users/{userId}/Items` | 主列表 + 搜索 + 人物作品，参数见下表 |
-| GET | `/Users/{userId}/Items/Resume` | 继续观看，默认 `DatePlayed` 倒序 |
+| GET | `/Users/{userId}/Items/Watched` | 观看历史（所有播放过的条目，含已看完），默认 `DatePlayed` 倒序 |
 | GET | `/Users/{userId}/Items/{itemId}` | 详情 / 编辑页数据源 |
 | GET | `/Persons` | 人物列表，`PremiereDate` 存生日 |
 | GET | `/Items/{itemId}/Similar` | 相似推荐 |
@@ -65,7 +65,7 @@ SortBy, SortOrder, StartIndex, Limit, Filters, VideoTypes, SearchTerm, Years, Pe
   PremiereDate, DatePlayed, Runtime, SortName, Random`
 - `SortBy=Random` 由服务端真随机抽样（`ORDER BY RANDOM()`）：每次请求都重新洗牌，
   默认只返回 50 条，取到的样本不重复；`StartIndex` 在随机模式下被忽略
-  （随机结果的“第二页”没有意义）。`/Items/Resume` 同样接受该参数。
+  （随机结果的“第二页”没有意义）。`/Items/Watched` 同样接受该参数。
 - `TotalRecordCount` 必须准确，否则分页 UI 失效
 
 `Fields` 参数不是装饰，模型直接读取，必须能返回：
@@ -141,7 +141,7 @@ BasicSyncInfo, CanDelete, CanDownload, PrimaryImageAspectRatio, Status, EndDate
 }
 ```
 
-`UserData` 是「继续观看」「已看标记」「收藏红心」的唯一数据来源，不能省略。
+`UserData` 是「观看历史」「已看标记」「收藏红心」的唯一数据来源，不能省略。
 
 ## 4. 容易被忽略的隐形功能
 
@@ -199,7 +199,7 @@ BasicSyncInfo, CanDelete, CanDownload, PrimaryImageAspectRatio, Status, EndDate
 | 阶段 | 内容 | 里程碑 |
 |---|---|---|
 | P0 | 鉴权 + Views + Items 查询 + 详情 + 图片 + stream(Range) | 能登录、能浏览、能播放 |
-| P1 | PlaybackInfo + 三条 Sessions 上报 + 收藏 + Resume | 进度记忆、继续观看 |
+| P1 | PlaybackInfo + 三条 Sessions 上报 + 收藏 + Watched | 进度记忆、观看历史 |
 | P2 | 扫描器 + ffprobe + 命名解析 + 建库 | 自动入库 |
 | P3 | 读取本地 NFO + 导入本地图片 | 海报、简介、演职人员 |
 | P4 | BIF 生成 + 图片管理 + 元数据编辑/刷新 | 管理能力补齐 |

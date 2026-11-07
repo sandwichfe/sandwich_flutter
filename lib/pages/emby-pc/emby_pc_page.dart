@@ -388,15 +388,16 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
     });
   }
 
-  Future<void> _selectRecentlyPlayed() async {
-    if (_c.view == 'recently-played') return;
+  // 观看历史：所有播放过的条目，按最近播放时间倒序。
+  Future<void> _selectWatchHistory() async {
+    if (_c.view == 'watch-history') return;
     _rememberScrollOffset();
     setState(() {
-      _c.view = 'recently-played';
+      _c.view = 'watch-history';
       _c.activeId = '';
       _c.clearItems();
       _resetQueryControllers();
-      // Resume uses Emby Web's default DatePlayed descending order.
+      // 最近播放时间倒序是观看历史的默认顺序。
       _c.sortBy = 'DatePlayed';
       _c.sortOrder = 'Descending';
     });
