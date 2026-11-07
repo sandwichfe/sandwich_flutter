@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../widgets/windows_title_bar.dart';
 import '../settings_page.dart';
 import 'emby_pc_detail_page.dart';
 import 'emby_pc_item_images_dialog.dart';
@@ -13,6 +14,7 @@ import 'emby_pc_models.dart';
 import 'emby_pc_person_page.dart';
 import 'emby_pc_playback.dart';
 import 'emby_pc_service.dart';
+import 'emby_pc_theme.dart';
 import 'emby_pc_toast.dart';
 import 'emby_pc_widgets.dart';
 import 'emby_pc_workspace_controller.dart';
@@ -50,7 +52,15 @@ class _EmbyPcEntryPageState extends State<EmbyPcEntryPage> {
       // 本地会话读取失败时清除残留状态，确保入口页可以回到登录界面。
       await EmbyPcService.instance.logout();
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        // 直接进入工作台时提前隐藏全局标题栏，避免首帧后再被顶掉 44 像素。
+        if (!kIsWeb &&
+            defaultTargetPlatform == TargetPlatform.windows &&
+            EmbyPcService.instance.isLoggedIn) {
+          WindowsTitleBar.embedded.value = true;
+        }
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -95,7 +105,17 @@ class _EmbyPcEntryPageState extends State<EmbyPcEntryPage> {
       child: _loading
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
           : !EmbyPcService.instance.isLoggedIn
-          ? EmbyPcLoginPage(onLogin: () => setState(() {}))
+          ? EmbyPcLoginPage(
+              onLogin: () {
+                // 登录成功即将进入工作台，先隐藏全局标题栏再切页。
+                if (!kIsWeb &&
+                    defaultTargetPlatform == TargetPlatform.windows &&
+                    EmbyPcService.instance.isLoggedIn) {
+                  WindowsTitleBar.embedded.value = true;
+                }
+                setState(() {});
+              },
+            )
           : EmbyPcWorkspace(onLogout: () => setState(() {})),
     );
   }
@@ -130,10 +150,25 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
   // 媒体库搜索沿用首页搜索的短防抖，连续输入时只执行最后一次查询。
   Timer? _searchDebounceTimer;
   Timer? _loadMoreDebounceTimer;
+  // 视图切换历史：页头的后退/前进按钮复用同一份栈，避免做成装饰按钮。
+  final List<_WorkspaceViewEntry> _viewHistory = [];
+  int _viewHistoryIndex = -1;
+  bool _restoringHistory = false;
+
+  // 仅 Windows 使用自绘窗口按钮，其他平台保留系统窗口行为。
+  bool get _usesWindowsChrome =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+
+  bool get _canGoBack => _viewHistoryIndex > 0;
+
+  bool get _canGoForward =>
+      _viewHistoryIndex >= 0 && _viewHistoryIndex < _viewHistory.length - 1;
 
   @override
   void initState() {
     super.initState();
+    // 工作台页头自带窗口按钮，隐藏全局标题栏避免出现双层顶栏。
+    _setEmbeddedTitleBar(true);
     WidgetsBinding.instance.addObserver(this);
     _scrollController.addListener(_onScroll);
     // 数据变化统一由 controller 通知，页面只在这里同步一次重建。
@@ -176,6 +211,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
   Future<void> _initialize() async {
     try {
       await _c.initialize();
+      // 初始首页作为历史起点，页头后退按钮从第二次切换开始生效。
+      _recordViewHistory();
     } catch (error) {
       if (!mounted) return;
       // 只有令牌被服务端判定失效才回登录页：服务层已清空会话。
@@ -292,6 +329,65 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
     _c.productionYear = int.tryParse(_yearController.text.trim());
   }
 
+  // ---- 视图历史：页头后退/前进按钮的线性历史 ----
+
+  void _recordViewHistory() {
+    if (_restoringHistory) return;
+    final entry = _WorkspaceViewEntry(_c.view, _c.activeId);
+    if (_viewHistoryIndex >= 0 && _viewHistoryIndex < _viewHistory.length) {
+      final current = _viewHistory[_viewHistoryIndex];
+      if (current.view == entry.view && current.activeId == entry.activeId) {
+        return;
+      }
+    }
+    // 从中间位置切走时丢弃“前进”分支，保持历史线性。
+    if (_viewHistoryIndex + 1 < _viewHistory.length) {
+      _viewHistory.removeRange(_viewHistoryIndex + 1, _viewHistory.length);
+    }
+    _viewHistory.add(entry);
+    _viewHistoryIndex = _viewHistory.length - 1;
+  }
+
+  Future<void> _goBackView() async {
+    if (!_canGoBack) return;
+    await _restoreViewHistory(_viewHistoryIndex - 1);
+  }
+
+  Future<void> _goForwardView() async {
+    if (!_canGoForward) return;
+    await _restoreViewHistory(_viewHistoryIndex + 1);
+  }
+
+  Future<void> _restoreViewHistory(int index) async {
+    if (index < 0 || index >= _viewHistory.length) return;
+    final entry = _viewHistory[index];
+    _viewHistoryIndex = index;
+    // 恢复历史时不再写入栈，否则后退会变成新增记录。
+    _restoringHistory = true;
+    try {
+      switch (entry.view) {
+        case 'home':
+          await _selectHome();
+        case 'library':
+          await _selectLibrary(entry.activeId);
+        case 'latest':
+          await _selectLatest();
+        case 'people':
+          await _selectPeople();
+        case 'part-groups':
+          await _selectPartGroups();
+        case 'watch-history':
+          await _selectWatchHistory();
+        case 'favorite-movies':
+        case 'favorite-people':
+          await _selectFavorites(entry.view);
+      }
+    } finally {
+      _restoringHistory = false;
+      if (mounted) setState(() {});
+    }
+  }
+
   Future<void> _selectHome() async {
     if (_c.view == 'home') return;
     _rememberScrollOffset();
@@ -303,6 +399,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
       _c.clearItems();
       _resetQueryControllers();
     });
+    _recordViewHistory();
     await _c.loadHome();
     _restoreScrollOffset();
   }
@@ -318,6 +415,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
       _resetQueryControllers();
       _restoreMediaSort();
     });
+    _recordViewHistory();
     await _c.loadItems(reset: true);
     _restoreScrollOffset();
   }
@@ -338,6 +436,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
         _restoreMediaSort();
       }
     });
+    _recordViewHistory();
     await _c.loadItems(reset: true);
     _restoreScrollOffset();
   }
@@ -354,6 +453,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
       _c.sortBy = 'DateCreated';
       _c.sortOrder = 'Descending';
     });
+    _recordViewHistory();
     await _c.loadItems(reset: true);
     _restoreScrollOffset();
   }
@@ -370,6 +470,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
       _c.sortBy = 'SortName';
       _c.sortOrder = 'Ascending';
     });
+    _recordViewHistory();
     await _c.loadItems(reset: true);
     _restoreScrollOffset();
   }
@@ -386,6 +487,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
       _c.clearItems();
       _resetQueryControllers();
     });
+    _recordViewHistory();
   }
 
   // 观看历史：所有播放过的条目，按最近播放时间倒序。
@@ -401,6 +503,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
       _c.sortBy = 'DatePlayed';
       _c.sortOrder = 'Descending';
     });
+    _recordViewHistory();
     await _c.loadItems(reset: true);
     _restoreScrollOffset();
   }
@@ -702,7 +805,10 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
 
   Future<void> _logout() async {
     await EmbyPcService.instance.logout();
-    if (mounted) widget.onLogout();
+    if (!mounted) return;
+    // 回到登录页后由全局标题栏接管窗口按钮。
+    WindowsTitleBar.embedded.value = false;
+    widget.onLogout();
   }
 
   void _openItem(EmbyPcItem item) {
@@ -733,21 +839,40 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
   Future<void> _playItem(EmbyPcItem item) async {
     // 播放返回后会刷新列表，通过统一的播放上下文起播并记住当前位置。
     _rememberScrollOffset();
-    final played = await openEmbyPcPlayer(
-      context,
-      EmbyPcPlaybackRequest(
-        item: item,
-        startPositionTicks: item.playbackPositionTicks,
-      ),
-    );
+    // 播放页没有自绘窗口按钮，播放期间交回全局标题栏。
+    if (_usesWindowsChrome) WindowsTitleBar.embedded.value = false;
+    bool played;
+    try {
+      played = await openEmbyPcPlayer(
+        context,
+        EmbyPcPlaybackRequest(
+          item: item,
+          startPositionTicks: item.playbackPositionTicks,
+        ),
+      );
+    } finally {
+      if (mounted && _usesWindowsChrome) {
+        WindowsTitleBar.embedded.value = true;
+      }
+    }
     // 直接播放返回后刷新当前工作台视图，避免继续显示旧的播放进度。
     if (!played || !mounted) return;
     await _reloadMediaAfterChange();
     _restoreScrollOffset();
   }
 
+  // 延迟到帧结束再切换全局标题栏，避免在 build/dispose 阶段通知祖先重建。
+  void _setEmbeddedTitleBar(bool value) {
+    if (!_usesWindowsChrome) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      WindowsTitleBar.embedded.value = value;
+    });
+  }
+
   @override
   void dispose() {
+    // 退出工作台（例如退出登录）时恢复全局标题栏。
+    _setEmbeddedTitleBar(false);
     WidgetsBinding.instance.removeObserver(this);
     _c.removeListener(_onWorkspaceChanged);
     _c.dispose();
@@ -766,41 +891,59 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final compact = constraints.maxWidth < 820;
-        final mobileWorkspace = _usesMobileWorkspaceLayout(
-          constraints.maxWidth,
-        );
-        return Scaffold(
-          key: _workspaceScaffoldKey,
-          drawer: mobileWorkspace
-              ? _EmbyPcWorkspaceNavigation(
-                  this,
-                )._buildMobileNavigationDrawer(context)
-              : null,
-          body: _c.error.isNotEmpty && _c.libraries.isEmpty
-              ? _WorkspaceError(
-                  message: _c.error,
-                  detail: _c.errorDetail,
-                  onRetry: _initialize,
-                  // 清会话后回到登录页，用户可重新填写服务器地址再登录。
-                  onLogout: _logout,
-                )
-              : Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (!compact)
-                      _EmbyPcWorkspaceNavigation(this)._buildSidebar(context),
-                    Expanded(
-                      child: _EmbyPcWorkspaceContent(
-                        this,
-                      )._buildContent(context, compact: compact),
+    // 工作台整体套一层独立的影院主题，避免改动全局设置页的明暗与圆角。
+    return Theme(
+      data: EmbyPcSkin.themeDataOf(context),
+      child: Builder(
+        builder: (context) => LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 820;
+            final mobileWorkspace = _usesMobileWorkspaceLayout(
+              constraints.maxWidth,
+            );
+            return Scaffold(
+              key: _workspaceScaffoldKey,
+              drawer: mobileWorkspace
+                  ? _EmbyPcWorkspaceNavigation(
+                      this,
+                    )._buildMobileNavigationDrawer(context)
+                  : null,
+              body: _c.error.isNotEmpty && _c.libraries.isEmpty
+                  ? _WorkspaceError(
+                      message: _c.error,
+                      detail: _c.errorDetail,
+                      onRetry: _initialize,
+                      // 清会话后回到登录页，用户可重新填写服务器地址再登录。
+                      onLogout: _logout,
+                    )
+                  : EmbyPcBackdrop(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (!compact)
+                            _EmbyPcWorkspaceNavigation(
+                              this,
+                            )._buildSidebar(context),
+                          Expanded(
+                            child: _EmbyPcWorkspaceContent(
+                              this,
+                            )._buildContent(context, compact: compact),
+                          ),
+                        ],
+                      ),
                     ),
-                  ],
-                ),
-        );
-      },
+            );
+          },
+        ),
+      ),
     );
   }
+}
+
+// 视图历史条目：视图类型 + 媒体库 ID，可完整还原一次视图切换。
+class _WorkspaceViewEntry {
+  final String view;
+  final String activeId;
+
+  const _WorkspaceViewEntry(this.view, this.activeId);
 }

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'emby_pc_models.dart';
 import 'emby_pc_service.dart';
+import 'emby_pc_theme.dart';
 
 // Emby PC 横向内容统一使用左右按钮翻页，同时保留鼠标拖动和触控滑动。
 class EmbyPcHorizontalCarousel extends StatefulWidget {
@@ -33,8 +34,7 @@ class EmbyPcHorizontalCarousel extends StatefulWidget {
       _EmbyPcHorizontalCarouselState();
 }
 
-class _EmbyPcHorizontalCarouselState
-    extends State<EmbyPcHorizontalCarousel> {
+class _EmbyPcHorizontalCarouselState extends State<EmbyPcHorizontalCarousel> {
   final _scrollController = ScrollController();
   bool _hovering = false;
 
@@ -50,10 +50,9 @@ class _EmbyPcHorizontalCarouselState
     final position = _scrollController.position;
     final viewportDistance = position.viewportDimension * 0.72;
     final distance = viewportDistance < 280 ? 280.0 : viewportDistance;
-    final target =
-        (_scrollController.offset + direction * distance)
-            .clamp(0.0, position.maxScrollExtent)
-            .toDouble();
+    final target = (_scrollController.offset + direction * distance)
+        .clamp(0.0, position.maxScrollExtent)
+        .toDouble();
     _scrollController.animateTo(
       target,
       duration: const Duration(milliseconds: 280),
@@ -63,9 +62,9 @@ class _EmbyPcHorizontalCarouselState
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    final labelSuffix =
-        widget.navigationLabel.isEmpty ? '' : widget.navigationLabel;
+    final labelSuffix = widget.navigationLabel.isEmpty
+        ? ''
+        : widget.navigationLabel;
     return MouseRegion(
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
@@ -82,23 +81,21 @@ class _EmbyPcHorizontalCarouselState
                 scrollDirection: Axis.horizontal,
                 itemCount: widget.itemCount,
                 separatorBuilder: (_, _) => SizedBox(width: widget.spacing),
-                itemBuilder:
-                    (context, index) => SizedBox(
-                      width: widget.itemWidth,
-                      child: widget.itemBuilder(context, index),
-                    ),
+                itemBuilder: (context, index) => SizedBox(
+                  width: widget.itemWidth,
+                  child: widget.itemBuilder(context, index),
+                ),
               ),
             ),
             if (widget.showNavigation && widget.itemCount > 1) ...[
               Align(
                 alignment: Alignment.centerLeft,
                 child: Padding(
-                  padding: const EdgeInsets.only(left: 10),
+                  padding: const EdgeInsets.only(left: 8),
                   child: _EmbyPcCarouselNavigationButton(
                     visible: _hovering,
                     icon: Icons.chevron_left_rounded,
                     tooltip: '向左滚动$labelSuffix',
-                    colors: colors,
                     onPressed: () => _scroll(-1),
                   ),
                 ),
@@ -106,12 +103,11 @@ class _EmbyPcHorizontalCarouselState
               Align(
                 alignment: Alignment.centerRight,
                 child: Padding(
-                  padding: const EdgeInsets.only(right: 10),
+                  padding: const EdgeInsets.only(right: 8),
                   child: _EmbyPcCarouselNavigationButton(
                     visible: _hovering,
                     icon: Icons.chevron_right_rounded,
                     tooltip: '向右滚动$labelSuffix',
-                    colors: colors,
                     onPressed: () => _scroll(1),
                   ),
                 ),
@@ -129,14 +125,12 @@ class _EmbyPcCarouselNavigationButton extends StatelessWidget {
   final bool visible;
   final IconData icon;
   final String tooltip;
-  final ColorScheme colors;
   final VoidCallback onPressed;
 
   const _EmbyPcCarouselNavigationButton({
     required this.visible,
     required this.icon,
     required this.tooltip,
-    required this.colors,
     required this.onPressed,
   });
 
@@ -146,14 +140,24 @@ class _EmbyPcCarouselNavigationButton extends StatelessWidget {
     child: AnimatedOpacity(
       opacity: visible ? 1 : 0,
       duration: const Duration(milliseconds: 180),
-      child: Material(
-        color: colors.surface.withValues(alpha: 0.96),
-        elevation: 6,
-        shape: CircleBorder(side: BorderSide(color: colors.outlineVariant)),
-        child: IconButton(
-          onPressed: onPressed,
-          tooltip: tooltip,
-          icon: Icon(icon),
+      child: Tooltip(
+        message: tooltip,
+        child: Material(
+          // 半透明黑底玻璃圆钮，悬浮在封面上时不会破坏画面。
+          color: Colors.black.withValues(alpha: 0.55),
+          elevation: 8,
+          shadowColor: Colors.black.withValues(alpha: 0.4),
+          shape: CircleBorder(
+            side: BorderSide(color: Colors.white.withValues(alpha: 0.22)),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onPressed,
+            child: SizedBox.square(
+              dimension: 40,
+              child: Icon(icon, size: 24, color: Colors.white),
+            ),
+          ),
         ),
       ),
     ),
@@ -176,7 +180,8 @@ class _EmbyPcHorizontalDragScrollBehavior extends MaterialScrollBehavior {
 // （例如需要跨视图记住滚动位置）传入 controller 即可复用同一份滚动状态。
 class EmbyPcScrollToTop extends StatefulWidget {
   final ScrollController? controller;
-  final Widget Function(BuildContext context, ScrollController controller) builder;
+  final Widget Function(BuildContext context, ScrollController controller)
+  builder;
   // 默认滚动约一屏多一点才出现，避免轻微滚动就弹出按钮。
   final double threshold;
   final EdgeInsetsGeometry padding;
@@ -247,7 +252,8 @@ class _EmbyPcScrollToTopState extends State<EmbyPcScrollToTop> {
 
   void _scrollToTop() {
     if (!_controller.hasClients) return;
-    final reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    final reduceMotion =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
     final target = _controller.position.minScrollExtent;
     if (reduceMotion) {
       _controller.jumpTo(target);
@@ -262,10 +268,12 @@ class _EmbyPcScrollToTopState extends State<EmbyPcScrollToTop> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    final reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
-    final duration =
-        reduceMotion ? Duration.zero : const Duration(milliseconds: 180);
+    final skin = EmbyPcSkin.of(context);
+    final reduceMotion =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    final duration = reduceMotion
+        ? Duration.zero
+        : const Duration(milliseconds: 180);
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -285,15 +293,23 @@ class _EmbyPcScrollToTopState extends State<EmbyPcScrollToTop> {
                     opacity: _visible ? 1 : 0,
                     duration: duration,
                     child: Material(
-                      color: colors.surface.withValues(alpha: 0.96),
-                      elevation: 6,
+                      color: skin.surface.withValues(alpha: 0.9),
+                      elevation: 10,
+                      shadowColor: Colors.black.withValues(alpha: 0.4),
                       shape: CircleBorder(
-                        side: BorderSide(color: colors.outlineVariant),
+                        side: BorderSide(color: skin.tint(0.35)),
                       ),
-                      child: IconButton(
-                        onPressed: _scrollToTop,
-                        tooltip: widget.tooltip,
-                        icon: const Icon(Icons.vertical_align_top_rounded),
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
+                        onTap: _scrollToTop,
+                        child: SizedBox.square(
+                          dimension: 44,
+                          child: Icon(
+                            Icons.vertical_align_top_rounded,
+                            size: 21,
+                            color: skin.accent,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -332,6 +348,8 @@ class EmbyPcMediaTile extends StatefulWidget {
   final String secondaryLabel;
   // 人物列表出生日期缺失时不应回退显示通用类型文本。
   final bool hideDefaultMetadata;
+  // 横向推荐位把标题压进图片底部，观感更接近视频平台的海报流。
+  final bool overlayCaption;
 
   const EmbyPcMediaTile({
     super.key,
@@ -345,6 +363,7 @@ class EmbyPcMediaTile extends StatefulWidget {
     this.actionBusy = false,
     this.secondaryLabel = '',
     this.hideDefaultMetadata = false,
+    this.overlayCaption = false,
   });
 
   @override
@@ -356,77 +375,217 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
 
   @override
   Widget build(BuildContext context) {
+    final skin = EmbyPcSkin.of(context);
     final backdrop = widget.imageStyle == 'backdrop';
-    final hasImage =
-        backdrop ? widget.item.hasBackdropImage : widget.item.hasPrimaryImage;
+    final hasImage = backdrop
+        ? widget.item.hasBackdropImage
+        : widget.item.hasPrimaryImage;
     // 带上条目图片标签，服务端换图后 URL 变化，客户端缓存才会失效。
     final imageUrl = EmbyPcService.instance.imageUrlForItem(
       widget.item,
       type: backdrop ? 'Backdrop' : 'Primary',
       maxWidth: backdrop ? 720 : 420,
     );
-    final progress =
-        widget.item.runTimeTicks <= 0
-            ? 0.0
-            : (widget.item.playbackPositionTicks / widget.item.runTimeTicks)
-                .clamp(0.0, 1.0)
-                .toDouble();
+    final progress = widget.item.runTimeTicks <= 0
+        ? 0.0
+        : (widget.item.playbackPositionTicks / widget.item.runTimeTicks)
+              .clamp(0.0, 1.0)
+              .toDouble();
     // 网格里每张卡片独立成层，滚动时避免整屏重新绘制。
     return RepaintBoundary(
       child: Semantics(
         button: true,
         label: '打开 ${widget.item.name}',
         child: MouseRegion(
-        onEnter: (_) => setState(() => _hovered = true),
-        onExit: (_) => setState(() => _hovered = false),
-        cursor: SystemMouseCursors.click,
-        child: Material(
-          color: Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: widget.onOpen,
-            hoverColor: Colors.transparent,
-            child:
-                backdrop
-                    ? _buildBackdropCard(
-                      context,
-                      imageUrl: hasImage ? imageUrl : '',
-                      progress: progress,
-                    )
-                    : _buildPosterCard(
-                      context,
-                      imageUrl: hasImage ? imageUrl : '',
-                      progress: progress,
-                    ),
+          onEnter: (_) => setState(() => _hovered = true),
+          onExit: (_) => setState(() => _hovered = false),
+          cursor: SystemMouseCursors.click,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: _hovered
+                      ? skin.tint(skin.dark ? 0.24 : 0.16)
+                      : Colors.black.withValues(alpha: skin.dark ? 0.30 : 0.07),
+                  blurRadius: _hovered ? 26 : 12,
+                  offset: Offset(0, _hovered ? 12 : 5),
+                ),
+              ],
+            ),
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(14),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: widget.onOpen,
+                hoverColor: Colors.transparent,
+                child: widget.overlayCaption
+                    ? _buildOverlayCard(
+                        context,
+                        imageUrl: hasImage ? imageUrl : '',
+                        progress: progress,
+                      )
+                    : _buildStandardCard(
+                        context,
+                        imageUrl: hasImage ? imageUrl : '',
+                        progress: progress,
+                      ),
+              ),
+            ),
           ),
-        ),
         ),
       ),
     );
   }
 
-  Widget _buildBackdropCard(
+  // 图片内嵌标题的横向卡片：整块是封面，底部用渐变压住文字。
+  Widget _buildOverlayCard(
     BuildContext context, {
     required String imageUrl,
     required double progress,
   }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    final skin = EmbyPcSkin.of(context);
+    return Stack(
+      fit: StackFit.expand,
       children: [
-        Expanded(
-          child: _buildImageFrame(
-            context,
-            imageUrl: imageUrl,
-            progress: progress,
+        EmbyPcNetworkImage(url: imageUrl),
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          color: _hovered
+              ? Colors.black.withValues(alpha: 0.20)
+              : Colors.transparent,
+        ),
+        const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0x00000000), Color(0x33000000), Color(0xE6000000)],
+              stops: [0.34, 0.60, 1],
+            ),
           ),
         ),
-        _buildTileCaption(context),
+        if (_qualityLabel(widget.item).isNotEmpty)
+          Positioned(
+            top: 9,
+            right: 9,
+            child: _MediaBadge(label: _qualityLabel(widget.item)),
+          ),
+        if (widget.item.played)
+          Positioned(top: 9, left: 9, child: const _MediaBadge(label: '已看')),
+        Positioned(
+          left: 14,
+          // 右下角常驻收藏/更多按钮，文字区为它让出固定宽度。
+          right: 92,
+          bottom: progress > 0 ? 13 : 12,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                widget.item.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontFamily: 'Microsoft YaHei UI',
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                  shadows: [Shadow(color: Color(0x99000000), blurRadius: 8)],
+                ),
+              ),
+              const SizedBox(height: 3),
+              _buildOverlayMeta(context),
+            ],
+          ),
+        ),
+        if (widget.onPlay != null)
+          Center(
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 200),
+              opacity: _hovered ? 1 : 0,
+              child: IgnorePointer(
+                ignoring: !_hovered,
+                child: _CircleAction(
+                  icon: Icons.play_arrow_rounded,
+                  size: 52,
+                  iconSize: 28,
+                  tooltip: '播放',
+                  onPressed: widget.onPlay!,
+                  accent: skin.accent,
+                ),
+              ),
+            ),
+          ),
+        if (widget.onFavorite != null || widget.onAction != null)
+          Positioned(
+            right: 12,
+            bottom: 12,
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 200),
+              opacity: _hovered ? 1 : 0,
+              child: IgnorePointer(
+                ignoring: !_hovered,
+                child: _buildCardActionRow(context, compact: true),
+              ),
+            ),
+          ),
+        if (progress > 0)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: _PlaybackProgress(value: progress, color: skin.accent),
+          ),
       ],
     );
   }
 
-  Widget _buildPosterCard(
+  Widget _buildOverlayMeta(BuildContext context) {
+    final secondary = widget.secondaryLabel;
+    final plain = <String>[
+      if (widget.item.productionYear != null) '${widget.item.productionYear}',
+      if (widget.item.runtimeLabel.isNotEmpty) widget.item.runtimeLabel,
+    ];
+    final text = secondary.isNotEmpty
+        ? secondary
+        : (plain.isEmpty ? widget.item.type : plain.join(' · '));
+    if (text.isEmpty) return const SizedBox.shrink();
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (widget.item.communityRating != null) ...[
+          const Icon(Icons.star_rounded, size: 13, color: Color(0xFFF5B942)),
+          const SizedBox(width: 2),
+          Text(
+            widget.item.communityRating!.toStringAsFixed(1),
+            style: const TextStyle(
+              color: Color(0xFFF5C563),
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(width: 8),
+        ],
+        Flexible(
+          child: Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.78),
+              fontSize: 11.5,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStandardCard(
     BuildContext context, {
     required String imageUrl,
     required double progress,
@@ -452,65 +611,53 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
     required String imageUrl,
     required double progress,
   }) {
-    final colors = Theme.of(context).colorScheme;
+    final skin = EmbyPcSkin.of(context);
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
       curve: Curves.easeOut,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(
-          color:
-              _hovered
-                  ? colors.primary.withValues(alpha: 0.72)
-                  : colors.outlineVariant.withValues(alpha: 0.78),
-        ),
-        boxShadow:
-            _hovered
-                ? [
-                  BoxShadow(
-                    color: colors.shadow.withValues(alpha: 0.15),
-                    blurRadius: 16,
-                    offset: const Offset(0, 6),
-                  ),
-                ]
-                : const [],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _hovered ? skin.tint(0.6) : skin.hairline),
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(5),
+        borderRadius: BorderRadius.circular(11),
         child: Stack(
           fit: StackFit.expand,
           children: [
             EmbyPcNetworkImage(url: imageUrl),
             AnimatedContainer(
               duration: const Duration(milliseconds: 180),
-              color:
-                  _hovered
-                      ? Colors.black.withValues(alpha: 0.28)
-                      : Colors.transparent,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: _hovered ? 0.12 : 0),
+                    Colors.black.withValues(alpha: _hovered ? 0.34 : 0.10),
+                  ],
+                ),
+              ),
             ),
             if (_qualityLabel(widget.item).isNotEmpty)
               Positioned(
-                top: 8,
-                right: 8,
+                top: 9,
+                right: 9,
                 child: _MediaBadge(label: _qualityLabel(widget.item)),
               ),
             // 已看状态常驻左上角，和右上角的分辨率角标互不遮挡。
             if (widget.item.played)
               Positioned(
-                top: 8,
-                left: 8,
-                child: _MediaBadge(label: '已看'),
+                top: 9,
+                left: 9,
+                child: const _MediaBadge(label: '已看'),
               ),
-            _buildCardActions(bottom: progress > 0 ? 8 : 6),
+            _buildCardActions(bottom: progress > 0 ? 10 : 8),
             if (progress > 0)
               Positioned(
                 left: 0,
                 right: 0,
                 bottom: 0,
-                child: _PlaybackProgress(
-                  value: progress,
-                  color: colors.primary,
-                ),
+                child: _PlaybackProgress(value: progress, color: skin.accent),
               ),
           ],
         ),
@@ -519,17 +666,20 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
   }
 
   Widget _buildTileCaption(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
+    final skin = EmbyPcSkin.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(2, 9, 2, 1),
+      padding: const EdgeInsets.fromLTRB(2, 10, 2, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           AnimatedDefaultTextStyle(
             duration: const Duration(milliseconds: 180),
-            style: (Theme.of(context).textTheme.titleMedium ??
-                    const TextStyle(fontSize: 14, fontWeight: FontWeight.w600))
-                .copyWith(color: _hovered ? colors.primary : colors.onSurface),
+            style: TextStyle(
+              fontFamily: 'Microsoft YaHei UI',
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: _hovered ? skin.accent : skin.scheme.onSurface,
+            ),
             child: Text(
               widget.item.name,
               maxLines: 1,
@@ -544,10 +694,7 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
               widget.secondaryLabel,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: colors.onSurfaceVariant,
-                fontSize: 12,
-              ),
+              style: TextStyle(color: skin.textSecondary, fontSize: 11.5),
             ),
         ],
       ),
@@ -563,17 +710,19 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
             opacity: _hovered ? 1 : 0,
             child: IgnorePointer(
               ignoring: !_hovered,
-              child: IconButton.filled(
+              child: _CircleAction(
+                icon: Icons.play_arrow_rounded,
+                size: 50,
+                iconSize: 27,
                 tooltip: '播放',
                 onPressed: widget.onPlay,
-                icon: const Icon(Icons.play_arrow_rounded),
               ),
             ),
           ),
         ),
-      if (widget.onFavorite != null)
+      if (widget.onFavorite != null || widget.onAction != null)
         Positioned(
-          right: widget.onAction == null ? 8 : 52,
+          right: 10,
           bottom: bottom,
           child: AnimatedOpacity(
             duration: const Duration(milliseconds: 200),
@@ -581,127 +730,109 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
             opacity: _hovered ? 1 : 0,
             child: IgnorePointer(
               ignoring: !_hovered,
-              child: IconButton.filledTonal(
-                tooltip: widget.item.isFavorite ? '取消收藏' : '收藏',
-                onPressed: widget.favoriteBusy ? null : widget.onFavorite,
-                style: IconButton.styleFrom(
-                  backgroundColor: Colors.black.withValues(alpha: 0.62),
-                  foregroundColor:
-                      widget.item.isFavorite
-                          ? const Color(0xFFE84C5B)
-                          : Colors.white,
-                ),
-                icon:
-                    widget.favoriteBusy
-                        ? const SizedBox.square(
-                          dimension: 17,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                        : Icon(
-                          widget.item.isFavorite
-                              ? Icons.favorite_rounded
-                              : Icons.favorite_border_rounded,
-                          size: 19,
-                        ),
-              ),
-            ),
-          ),
-        ),
-      if (widget.onAction != null)
-        Positioned(
-          right: 8,
-          bottom: bottom,
-          child: IgnorePointer(
-            ignoring: !_hovered || widget.actionBusy,
-            child: AnimatedOpacity(
-              opacity: _hovered ? 1 : 0,
-              duration: const Duration(milliseconds: 180),
-              child: PopupMenuButton<EmbyPcMediaAction>(
-                tooltip: '更多',
-                padding: EdgeInsets.zero,
-                enabled: !widget.actionBusy,
-                onSelected: widget.onAction,
-                itemBuilder: (context) => [
-                  // 已看状态就地切换，成功后列表角标与进度条同步更新。
-                  PopupMenuItem(
-                    value: EmbyPcMediaAction.togglePlayed,
-                    child: Row(
-                      children: [
-                        Icon(
-                          widget.item.played
-                              ? Icons.visibility_off_outlined
-                              : Icons.visibility_outlined,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 12),
-                        Text(widget.item.played ? '标记为未看' : '标记为已看'),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: EmbyPcMediaAction.editMetadata,
-                    child: Row(
-                      children: [
-                        Icon(Icons.edit_outlined, size: 20),
-                        SizedBox(width: 12),
-                        Text('编辑元数据'),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: EmbyPcMediaAction.editImages,
-                    child: Row(
-                      children: [
-                        Icon(Icons.image_outlined, size: 20),
-                        SizedBox(width: 12),
-                        Text('编辑图像'),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: EmbyPcMediaAction.refreshMetadata,
-                    child: Row(
-                      children: [
-                        Icon(Icons.refresh_outlined, size: 20),
-                        SizedBox(width: 12),
-                        Text('刷新元数据'),
-                      ],
-                    ),
-                  ),
-                ],
-                child: SizedBox.square(
-                  dimension: 38,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.62),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Center(
-                      child: widget.actionBusy
-                          ? const SizedBox.square(
-                              dimension: 17,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(
-                              Icons.more_horiz,
-                              size: 23,
-                              color: Colors.white,
-                            ),
-                    ),
-                  ),
-                ),
-              ),
+              child: _buildCardActionRow(context),
             ),
           ),
         ),
     ],
   );
+
+  Widget _buildCardActionRow(BuildContext context, {bool compact = false}) {
+    final size = compact ? 34.0 : 36.0;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (widget.onFavorite != null)
+          _CircleAction(
+            icon: widget.item.isFavorite
+                ? Icons.favorite_rounded
+                : Icons.favorite_border_rounded,
+            size: size,
+            iconSize: 18,
+            tooltip: widget.item.isFavorite ? '取消收藏' : '收藏',
+            // 收藏态用暖红色，和视频平台的“追剧”标记一致。
+            accent: widget.item.isFavorite
+                ? const Color(0xFFFF5C7A)
+                : Colors.white,
+            busy: widget.favoriteBusy,
+            onPressed: widget.favoriteBusy ? null : widget.onFavorite,
+          ),
+        if (widget.onFavorite != null && widget.onAction != null)
+          const SizedBox(width: 8),
+        if (widget.onAction != null)
+          PopupMenuButton<EmbyPcMediaAction>(
+            tooltip: '更多',
+            padding: EdgeInsets.zero,
+            enabled: !widget.actionBusy,
+            onSelected: widget.onAction,
+            itemBuilder: (context) => [
+              // 已看状态就地切换，成功后列表角标与进度条同步更新。
+              PopupMenuItem(
+                value: EmbyPcMediaAction.togglePlayed,
+                child: Row(
+                  children: [
+                    Icon(
+                      widget.item.played
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 12),
+                    Text(widget.item.played ? '标记为未看' : '标记为已看'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: EmbyPcMediaAction.editMetadata,
+                child: Row(
+                  children: [
+                    Icon(Icons.edit_outlined, size: 20),
+                    SizedBox(width: 12),
+                    Text('编辑元数据'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: EmbyPcMediaAction.editImages,
+                child: Row(
+                  children: [
+                    Icon(Icons.image_outlined, size: 20),
+                    SizedBox(width: 12),
+                    Text('编辑图像'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: EmbyPcMediaAction.refreshMetadata,
+                child: Row(
+                  children: [
+                    Icon(Icons.refresh_outlined, size: 20),
+                    SizedBox(width: 12),
+                    Text('刷新元数据'),
+                  ],
+                ),
+              ),
+            ],
+            child: _GlassCircle(
+              size: size,
+              child: widget.actionBusy
+                  ? const SizedBox.square(
+                      dimension: 15,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(
+                      Icons.more_horiz_rounded,
+                      size: 21,
+                      color: Colors.white,
+                    ),
+            ),
+          ),
+      ],
+    );
+  }
 
   String _qualityLabel(EmbyPcItem item) {
     final width = item.width ?? 0;
@@ -721,10 +852,9 @@ class _MediaMetadata extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final muted =
-        onDark
-            ? Colors.white.withValues(alpha: 0.74)
-            : Theme.of(context).colorScheme.onSurfaceVariant;
+    final muted = onDark
+        ? Colors.white.withValues(alpha: 0.74)
+        : Theme.of(context).colorScheme.onSurfaceVariant;
     final plain = <String>[
       if (item.productionYear != null) '${item.productionYear}',
       if (item.runtimeLabel.isNotEmpty) item.runtimeLabel,
@@ -809,15 +939,12 @@ class EmbyPcNetworkImage extends StatelessWidget {
           memCacheWidth: memWidth,
           fit: fit,
           fadeInDuration: const Duration(milliseconds: 160),
-          placeholder:
-              (_, _) => _ImagePlaceholder(
-                color: colors.surfaceContainerHigh,
-                loading: true,
-              ),
-          errorWidget:
-              (_, _, _) => _ImagePlaceholder(
-                color: colors.surfaceContainerHigh,
-              ),
+          placeholder: (_, _) => _ImagePlaceholder(
+            color: colors.surfaceContainerHigh,
+            loading: true,
+          ),
+          errorWidget: (_, _, _) =>
+              _ImagePlaceholder(color: colors.surfaceContainerHigh),
         );
       },
     );
@@ -885,15 +1012,13 @@ class _ImageLoadingSkeletonState extends State<_ImageLoadingSkeleton>
     );
     return AnimatedBuilder(
       animation: _controller,
-      builder:
-          (context, child) => ColoredBox(
-            color:
-                Color.lerp(
-                  widget.color,
-                  highlightColor,
-                  Curves.easeInOut.transform(_controller.value),
-                )!,
-          ),
+      builder: (context, child) => ColoredBox(
+        color: Color.lerp(
+          widget.color,
+          highlightColor,
+          Curves.easeInOut.transform(_controller.value),
+        )!,
+      ),
     );
   }
 }
@@ -906,17 +1031,89 @@ class _MediaBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) => DecoratedBox(
     decoration: BoxDecoration(
-      color: Colors.black.withOpacity(0.68),
-      borderRadius: BorderRadius.circular(4),
+      color: Colors.black.withValues(alpha: 0.62),
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
     ),
     child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       child: Text(
         label,
-        style: const TextStyle(color: Colors.white, fontSize: 11),
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 10.5,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.3,
+          height: 1.1,
+        ),
       ),
     ),
   );
+}
+
+// 封面上的玻璃圆钮：半透明黑底 + 极细白边，深色浅色封面都能压住。
+class _GlassCircle extends StatelessWidget {
+  final double size;
+  final Widget child;
+
+  const _GlassCircle({required this.size, required this.child});
+
+  @override
+  Widget build(BuildContext context) => SizedBox.square(
+    dimension: size,
+    child: DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.55),
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
+      ),
+      child: Center(child: child),
+    ),
+  );
+}
+
+class _CircleAction extends StatelessWidget {
+  final IconData icon;
+  final double size;
+  final double iconSize;
+  final String tooltip;
+  final VoidCallback? onPressed;
+  final Color? accent;
+  final bool busy;
+
+  const _CircleAction({
+    required this.icon,
+    required this.size,
+    required this.iconSize,
+    required this.tooltip,
+    required this.onPressed,
+    this.accent,
+    this.busy = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final content = busy
+        ? SizedBox.square(
+            dimension: iconSize * 0.78,
+            child: const CircularProgressIndicator(
+              strokeWidth: 2,
+              color: Colors.white,
+            ),
+          )
+        : Icon(icon, size: iconSize, color: accent ?? Colors.white);
+    return Tooltip(
+      message: tooltip,
+      child: GestureDetector(
+        onTap: onPressed,
+        behavior: HitTestBehavior.opaque,
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: _GlassCircle(size: size, child: content),
+        ),
+      ),
+    );
+  }
 }
 
 // 加载占位符：在分页加载时显示骨架屏，提供更流畅的视觉反馈
@@ -934,16 +1131,14 @@ class EmbyPcLoadingPlaceholder extends StatelessWidget {
         Expanded(
           child: Container(
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(12),
               border: Border.all(
                 color: colors.outlineVariant.withValues(alpha: 0.5),
               ),
             ),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(5),
-              child: _ImageLoadingSkeleton(
-                color: colors.surfaceContainerHigh,
-              ),
+              borderRadius: BorderRadius.circular(11),
+              child: _ImageLoadingSkeleton(color: colors.surfaceContainerHigh),
             ),
           ),
         ),
@@ -976,4 +1171,3 @@ class EmbyPcLoadingPlaceholder extends StatelessWidget {
     );
   }
 }
-

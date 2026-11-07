@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../widgets/windows_title_bar.dart';
 import 'emby_pc_models.dart';
 import 'emby_pc_person_page.dart';
 import 'emby_pc_playback.dart';
@@ -20,10 +22,12 @@ part 'emby_pc_artwork_preview.dart';
 Route<T> embyPcFadeRoute<T>(BuildContext context, WidgetBuilder builder) {
   final reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
   return PageRouteBuilder<T>(
-    transitionDuration:
-        reduceMotion ? Duration.zero : const Duration(milliseconds: 180),
-    reverseTransitionDuration:
-        reduceMotion ? Duration.zero : const Duration(milliseconds: 140),
+    transitionDuration: reduceMotion
+        ? Duration.zero
+        : const Duration(milliseconds: 180),
+    reverseTransitionDuration: reduceMotion
+        ? Duration.zero
+        : const Duration(milliseconds: 140),
     pageBuilder: (context, animation, secondaryAnimation) => builder(context),
     transitionsBuilder: (context, animation, secondaryAnimation, child) {
       return FadeTransition(
@@ -53,11 +57,28 @@ class EmbyPcImmersiveTopBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final navigator = Navigator.of(context);
+    // 工作台内嵌窗口按钮后，详情页也要自带按钮，避免全屏页面无法最小化/关闭。
+    final windowsChrome =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+    final titleWidget = Semantics(
+      header: true,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Text(
+          title.isEmpty ? '详情' : title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(
+            context,
+          ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
+        ),
+      ),
+    );
     return Material(
       color: colors.surface.withValues(alpha: 0.78),
       child: Container(
         height: 68,
-        padding: const EdgeInsets.symmetric(horizontal: 14),
+        padding: EdgeInsets.only(left: 14, right: windowsChrome ? 0 : 14),
         decoration: BoxDecoration(
           border: Border(
             bottom: BorderSide(
@@ -74,17 +95,9 @@ class EmbyPcImmersiveTopBar extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: Semantics(
-                header: true,
-                child: Text(
-                  title.isEmpty ? '详情' : title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
-                ),
-              ),
+              child: windowsChrome
+                  ? WindowsDragArea(child: titleWidget)
+                  : titleWidget,
             ),
             if (loading) ...[
               const SizedBox(width: 16),
@@ -97,6 +110,7 @@ class EmbyPcImmersiveTopBar extends StatelessWidget {
               ),
               const SizedBox(width: 10),
             ],
+            if (windowsChrome) const WindowsCaptionButtons(height: 68),
           ],
         ),
       ),
@@ -251,10 +265,9 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
       setState(() {
         _detail = detail.copyWith(
           mediaSources: sourceList,
-          runTimeTicks:
-              selected.runTimeTicks > 0
-                  ? selected.runTimeTicks
-                  : detail.runTimeTicks,
+          runTimeTicks: selected.runTimeTicks > 0
+              ? selected.runTimeTicks
+              : detail.runTimeTicks,
           width: video?.width ?? detail.width,
           height: video?.height ?? detail.height,
         );
@@ -307,8 +320,9 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
     final colors = Theme.of(context).colorScheme;
     final reduceMotion =
         MediaQuery.maybeOf(context)?.disableAnimations ?? false;
-    final contentDuration =
-        reduceMotion ? Duration.zero : const Duration(milliseconds: 220);
+    final contentDuration = reduceMotion
+        ? Duration.zero
+        : const Duration(milliseconds: 220);
 
     final Widget pageContent;
     if (_loading) {
@@ -329,48 +343,45 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
     } else {
       pageContent = EmbyPcScrollToTop(
         key: ValueKey('detail-${detail.id}'),
-        builder:
-            (context, scrollController) => CustomScrollView(
-              controller: scrollController,
-              slivers: [
-                SliverToBoxAdapter(
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 1180),
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: _DetailContent(
-                          detail: detail,
-                          similar: _similar,
-                          parts: _parts,
-                          favoriteBusy: _favoriteBusy,
-                          actionBusy: _actionBusy,
-                          onFavorite: _toggleFavorite,
-                          onAction: _handleAction,
-                          onPlay: _play,
-                          onSelectMediaSource: _selectMediaSource,
-                          onOpenSimilar:
-                              (item) => _pushAndRefresh(
-                                EmbyPcDetailPage(
-                                  item: item,
-                                  onMediaAction: widget.onMediaAction,
-                                ),
-                              ),
-                          onOpenPerson:
-                              (person) => _pushAndRefresh(
-                                EmbyPcPersonPage(
-                                  personId: person.id,
-                                  personName: person.name,
-                                  onMediaAction: widget.onMediaAction,
-                                ),
-                              ),
+        builder: (context, scrollController) => CustomScrollView(
+          controller: scrollController,
+          slivers: [
+            SliverToBoxAdapter(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1180),
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: _DetailContent(
+                      detail: detail,
+                      similar: _similar,
+                      parts: _parts,
+                      favoriteBusy: _favoriteBusy,
+                      actionBusy: _actionBusy,
+                      onFavorite: _toggleFavorite,
+                      onAction: _handleAction,
+                      onPlay: _play,
+                      onSelectMediaSource: _selectMediaSource,
+                      onOpenSimilar: (item) => _pushAndRefresh(
+                        EmbyPcDetailPage(
+                          item: item,
+                          onMediaAction: widget.onMediaAction,
+                        ),
+                      ),
+                      onOpenPerson: (person) => _pushAndRefresh(
+                        EmbyPcPersonPage(
+                          personId: person.id,
+                          personName: person.name,
+                          onMediaAction: widget.onMediaAction,
                         ),
                       ),
                     ),
                   ),
                 ),
-              ],
+              ),
             ),
+          ],
+        ),
       );
     }
 
@@ -382,10 +393,9 @@ class _EmbyPcDetailPageState extends State<EmbyPcDetailPage> {
           // 列表条目已有图片信息时，路由首帧就开始展示背景；详情返回后仅渐变替换图片。
           _DetailBackdrop(
             item: displayItem,
-            duration:
-                reduceMotion
-                    ? Duration.zero
-                    : const Duration(milliseconds: 260),
+            duration: reduceMotion
+                ? Duration.zero
+                : const Duration(milliseconds: 260),
           ),
           // 使用主题色渐变压暗图片，保证浅色和深色主题下的正文都清晰可读。
           DecoratedBox(

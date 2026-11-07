@@ -2,156 +2,218 @@ part of 'emby_pc_page.dart';
 
 // 查询工具栏集中承载筛选、排序和布局切换控件。
 extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
+  // 工作台唯一的顶部工具条：历史导航 + 全局搜索 + 账号 + 窗口按钮。
   Widget _buildWorkspaceHeader(BuildContext context, {required bool compact}) {
-    final colors = Theme.of(context).colorScheme;
-    // 仅移动端窄屏使用分层头部，Windows 等桌面平台继续保持原有排列。
-    final stackedMobileHeader = _usesMobileWorkspaceLayout(
-      MediaQuery.sizeOf(context).width,
-    );
-    final pageTitle = Text(
-      _EmbyPcWorkspaceNavigation(this)._pageTitle,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: Theme.of(
-        context,
-      ).textTheme.headlineSmall?.copyWith(
-        fontSize: 20,
-        fontWeight: FontWeight.w600,
-      ),
-    );
-    // 分片影片是独立的管理视图，条目数与搜索都由视图自己维护，头部不再展示列表状态。
-    final partGroupsView = _c.view == 'part-groups';
-    // 加载进度紧跟页面标题，并微调字面位置以与大字号标题视觉居中。
-    final loadStatus =
-        partGroupsView
-            ? const SizedBox.shrink()
-            : Transform.translate(
-                offset: const Offset(0, 2),
-                child: Text(
-                  _c.loading && _c.items.isEmpty
-                      ? '加载中'
-                      // 随机模式只展示当前这批样本，总数仍是筛选后的全量。
-                      : _c.randomMode
-                      ? '随机 ${_c.items.length} 条 / 共 ${_c.total} 条'
-                      : '已加载 ${_c.items.length} 条 /  ${_c.total} 条',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: colors.onSurfaceVariant,
-                    fontSize: 12,
-                  ),
-                ),
-              );
-    if (stackedMobileHeader && _c.view != 'home') {
-      return Material(
-        color: colors.surfaceContainerLowest,
-        child: Container(
-          // 分片影片没有头部搜索行，高度与桌面头部保持一致即可。
-          constraints: BoxConstraints(minHeight: partGroupsView ? 76 : 118),
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-          child: Column(
-            children: [
-              Row(
-                children: [
+    final skin = EmbyPcSkin.of(context);
+    final mobile = _usesMobileWorkspaceLayout(MediaQuery.sizeOf(context).width);
+    final showWindowButtons = _usesWindowsChrome;
+    final content = Row(
+      children: [
+        Expanded(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              compact ? 8 : 14,
+              10,
+              showWindowButtons ? 8 : (compact ? 10 : 16),
+              10,
+            ),
+            child: Row(
+              children: [
+                if (compact) ...[
                   _buildCompactLibraryMenu(),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Row(
-                      children: [
-                        Flexible(child: pageTitle),
-                        const SizedBox(width: 10),
-                        Flexible(child: loadStatus),
-                      ],
+                  const SizedBox(width: 2),
+                ],
+                if (!mobile) ...[
+                  _buildHistoryButton(
+                    icon: Icons.chevron_left_rounded,
+                    tooltip: '后退',
+                    onPressed: _canGoBack ? _goBackView : null,
+                  ),
+                  _buildHistoryButton(
+                    icon: Icons.chevron_right_rounded,
+                    tooltip: '前进',
+                    onPressed: _canGoForward ? _goForwardView : null,
+                  ),
+                  const SizedBox(width: 10),
+                ],
+                // 搜索框吸收剩余空间，宽屏限制最大宽度，避免拉成一条长条。
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 420),
+                      child: _EmbyPcWorkspaceNavigation(
+                        this,
+                      )._buildSearchField(double.infinity),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  _EmbyPcWorkspaceNavigation(
-                    this,
-                  )._buildAccountMenu(context),
-                ],
-              ),
-              // 搜索框独占第二行，避免与标题、加载数量和账号入口互相挤压。
-              if (!partGroupsView) ...[
-                const SizedBox(height: 8),
+                ),
+                const SizedBox(width: 10),
+                _buildHeaderAction(
+                  icon: Icons.refresh_rounded,
+                  tooltip: _c.view == 'home' ? '刷新首页' : '刷新列表',
+                  onPressed: _c.view == 'part-groups'
+                      ? null
+                      : () => unawaited(_refreshCurrentView()),
+                ),
+                // 移动端设置入口在抽屉里，页头省下空间给搜索框。
+                if (!mobile)
+                  _buildHeaderAction(
+                    icon: Icons.settings_rounded,
+                    tooltip: '设置',
+                    onPressed: () => unawaited(_openSettings()),
+                  ),
+                const SizedBox(width: 8),
                 _EmbyPcWorkspaceNavigation(
                   this,
-                )._buildSearchField(double.infinity),
+                )._buildAccountMenu(context, header: true),
               ],
-            ],
+            ),
           ),
         ),
-      );
-    }
-    return Material(
-      color: colors.surfaceContainerLowest,
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 76),
-        padding: const EdgeInsets.fromLTRB(26, 16, 26, 8),
-        child: Row(
-          children: [
-            if (compact) ...[
-              _buildCompactLibraryMenu(),
-              const SizedBox(width: 8),
-            ],
-            if (_c.view == 'home') ...[
-              Expanded(child: pageTitle),
-              const SizedBox(width: 8),
-              _buildGlobalSearchButton(context, compact: compact),
-            ] else ...[
-              Expanded(
-                child: Row(
-                  children: [
-                    Flexible(child: pageTitle),
-                    const SizedBox(width: 10),
-                    Flexible(child: loadStatus),
-                  ],
+        if (showWindowButtons) ...[
+          // 窗口按钮占满整个页头高度，悬停背景才不会被上下留白切断。
+          Container(width: 1, height: 24, color: skin.hairline),
+          const WindowsCaptionButtons(height: 62),
+        ],
+      ],
+    );
+
+    return Container(
+      height: 62,
+      decoration: BoxDecoration(
+        color: skin.sidebar.withValues(alpha: skin.dark ? 0.94 : 0.96),
+        border: Border(bottom: BorderSide(color: skin.hairline)),
+      ),
+      child: showWindowButtons
+          // 空白处可拖动窗口；按钮和输入框位于上层，优先响应鼠标事件。
+          ? Stack(
+              children: [
+                Positioned.fill(
+                  child: WindowsDragArea(child: const SizedBox.expand()),
                 ),
-              ),
-              // 窄屏下允许搜索框随剩余空间收缩，避免固定宽度挤出工具栏。
-              // 分片影片的搜索框在视图内部，头部不再重复一个查媒体库的输入框。
-              if (!partGroupsView) ...[
-                const SizedBox(width: 16),
-                Flexible(
-                  child: _EmbyPcWorkspaceNavigation(
-                    this,
-                  )._buildSearchField(compact ? 230 : 340),
-                ),
+                Positioned.fill(child: content),
               ],
-            ],
-            if (compact) ...[
-              const SizedBox(width: 12),
-              _EmbyPcWorkspaceNavigation(this)._buildAccountMenu(context),
-            ],
-          ],
+            )
+          : content,
+    );
+  }
+
+  Widget _buildHistoryButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback? onPressed,
+  }) {
+    final skin = EmbyPcSkin.of(context);
+    final enabled = onPressed != null;
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onPressed,
+          child: SizedBox.square(
+            dimension: 34,
+            child: Icon(
+              icon,
+              size: 22,
+              color: enabled
+                  ? skin.textSecondary
+                  : skin.textTertiary.withValues(alpha: 0.4),
+            ),
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildGlobalSearchButton(
-      BuildContext context, {
-        required bool compact,
-      }) {
-    final colors = Theme.of(context).colorScheme;
-    if (compact) {
-      return IconButton.outlined(
-        tooltip: '搜索媒体库',
-        onPressed: _openGlobalSearch,
-        icon: const Icon(Icons.search_rounded, size: 20),
-      );
-    }
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minHeight: 42),
-      child: OutlinedButton.icon(
-        onPressed: _openGlobalSearch,
-        style: OutlinedButton.styleFrom(
-          foregroundColor: colors.onSurfaceVariant,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          side: BorderSide(color: colors.outlineVariant),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+  Widget _buildHeaderAction({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback? onPressed,
+  }) {
+    final skin = EmbyPcSkin.of(context);
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onPressed,
+          child: SizedBox.square(
+            dimension: 34,
+            child: Icon(
+              icon,
+              size: 19,
+              color: onPressed == null
+                  ? skin.textTertiary.withValues(alpha: 0.4)
+                  : skin.textSecondary,
+            ),
+          ),
         ),
-        icon: const Icon(Icons.search_rounded, size: 19),
-        label: const Text('搜索媒体库'),
+      ),
+    );
+  }
+
+  Future<void> _refreshCurrentView() async {
+    if (_c.view == 'home') {
+      await _c.loadHome(force: true);
+      return;
+    }
+    _syncQueryInput();
+    await _c.loadItems(reset: true);
+  }
+
+  // 内容页大标题：放在页头下方，像视频/音乐客户端一样作为页面级标题。
+  Widget _buildPageHeading(BuildContext context) {
+    final skin = EmbyPcSkin.of(context);
+    final narrow = MediaQuery.sizeOf(context).width < 600;
+    final subtitle = _c.view == 'home'
+        ? (_c.homeLoading && !_c.homeLoaded
+              ? '正在为你挑选内容'
+              : '共 ${_c.libraries.length} 个媒体库 · 最近更新优先')
+        // 分片视图的条目数由视图自己维护，页头只描述用途。
+        : _c.view == 'part-groups'
+        ? '核对同一部影片的多文件归属 · 只读视图'
+        : _c.loading && _c.items.isEmpty
+        ? '正在载入'
+        : _c.randomMode
+        ? '随机 ${_c.items.length} 条 / 共 ${_c.total} 条'
+        : '已加载 ${_c.items.length} 条 / 共 ${_c.total} 条';
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        narrow ? 16 : 28,
+        narrow ? 14 : 18,
+        narrow ? 16 : 28,
+        2,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _pageTitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontFamily: 'Microsoft YaHei UI',
+              fontSize: narrow ? 22 : 26,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.6,
+              height: 1.2,
+              color: skin.scheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            subtitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: skin.textSecondary),
+          ),
+        ],
       ),
     );
   }
@@ -161,12 +223,12 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
       return IconButton(
         tooltip: '打开内容导航',
         onPressed: _openMobileNavigation,
-        icon: const Icon(Icons.menu),
+        icon: const Icon(Icons.menu_rounded, size: 21),
       );
     }
     return PopupMenuButton<String>(
       tooltip: '切换内容',
-      icon: const Icon(Icons.menu),
+      icon: const Icon(Icons.menu_rounded, size: 21),
       onSelected: (value) {
         if (value == 'home') {
           _selectHome();
@@ -182,36 +244,25 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
           _selectLibrary(value);
         }
       },
-      itemBuilder:
-          (_) => [
-            const PopupMenuItem(value: 'home', child: Text('首页')),
-            const PopupMenuItem(
-              value: 'watch-history',
-              child: Text('观看历史'),
-            ),
-            const PopupMenuDivider(),
-            ..._c.libraries.map(
-              (library) =>
-                  PopupMenuItem(value: library.id, child: Text(library.name)),
-            ),
-            // 紧凑桌面布局使用弹出菜单替代侧栏，也保留分片影片与演员列表入口。
-            const PopupMenuItem(value: 'part-groups', child: Text('分片影片')),
-            const PopupMenuItem(value: 'people', child: Text('演员列表')),
-            const PopupMenuDivider(),
-            const PopupMenuItem(
-              value: 'favorite-movies',
-              child: Text('收藏影片'),
-            ),
-            const PopupMenuItem(
-              value: 'favorite-people',
-              child: Text('收藏演员'),
-            ),
-          ],
+      itemBuilder: (_) => [
+        const PopupMenuItem(value: 'home', child: Text('首页')),
+        const PopupMenuItem(value: 'watch-history', child: Text('观看历史')),
+        const PopupMenuDivider(),
+        ..._c.libraries.map(
+          (library) =>
+              PopupMenuItem(value: library.id, child: Text(library.name)),
+        ),
+        // 紧凑桌面布局使用弹出菜单替代侧栏，也保留分片影片与演员列表入口。
+        const PopupMenuItem(value: 'part-groups', child: Text('分片影片')),
+        const PopupMenuItem(value: 'people', child: Text('演员列表')),
+        const PopupMenuDivider(),
+        const PopupMenuItem(value: 'favorite-movies', child: Text('收藏影片')),
+        const PopupMenuItem(value: 'favorite-people', child: Text('收藏演员')),
+      ],
     );
   }
 
   Widget _buildToolbar(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
     // 移动端缩小工具栏留白，桌面端继续沿用原有间距。
     final compactMobileToolbar = _usesMobileWorkspaceLayout(
       MediaQuery.sizeOf(context).width,
@@ -219,20 +270,12 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
     // 人物接口没有视频筛选和布局参数，避免展示不会影响请求的控件。
     final peopleList = _c.view == 'people' || _c.view == 'favorite-people';
     return Material(
-      color: colors.surfaceContainerLowest,
+      color: Colors.transparent,
       child: Container(
         constraints: const BoxConstraints(minHeight: 54),
-        padding:
-            compactMobileToolbar
-                ? const EdgeInsets.fromLTRB(12, 4, 12, 10)
-                : const EdgeInsets.fromLTRB(26, 4, 26, 10),
-        decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(
-              color: colors.outlineVariant.withValues(alpha: 0.72),
-            ),
-          ),
-        ),
+        padding: compactMobileToolbar
+            ? const EdgeInsets.fromLTRB(14, 6, 14, 12)
+            : const EdgeInsets.fromLTRB(28, 8, 28, 14),
         child: LayoutBuilder(
           builder: (context, constraints) {
             // 安卓窄屏仅显示布局图标，完整含义继续由 Tooltip 提供。
@@ -241,16 +284,10 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
             return Row(
               children: [
                 if (!peopleList) ...[
-                  _buildFilterMenu(
-                    context,
-                    compact: compactMobileToolbar,
-                  ),
+                  _buildFilterMenu(context, compact: compactMobileToolbar),
                   SizedBox(width: compactMobileToolbar ? 6 : 8),
                 ],
-                _buildSortMenu(
-                  context,
-                  compact: compactMobileToolbar,
-                ),
+                _buildSortMenu(context, compact: compactMobileToolbar),
                 // 随机播放只对媒体列表有意义，人物列表不展示该入口。
                 if (!peopleList) ...[
                   SizedBox(width: compactMobileToolbar ? 6 : 8),
@@ -263,10 +300,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                 ],
                 const Spacer(),
                 if (!peopleList)
-                  _buildLayoutControl(
-                    context,
-                    compact: compactLayoutControl,
-                  ),
+                  _buildLayoutControl(context, compact: compactLayoutControl),
               ],
             );
           },
@@ -275,26 +309,22 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
     );
   }
 
-  int get _activeFilterCount =>
-      [
-        _c.itemType,
-        _c.statusFilter,
-        _c.markFilter,
-        _c.videoType,
-        _yearController.text.trim(),
-        _c.genreFilter,
-        _c.personFilter,
-        _c.minRating?.toString() ?? '',
-      ].where((value) => value.isNotEmpty).length;
+  int get _activeFilterCount => [
+    _c.itemType,
+    _c.statusFilter,
+    _c.markFilter,
+    _c.videoType,
+    _yearController.text.trim(),
+    _c.genreFilter,
+    _c.personFilter,
+    _c.minRating?.toString() ?? '',
+  ].where((value) => value.isNotEmpty).length;
 
   // 搜索词同样会筛出空列表，空状态需要据此决定是否给出恢复入口。
   bool get _hasActiveFilters =>
       _activeFilterCount > 0 || _searchController.text.trim().isNotEmpty;
 
-  Widget _buildFilterMenu(
-    BuildContext context, {
-    bool compact = false,
-  }) {
+  Widget _buildFilterMenu(BuildContext context, {bool compact = false}) {
     const itemTypes = {
       '': '全部类型',
       'Movie': '电影',
@@ -320,8 +350,8 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
     final contentWidth = panelWidth - 28;
     final showAdvancedFilters =
         _c.view != 'favorite-movies' &&
-            _c.view != 'favorite-people' &&
-            _c.view != 'watch-history';
+        _c.view != 'favorite-people' &&
+        _c.view != 'watch-history';
 
     // 多组低频筛选集中放入弹出面板，选中后仍按原逻辑立即刷新列表。
     return MenuAnchor(
@@ -356,17 +386,14 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                   ),
                   if (showAdvancedFilters) ...[
                     _buildQueryGroup(
-                      title: _c.genreOptions.isEmpty
-                          ? '流派（加载中…）'
-                          : '流派',
+                      title: _c.genreOptions.isEmpty ? '流派（加载中…）' : '流派',
                       // 流派可能很多，只展示条目最多的前 12 个，避免面板过长。
                       options: {
                         '': '全部流派',
                         for (final genre in _c.genreOptions.take(12))
-                          genre.id:
-                              genre.childCount == null
-                                  ? genre.name
-                                  : '${genre.name} ${genre.childCount}',
+                          genre.id: genre.childCount == null
+                              ? genre.name
+                              : '${genre.name} ${genre.childCount}',
                       },
                       selected: _c.genreFilter,
                       availableWidth: contentWidth,
@@ -494,32 +521,27 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
           ),
         ),
       ],
-      builder:
-          (context, controller, child) => _buildQueryPill(
+      builder: (context, controller, child) => _buildQueryPill(
         label: _activeFilterCount == 0 ? '筛选' : '筛选 $_activeFilterCount',
         icon: Icons.filter_list,
         active: _activeFilterCount > 0,
         compact: compact,
-        onPressed:
-        _c.loading
+        onPressed: _c.loading
             ? null
             : () {
-              if (controller.isOpen) {
-                controller.close();
-                return;
-              }
-              // 流派候选值只在打开面板时按需拉取，失败也不影响其余筛选。
-              unawaited(_c.ensureGenreOptions());
-              controller.open();
-            },
+                if (controller.isOpen) {
+                  controller.close();
+                  return;
+                }
+                // 流派候选值只在打开面板时按需拉取，失败也不影响其余筛选。
+                unawaited(_c.ensureGenreOptions());
+                controller.open();
+              },
       ),
     );
   }
 
-  Widget _buildSortMenu(
-    BuildContext context, {
-    bool compact = false,
-  }) {
+  Widget _buildSortMenu(BuildContext context, {bool compact = false}) {
     // 演员没有评分/分辨率等影片字段，排序项改为人物资料属性。
     final peopleList = _c.view == 'people' || _c.view == 'favorite-people';
     const mediaSortOptions = {
@@ -574,36 +596,32 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                       button: true,
                       selected: active,
                       excludeSemantics: true,
-                      label:
-                      active
+                      label: active
                           ? '${entry.value}，当前$currentOrder，点击切换为$nextOrder'
                           : '${entry.value}，点击按此字段排序',
                       child: Material(
-                        color:
-                        active
+                        color: active
                             ? colors.primary.withValues(alpha: 0.10)
                             : Colors.transparent,
                         borderRadius: BorderRadius.circular(6),
                         clipBehavior: Clip.antiAlias,
                         child: InkWell(
-                          onTap:
-                          _c.loading
+                          onTap: _c.loading
                               ? null
                               : () {
-                            setState(() {
-                              // 手动指定排序即退出随机播放，回到常规列表。
-                              _c.exitRandomMode();
-                              if (active) {
-                                _c.sortOrder =
-                                ascending
-                                    ? 'Descending'
-                                    : 'Ascending';
-                              } else {
-                                _c.sortBy = entry.key;
-                              }
-                            });
-                            _applyQuery();
-                          },
+                                  setState(() {
+                                    // 手动指定排序即退出随机播放，回到常规列表。
+                                    _c.exitRandomMode();
+                                    if (active) {
+                                      _c.sortOrder = ascending
+                                          ? 'Descending'
+                                          : 'Ascending';
+                                    } else {
+                                      _c.sortBy = entry.key;
+                                    }
+                                  });
+                                  _applyQuery();
+                                },
                           child: ConstrainedBox(
                             constraints: const BoxConstraints(minHeight: 44),
                             child: Padding(
@@ -618,18 +636,17 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                                       entry.value,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.bodyMedium?.copyWith(
-                                        color:
-                                        active
-                                            ? colors.primary
-                                            : colors.onSurface,
-                                        fontWeight:
-                                        active
-                                            ? FontWeight.w600
-                                            : FontWeight.w400,
-                                      ),
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(
+                                            color: active
+                                                ? colors.primary
+                                                : colors.onSurface,
+                                            fontWeight: active
+                                                ? FontWeight.w600
+                                                : FontWeight.w400,
+                                          ),
                                     ),
                                   ),
                                   if (active)
@@ -657,18 +674,13 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
           ),
         ),
       ],
-      builder:
-          (context, controller, child) => _buildQueryPill(
+      builder: (context, controller, child) => _buildQueryPill(
         label: '排序',
         icon: Icons.swap_vert,
         compact: compact,
-        onPressed:
-        _c.loading
+        onPressed: _c.loading
             ? null
-            : () =>
-        controller.isOpen
-            ? controller.close()
-            : controller.open(),
+            : () => controller.isOpen ? controller.close() : controller.open(),
       ),
     );
   }
@@ -686,25 +698,25 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
     required bool compact,
     required bool enabled,
   }) {
-    final colors = Theme.of(context).colorScheme;
+    final skin = EmbyPcSkin.of(context);
     final active = _c.randomMode;
     const tooltip = '随机播放：服务端重新抽取 50 条';
-    final side = BorderSide(
-      color: active ? colors.primary : colors.outlineVariant,
-    );
+    final side = BorderSide(color: active ? skin.tint(0.5) : skin.hairline);
+    final background = active
+        ? skin.tint(0.16)
+        : skin.surfaceAlt.withValues(alpha: skin.dark ? 0.55 : 1);
     if (compact) {
       // 移动端工具栏空间有限，只用图标，含义由 Tooltip 补充。
-      return IconButton.outlined(
+      return IconButton(
         tooltip: tooltip,
         onPressed: enabled ? () => unawaited(_shuffleMediaItems()) : null,
         style: IconButton.styleFrom(
           minimumSize: const Size(0, 38),
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          foregroundColor: active ? colors.primary : colors.onSurface,
-          backgroundColor:
-              active ? colors.primary.withValues(alpha: 0.10) : colors.surface,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          foregroundColor: active ? skin.accent : skin.scheme.onSurface,
+          backgroundColor: background,
           side: side,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          shape: const StadiumBorder(),
         ),
         icon: const Icon(Icons.shuffle_rounded, size: 19),
       );
@@ -715,94 +727,85 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
         onPressed: enabled ? () => unawaited(_shuffleMediaItems()) : null,
         style: OutlinedButton.styleFrom(
           minimumSize: const Size(0, 38),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          foregroundColor: active ? colors.primary : colors.onSurface,
-          backgroundColor:
-              active ? colors.primary.withValues(alpha: 0.10) : colors.surface,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          foregroundColor: active ? skin.accent : skin.scheme.onSurface,
+          backgroundColor: background,
           side: side,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          shape: const StadiumBorder(),
+          textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
         ),
         icon: const Icon(Icons.shuffle_rounded, size: 17),
-        label: const Text(
-          '随机播放',
-          style: TextStyle(fontWeight: FontWeight.w500),
-        ),
+        label: const Text('随机播放'),
       ),
     );
   }
 
-  Widget _buildLayoutControl(
-    BuildContext context, {
-    required bool compact,
-  }) {
-    final colors = Theme.of(context).colorScheme;
+  Widget _buildLayoutControl(BuildContext context, {required bool compact}) {
+    final skin = EmbyPcSkin.of(context);
     return SegmentedButton<String>(
       showSelectedIcon: false,
-      segments:
-          compact
-              ? const [
-                ButtonSegment(
-                  value: 'backdrop',
-                  icon: Tooltip(
-                    message: '背景图布局',
-                    child: Icon(Icons.view_day_outlined),
-                  ),
+      segments: compact
+          ? const [
+              ButtonSegment(
+                value: 'backdrop',
+                icon: Tooltip(
+                  message: '背景图布局',
+                  child: Icon(Icons.view_day_outlined),
                 ),
-                ButtonSegment(
-                  value: 'poster',
-                  icon: Tooltip(
-                    message: '海报布局',
-                    child: Icon(Icons.view_agenda_outlined),
-                  ),
+              ),
+              ButtonSegment(
+                value: 'poster',
+                icon: Tooltip(
+                  message: '海报布局',
+                  child: Icon(Icons.view_agenda_outlined),
                 ),
-              ]
-              : const [
-                ButtonSegment(
-                  value: 'backdrop',
-                  icon: Tooltip(
-                    message: '背景图布局',
-                    child: Icon(Icons.view_day_outlined),
-                  ),
-                  label: Text('背景图'),
+              ),
+            ]
+          : const [
+              ButtonSegment(
+                value: 'backdrop',
+                icon: Tooltip(
+                  message: '背景图布局',
+                  child: Icon(Icons.view_day_outlined),
                 ),
-                ButtonSegment(
-                  value: 'poster',
-                  icon: Tooltip(
-                    message: '海报布局',
-                    child: Icon(Icons.view_agenda_outlined),
-                  ),
-                  label: Text('海报'),
+                label: Text('背景图'),
+              ),
+              ButtonSegment(
+                value: 'poster',
+                icon: Tooltip(
+                  message: '海报布局',
+                  child: Icon(Icons.view_agenda_outlined),
                 ),
-              ],
+                label: Text('海报'),
+              ),
+            ],
       selected: {_c.imageStyle},
-      onSelectionChanged:
-      _c.loading ? null : (selection) => _updateImageStyle(selection.first),
+      onSelectionChanged: _c.loading
+          ? null
+          : (selection) => _updateImageStyle(selection.first),
       style: ButtonStyle(
         visualDensity: VisualDensity.compact,
         minimumSize: const WidgetStatePropertyAll(Size(0, 38)),
         // 布局选中态与侧栏、筛选项统一使用用户设置的主题色。
         foregroundColor: WidgetStateProperty.resolveWith(
-              (states) =>
-          states.contains(WidgetState.selected)
-              ? colors.onPrimary
-              : colors.onSurface,
+          (states) => states.contains(WidgetState.selected)
+              ? skin.scheme.onPrimary
+              : skin.textSecondary,
+        ),
+        iconColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? skin.scheme.onPrimary
+              : skin.textSecondary,
         ),
         backgroundColor: WidgetStateProperty.resolveWith(
-              (states) =>
-          states.contains(WidgetState.selected)
-              ? colors.primary
-              : Colors.transparent,
+          (states) => states.contains(WidgetState.selected)
+              ? skin.accent
+              : skin.surfaceAlt.withValues(alpha: skin.dark ? 0.55 : 1),
         ),
-        side: WidgetStateProperty.resolveWith(
-              (states) => BorderSide(
-            color:
-            states.contains(WidgetState.selected)
-                ? colors.primary
-                : colors.outlineVariant,
-          ),
-        ),
-        shape: WidgetStatePropertyAll(
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        side: WidgetStatePropertyAll(BorderSide(color: skin.hairline)),
+        shape: const WidgetStatePropertyAll(StadiumBorder()),
+        textStyle: const WidgetStatePropertyAll(
+          TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
         ),
       ),
     );
@@ -860,8 +863,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
     return Wrap(
       spacing: spacing,
       runSpacing: spacing,
-      children:
-      options.entries.map((entry) {
+      children: options.entries.map((entry) {
         final active = entry.key == selected;
         return SizedBox(
           width: itemWidth,
@@ -869,14 +871,12 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
             onPressed: _c.loading ? null : () => onSelected(entry.key),
             style: OutlinedButton.styleFrom(
               minimumSize: const Size(0, 36),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 10,
-                vertical: 7,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
               alignment: Alignment.centerLeft,
               foregroundColor: active ? colors.primary : colors.onSurface,
-              backgroundColor:
-              active ? colors.primary.withValues(alpha: 0.12) : null,
+              backgroundColor: active
+                  ? colors.primary.withValues(alpha: 0.12)
+                  : null,
               side: BorderSide(
                 color: active ? colors.primary : colors.outlineVariant,
               ),
@@ -913,33 +913,29 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
     bool compact = false,
     required VoidCallback? onPressed,
   }) {
-    final colors = Theme.of(context).colorScheme;
+    final skin = EmbyPcSkin.of(context);
     final style = OutlinedButton.styleFrom(
       minimumSize: const Size(0, 38),
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      foregroundColor: active ? colors.primary : colors.onSurface,
-      backgroundColor:
-        active ? colors.primary.withValues(alpha: 0.10) : colors.surface,
-      side: BorderSide(
-        color: active ? colors.primary : colors.outlineVariant,
-      ),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      foregroundColor: active ? skin.accent : skin.scheme.onSurface,
+      backgroundColor: active
+          ? skin.tint(0.16)
+          : skin.surfaceAlt.withValues(alpha: skin.dark ? 0.55 : 1),
+      side: BorderSide(color: active ? skin.tint(0.5) : skin.hairline),
+      shape: const StadiumBorder(),
+      textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
     );
     final content = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
+        Text(label),
         const SizedBox(width: 4),
-        const Icon(Icons.keyboard_arrow_down, size: 17),
+        const Icon(Icons.keyboard_arrow_down_rounded, size: 17),
       ],
     );
     if (compact) {
       // 移动端保留明确的文字入口，省略重复图标以释放横向空间。
-      return OutlinedButton(
-        onPressed: onPressed,
-        style: style,
-        child: content,
-      );
+      return OutlinedButton(onPressed: onPressed, style: style, child: content);
     }
     return OutlinedButton.icon(
       onPressed: onPressed,

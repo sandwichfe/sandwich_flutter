@@ -9,6 +9,10 @@ class WindowsTitleBar extends StatefulWidget {
 
   const WindowsTitleBar({super.key, required this.child});
 
+  /// 页面自带窗口按钮（例如工作台页头）时置为 true，全局标题栏让出高度，
+  /// 避免顶部出现两条重复的窗口控制栏。
+  static final ValueNotifier<bool> embedded = ValueNotifier<bool>(false);
+
   /// 由切换全屏的调用方直接告知目标状态：标题栏与窗口尺寸会在同一帧内变化，
   /// 避免"先缩窗口再收起标题栏"造成的二次布局闪烁。
   static void setFullscreen(bool value) {
@@ -64,10 +68,7 @@ class _WindowsTitleBarState extends State<WindowsTitleBar> with WindowListener {
     unawaited(_syncWindowState());
     // 退出全屏依赖 PostMessage(SC_MAXIMIZE)，WM_SIZE 处理完后状态才稳定。
     unawaited(
-      Future<void>.delayed(
-        const Duration(milliseconds: 120),
-        _syncWindowState,
-      ),
+      Future<void>.delayed(const Duration(milliseconds: 120), _syncWindowState),
     );
   }
 
@@ -114,33 +115,33 @@ class _WindowsTitleBarState extends State<WindowsTitleBar> with WindowListener {
     // 标题栏使用中间表面层，下方页面画布和媒体卡片仍保留各自层级。
     final titleBarColor = colors.surfaceContainerLow;
 
-    return ColoredBox(
-      color: colors.surfaceContainerLowest,
-      child: Column(
-        children: [
-          if (!_isFullScreen)
-            _TitleBar(
-              color: titleBarColor,
-              isMaximized: _isMaximized,
-              onToggleMaximize: _toggleMaximize,
-            ),
-          Expanded(child: widget.child),
-        ],
-      ),
+    return ValueListenableBuilder<bool>(
+      valueListenable: WindowsTitleBar.embedded,
+      builder: (context, embedded, _) {
+        return ColoredBox(
+          color: colors.surfaceContainerLowest,
+          child: Column(
+            children: [
+              // 页面内嵌窗口按钮时不再绘制全局标题栏，但全屏状态仍优先隐藏。
+              if (!_isFullScreen && !embedded)
+                _TitleBar(
+                  color: titleBarColor,
+                  onToggleMaximize: _toggleMaximize,
+                ),
+              Expanded(child: widget.child),
+            ],
+          ),
+        );
+      },
     );
   }
 }
 
 class _TitleBar extends StatelessWidget {
   final Color color;
-  final bool isMaximized;
   final VoidCallback onToggleMaximize;
 
-  const _TitleBar({
-    required this.color,
-    required this.isMaximized,
-    required this.onToggleMaximize,
-  });
+  const _TitleBar({required this.color, required this.onToggleMaximize});
 
   @override
   Widget build(BuildContext context) {
@@ -196,31 +197,123 @@ class _TitleBar extends StatelessWidget {
                 ),
               ),
             ),
-            _WindowButton(
-              tooltip: '最小化',
-              icon: Icons.remove_rounded,
-              onPressed: windowManager.minimize,
-            ),
-            _WindowButton(
-              tooltip: isMaximized ? '还原' : '最大化',
-              icon:
-                  isMaximized
-                      ? Icons.filter_none_rounded
-                      : Icons.crop_square_rounded,
-              iconSize: isMaximized ? 14 : 13,
-              onPressed: onToggleMaximize,
-            ),
-            _WindowButton(
-              tooltip: '关闭',
-              icon: Icons.close_rounded,
-              isClose: true,
-              onPressed: windowManager.close,
-            ),
+            const WindowsCaptionButtons(),
           ],
         ),
       ),
     );
   }
+}
+
+/// 独立的最小化/最大化/关闭按钮组，供全局标题栏与页面内嵌页头复用。
+class WindowsCaptionButtons extends StatefulWidget {
+  final double height;
+
+  const WindowsCaptionButtons({super.key, this.height = 44});
+
+  @override
+  State<WindowsCaptionButtons> createState() => _WindowsCaptionButtonsState();
+}
+
+class _WindowsCaptionButtonsState extends State<WindowsCaptionButtons>
+    with WindowListener {
+  bool _isMaximized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    windowManager.addListener(this);
+    _syncState();
+  }
+
+  @override
+  void dispose() {
+    windowManager.removeListener(this);
+    super.dispose();
+  }
+
+  Future<void> _syncState() async {
+    final isMaximized = await windowManager.isMaximized();
+    if (!mounted || _isMaximized == isMaximized) return;
+    setState(() => _isMaximized = isMaximized);
+  }
+
+  Future<void> _toggleMaximize() async {
+    if (await windowManager.isMaximized()) {
+      await windowManager.unmaximize();
+    } else {
+      await windowManager.maximize();
+    }
+    await _syncState();
+  }
+
+  // 最大化/还原由系统异步完成，稍后再回查一次，避免图标与窗口状态不一致。
+  void _scheduleSync() {
+    if (!mounted) return;
+    unawaited(_syncState());
+    unawaited(
+      Future<void>.delayed(const Duration(milliseconds: 120), _syncState),
+    );
+  }
+
+  @override
+  void onWindowMaximize() => _scheduleSync();
+
+  @override
+  void onWindowUnmaximize() => _scheduleSync();
+
+  @override
+  void onWindowRestore() => _scheduleSync();
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    height: widget.height,
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _WindowButton(
+          tooltip: '最小化',
+          icon: Icons.remove_rounded,
+          onPressed: windowManager.minimize,
+        ),
+        _WindowButton(
+          tooltip: _isMaximized ? '还原' : '最大化',
+          icon: _isMaximized
+              ? Icons.filter_none_rounded
+              : Icons.crop_square_rounded,
+          iconSize: _isMaximized ? 14 : 13,
+          onPressed: _toggleMaximize,
+        ),
+        _WindowButton(
+          tooltip: '关闭',
+          icon: Icons.close_rounded,
+          isClose: true,
+          onPressed: windowManager.close,
+        ),
+      ],
+    ),
+  );
+}
+
+/// 页头空白处的窗口拖动区：按住移动窗口，双击切换最大化。
+class WindowsDragArea extends StatelessWidget {
+  final Widget child;
+
+  const WindowsDragArea({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    behavior: HitTestBehavior.translucent,
+    onPanStart: (_) => unawaited(windowManager.startDragging()),
+    onDoubleTap: () async {
+      if (await windowManager.isMaximized()) {
+        await windowManager.unmaximize();
+      } else {
+        await windowManager.maximize();
+      }
+    },
+    child: child,
+  );
 }
 
 /// 窗口按钮使用矩形轻量悬停反馈，贴近主流 Windows 桌面应用的交互。
@@ -249,12 +342,12 @@ class _WindowButtonState extends State<_WindowButton> {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final hoverColor =
-        widget.isClose
-            ? const Color(0xFFC42B1C)
-            : colors.onSurface.withAlpha(18);
-    final foregroundColor =
-        widget.isClose && _isHovered ? Colors.white : colors.onSurfaceVariant;
+    final hoverColor = widget.isClose
+        ? const Color(0xFFC42B1C)
+        : colors.onSurface.withAlpha(18);
+    final foregroundColor = widget.isClose && _isHovered
+        ? Colors.white
+        : colors.onSurfaceVariant;
 
     // 标题栏位于全局 Navigator 外层，避免使用依赖 Overlay 的 Tooltip。
     return MouseRegion(
