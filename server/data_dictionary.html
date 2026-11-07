@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>embyx 数据字典 · SQLite</title>
+<style>
+  :root {
+    --bg: #f7f8fa;
+    --panel: #ffffff;
+    --text: #1f2430;
+    --muted: #5c6675;
+    --line: #e2e6ec;
+    --accent: #2f6feb;
+    --accent-soft: #eaf1ff;
+    --code-bg: #f1f3f6;
+    --key: #b4451f;
+    --ok: #1d7a4c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171c;
+      --panel: #1b1f26;
+      --text: #e6e9ef;
+      --muted: #9aa4b2;
+      --line: #2c333d;
+      --accent: #6fa0ff;
+      --accent-soft: #1f2b40;
+      --code-bg: #232932;
+      --key: #ffab8a;
+      --ok: #6fd39b;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei",
+      "PingFang SC", "Hiragino Sans GB", sans-serif;
+  }
+  code, .mono {
+    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    font-size: 12.5px;
+  }
+  code {
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  header {
+    padding: 30px 32px 22px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+  header h1 {
+    margin: 0 0 6px;
+    font-size: 22px;
+    letter-spacing: 0.3px;
+  }
+  header p {
+    margin: 0;
+    color: var(--muted);
+  }
+  .chips { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    font-size: 12px;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    background: var(--bg);
+    border-radius: 999px;
+    padding: 3px 10px;
+  }
+  .layout {
+    display: grid;
+    grid-template-columns: 216px minmax(0, 1fr);
+    align-items: start;
+    gap: 26px;
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 24px 24px 60px;
+  }
+  nav.toc {
+    position: sticky;
+    top: 18px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px 10px;
+  }
+  nav.toc h2 {
+    margin: 2px 8px 10px;
+    font-size: 12px;
+    color: var(--muted);
+    font-weight: 600;
+    letter-spacing: 1px;
+  }
+  nav.toc a {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    color: var(--text);
+    text-decoration: none;
+    font-size: 13px;
+  }
+  nav.toc a:hover { background: var(--accent-soft); color: var(--accent); }
+  nav.toc a span { color: var(--muted); font-size: 11.5px; }
+  main { min-width: 0; }
+  section.card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 20px 22px 22px;
+    margin-bottom: 22px;
+    scroll-margin-top: 16px;
+  }
+  section.card > h2 {
+    margin: 0 0 4px;
+    font-size: 17px;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  section.card > h2 .tbl {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 15px;
+    color: var(--accent);
+  }
+  section.card > h2 .cn { font-size: 13px; color: var(--muted); font-weight: 400; }
+  .desc { margin: 8px 0 14px; color: var(--muted); }
+  .meta {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 8px 18px;
+    margin: 0 0 16px;
+    padding: 12px 14px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-size: 13px;
+  }
+  .meta div { color: var(--muted); }
+  .meta b { color: var(--text); font-weight: 600; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  thead th {
+    text-align: left;
+    font-size: 12px;
+    color: var(--muted);
+    font-weight: 600;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  tbody td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover td { background: var(--bg); }
+  td.col-field code { font-weight: 600; }
+  td.col-type { color: var(--muted); white-space: nowrap; }
+  td.col-cons { color: var(--muted); }
+  .pk { color: var(--key); font-weight: 600; font-size: 11.5px; }
+  .fk { color: var(--accent); font-weight: 600; font-size: 11.5px; }
+  .json { color: var(--ok); font-size: 11.5px; }
+  .note {
+    margin: 14px 0 0;
+    padding: 10px 14px;
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    border-radius: 0 6px 6px 0;
+    font-size: 13px;
+  }
+  .note b { color: var(--text); }
+  ul.plain { margin: 6px 0 0; padding-left: 20px; }
+  ul.plain li { margin: 3px 0; color: var(--muted); }
+  .rel-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .rel {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: var(--bg);
+    font-size: 13px;
+  }
+  .rel b { display: block; margin-bottom: 4px; }
+  .rel span { color: var(--muted); }
+  footer {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 0 24px 40px;
+    color: var(--muted);
+    font-size: 12.5px;
+  }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    nav.toc { position: static; }
+  }
+  @media print {
+    body { background: #fff; }
+    nav.toc { display: none; }
+    .layout { grid-template-columns: 1fr; padding: 0; }
+    section.card { break-inside: avoid; border-color: #ccc; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>embyx 数据字典</h1>
+  <p>自建 Emby 兼容媒体服务端 · SQLite（modernc.org/sqlite）· 单库单文件</p>
+  <div class="chips">
+    <span class="chip">schema 版本 v9</span>
+    <span class="chip">10 张表</span>
+    <span class="chip">12 个索引</span>
+    <span class="chip">无显式外键，关联由应用层维护</span>
+  </div>
+</header>
+
+<div class="layout">
+  <nav class="toc">
+    <h2>目录</h2>
+    <a href="#overview">总览与关系</a>
+    <a href="#users">users <span>用户</span></a>
+    <a href="#tokens">tokens <span>令牌</span></a>
+    <a href="#libraries">libraries <span>媒体库</span></a>
+    <a href="#items">items <span>条目</span></a>
+    <a href="#user_data">user_data <span>用户数据</span></a>
+    <a href="#play_sessions">play_sessions <span>播放会话</span></a>
+    <a href="#persons">persons <span>演员</span></a>
+    <a href="#item_people">item_people <span>演员关联</span></a>
+    <a href="#item_groups">item_groups <span>分片归属</span></a>
+    <a href="#image_locks">image_locks <span>图片锁</span></a>
+    <a href="#rules">业务规则</a>
+  </nav>
+
+  <main>
+
+    <section class="card" id="overview">
+      <h2><span class="tbl">总览</span><span class="cn">表结构与关联</span></h2>
+      <p class="desc">
+        库内以 <code>TEXT</code> / <code>INTEGER</code> / <code>REAL</code> 三种亲和类型为主：
+        时间统一存为定宽 ISO 字符串（<code>2006-01-02T15:04:05.0000000Z</code>，UTC），
+        布尔用 <code>INTEGER 0/1</code>，复杂结构（演员、媒体流、图片标签）以 JSON 文本存放。
+      </p>
+
+      <div class="rel-grid">
+        <div class="rel">
+          <b>users ─┬─ tokens</b>
+          <span><code>tokens.user_id</code> 指向登录用户，1:N。</span>
+        </div>
+        <div class="rel">
+          <b>libraries ─── items</b>
+          <span><code>items.library_id</code> 归属媒体库；<code>items.parent_id</code> 自关联形成 剧集 → 季 → 集 层级。</span>
+        </div>
+        <div class="rel">
+          <b>users + items ─── user_data</b>
+          <span>联合主键 <code>(user_id, item_id)</code>，存收藏、已看、续播位置、观看历史。</span>
+        </div>
+        <div class="rel">
+          <b>items ─┬─ item_people ─── persons</b>
+          <span>演员以 <code>persons</code> 为主表，<code>item_people</code> 是唯一的多对多关联。</span>
+        </div>
+        <div class="rel">
+          <b>items ─── item_groups</b>
+          <span>一行的条目属于某个分片组，<code>item_id</code> 即主键，单归属。</span>
+        </div>
+        <div class="rel">
+          <b>image_locks ─── 三类实体</b>
+          <span><code>entity_id</code> 多态指向 items / persons / libraries，锁定后扫描不覆盖图片。</span>
+        </div>
+      </div>
+
+      <div class="note">
+        <b>数据库版本：</b><code>PRAGMA user_version = 9</code>。全新库按 <code>schema.sql</code> 一次建到最新；
+        老库在 <code>store.go</code> 的 <code>schemaMigrations</code> 里逐级升级，不要求删库重扫。
+      </div>
+    </section>
+
+    <section class="card" id="users">
+      <h2><span class="tbl">users</span><span class="cn">用户</span></h2>
+      <p class="desc">登录账号。Emby 客户端的 <code>AuthenticateByName</code> 在本表校验密码并换取令牌。</p>
+      <div class="meta">
+        <div><b>主键</b> <code>id</code></div>
+        <div><b>唯一约束</b> <code>name</code>（<code>COLLATE NOCASE</code>，登录名大小写不敏感）</div>
+        <div><b>写入方</b> <code>store/users.go</code> · 认证接口</div>
+      </div>
+      <table>
+        <thead><tr><th>字段</th><th>类型</th><th>约束 / 默认</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td class="col-field"><code>id</code> <span class="pk">PK</span></td><td class="col-type">TEXT</td><td class="col-cons">PRIMARY KEY</td><td>用户 ID，32 位十六进制，形态与 Emby Id 一致。</td></tr>
+          <tr><td class="col-field"><code>name</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL UNIQUE COLLATE NOCASE</td><td>登录名，不允许重名（忽略大小写）。</td></tr>
+          <tr><td class="col-field"><code>password_hash</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL</td><td>密码哈希，不存明文。</td></tr>
+          <tr><td class="col-field"><code>is_admin</code></td><td class="col-type">INTEGER</td><td class="col-cons">NOT NULL DEFAULT 0</td><td>1 = 管理员。扫描、刮削、媒体库管理等接口要求管理员身份。</td></tr>
+          <tr><td class="col-field"><code>primary_image_tag</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>头像版本标记；换头像后变化，用于让客户端头像 URL 失效重取。</td></tr>
+          <tr><td class="col-field"><code>created_at</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL</td><td>创建时间，ISO 定宽 UTC。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card" id="tokens">
+      <h2><span class="tbl">tokens</span><span class="cn">登录令牌</span></h2>
+      <p class="desc">登录成功后签发的访问令牌，后续请求通过 <code>api_key</code> / <code>X-Emby-Token</code> 携带。</p>
+      <div class="meta">
+        <div><b>主键</b> <code>token</code></div>
+        <div><b>写入方</b> <code>store/users.go</code> · 登录 / 登出</div>
+        <div><b>缓存</b> 进程内 <code>tokenCache</code>，登出时主动失效</div>
+      </div>
+      <table>
+        <thead><tr><th>字段</th><th>类型</th><th>约束 / 默认</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td class="col-field"><code>token</code> <span class="pk">PK</span></td><td class="col-type">TEXT</td><td class="col-cons">PRIMARY KEY</td><td>令牌值本身即主键，校验时按值直接命中。</td></tr>
+          <tr><td class="col-field"><code>user_id</code> <span class="fk">FK</span></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL</td><td>所属用户，指向 <code>users.id</code>。</td></tr>
+          <tr><td class="col-field"><code>created_at</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL</td><td>签发时间。当前不做过期清理，登出即删除。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card" id="libraries">
+      <h2><span class="tbl">libraries</span><span class="cn">媒体库</span></h2>
+      <p class="desc">对应 Emby 的 <code>VirtualFolders</code>，侧栏的每个分区就是一行。</p>
+      <div class="meta">
+        <div><b>主键</b> <code>id</code></div>
+        <div><b>写入方</b> <code>store/libraries.go</code> · 媒体库管理接口</div>
+        <div><b>被引用</b> <code>items.library_id</code></div>
+      </div>
+      <table>
+        <thead><tr><th>字段</th><th>类型</th><th>约束 / 默认</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td class="col-field"><code>id</code> <span class="pk">PK</span></td><td class="col-type">TEXT</td><td class="col-cons">PRIMARY KEY</td><td>媒体库 ID，也作为 <code>ParentId</code> 出现在条目查询里。</td></tr>
+          <tr><td class="col-field"><code>name</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL</td><td>显示名称。</td></tr>
+          <tr><td class="col-field"><code>collection_type</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT 'movies'</td><td>媒体库类型（movies 等），影响扫描与展示策略。</td></tr>
+          <tr><td class="col-field"><code>path</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>单目录兼容字段，仅为老数据保留。</td></tr>
+          <tr><td class="col-field"><code>paths</code> <span class="json">JSON</span></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT '[]'</td><td>权威目录列表：<code>["D:/A","E:/B"]</code>，一个库可挂多个目录。</td></tr>
+          <tr><td class="col-field"><code>sort_order</code></td><td class="col-type">INTEGER</td><td class="col-cons">NOT NULL DEFAULT 0</td><td>侧栏排序序号，客户端保存的自定义顺序也写这里。</td></tr>
+          <tr><td class="col-field"><code>prefer_local_artwork</code></td><td class="col-type">INTEGER</td><td class="col-cons">NOT NULL DEFAULT 1</td><td>1 = 优先使用媒体目录里的海报/封面；0 = 优先用服务端从视频画面生成的图片。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card" id="items">
+      <h2><span class="tbl">items</span><span class="cn">媒体条目</span></h2>
+      <p class="desc">
+        全库核心表：电影、剧集、季、单集、家庭视频都是 items 的一行，用 <code>type</code> 区分、
+        <code>parent_id</code> 组织层级。扫描入库时写入，元数据编辑与刮削会更新。
+      </p>
+      <div class="meta">
+        <div><b>主键</b> <code>id</code></div>
+        <div><b>写入方</b> 扫描器 / 元数据编辑 / 刮削</div>
+        <div><b>被引用</b> <code>user_data</code> · <code>play_sessions</code> · <code>item_people</code> · <code>item_groups</code></div>
+      </div>
+      <table>
+        <thead><tr><th>字段</th><th>类型</th><th>约束 / 默认</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td class="col-field"><code>id</code> <span class="pk">PK</span></td><td class="col-type">TEXT</td><td class="col-cons">PRIMARY KEY</td><td>条目 ID，32 位十六进制，与 Emby Id 形态一致。</td></tr>
+          <tr><td class="col-field"><code>library_id</code> <span class="fk">FK</span></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>所属媒体库，指向 <code>libraries.id</code>。</td></tr>
+          <tr><td class="col-field"><code>parent_id</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>父条目：库下的顶层条目常等于 <code>library_id</code>；剧集结构中为 剧集 → 季 → 集。</td></tr>
+          <tr><td class="col-field"><code>type</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>条目类型：<code>Movie</code> / <code>Series</code> / <code>Season</code> / <code>Episode</code> / <code>Video</code>。</td></tr>
+          <tr><td class="col-field"><code>name</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>显示标题。</td></tr>
+          <tr><td class="col-field"><code>sort_name</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>排序用标题（去掉冠词等），默认排序字段。</td></tr>
+          <tr><td class="col-field"><code>overview</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>简介，同时参与全文搜索（名称 / 排序名 / 简介三列 LIKE）。</td></tr>
+          <tr><td class="col-field"><code>production_year</code></td><td class="col-type">INTEGER</td><td class="col-cons">可空</td><td>年份，供年份筛选。</td></tr>
+          <tr><td class="col-field"><code>premiere_date</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>上映 / 首播日期，ISO 字符串。</td></tr>
+          <tr><td class="col-field"><code>date_created</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>入库时间，「最新入库」排序依据，配合 <code>idx_items_library_created</code>。</td></tr>
+          <tr><td class="col-field"><code>community_rating</code></td><td class="col-type">REAL</td><td class="col-cons">可空</td><td>评分（0–10），支持最低评分筛选。</td></tr>
+          <tr><td class="col-field"><code>official_rating</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>内容分级（如 PG-13）。</td></tr>
+          <tr><td class="col-field"><code>run_time_ticks</code></td><td class="col-type">INTEGER</td><td class="col-cons">NOT NULL DEFAULT 0</td><td>时长，单位 100ns（Emby 约定）。续播进度与「看完 90%」判定都用它换算。</td></tr>
+          <tr><td class="col-field"><code>width</code> / <code>height</code></td><td class="col-type">INTEGER</td><td class="col-cons">NOT NULL DEFAULT 0</td><td>分辨率像素，用于按高度筛选与卡片信息展示。</td></tr>
+          <tr><td class="col-field"><code>path</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>媒体文件绝对路径，<code>/Videos/{id}/stream</code> 直接回源这个文件。</td></tr>
+          <tr><td class="col-field"><code>container</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>容器格式（mkv、mp4 等）。</td></tr>
+          <tr><td class="col-field"><code>size</code></td><td class="col-type">INTEGER</td><td class="col-cons">NOT NULL DEFAULT 0</td><td>文件大小（字节）。</td></tr>
+          <tr><td class="col-field"><code>bitrate</code></td><td class="col-type">INTEGER</td><td class="col-cons">NOT NULL DEFAULT 0</td><td>总码率（bps）。</td></tr>
+          <tr><td class="col-field"><code>media_streams</code> <span class="json">JSON</span></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT '[]'</td><td>ffprobe 结果原样透传的音视频流数组，直接进 <code>MediaSources/MediaStreams</code>。</td></tr>
+          <tr><td class="col-field"><code>genres</code> <span class="json">JSON</span></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT '[]'</td><td>流派名称数组，筛选时走 <code>json_each</code>。</td></tr>
+          <tr><td class="col-field"><code>tags</code> <span class="json">JSON</span></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT '[]'</td><td>标签数组，同样用 <code>json_each</code> 过滤。</td></tr>
+          <tr><td class="col-field"><code>studios</code> <span class="json">JSON</span></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT '[]'</td><td>工作室数组，元素形态 <code>{"Id":"studio1","Name":"A24"}</code>。</td></tr>
+          <tr><td class="col-field"><code>people</code> <span class="json">JSON</span></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT '[]'</td><td>入库时的演职人员快照。展示与筛选以 <code>persons</code> + <code>item_people</code> 为准。</td></tr>
+          <tr><td class="col-field"><code>chapters</code> <span class="json">JSON</span></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT '[]'</td><td>章节标记（起始位置 + 名称），详情页章节列表使用。</td></tr>
+          <tr><td class="col-field"><code>provider_ids</code> <span class="json">JSON</span></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT '{}'</td><td>外部编号：<code>{"Tmdb":"19995","Imdb":"tt0499549"}</code>。</td></tr>
+          <tr><td class="col-field"><code>external_urls</code> <span class="json">JSON</span></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT '[]'</td><td>外部链接数组。</td></tr>
+          <tr><td class="col-field"><code>image_tags</code> <span class="json">JSON</span></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT '{}'</td><td>各图片类型的版本标记：<code>{"Primary":"fc6c7c05","Logo":"..."}</code>，用于图片 URL 的缓存失效。</td></tr>
+          <tr><td class="col-field"><code>backdrop_tags</code> <span class="json">JSON</span></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT '[]'</td><td>背景图版本标记数组。</td></tr>
+          <tr><td class="col-field"><code>screenshot_tags</code> <span class="json">JSON</span></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT '[]'</td><td>截图预览的版本标记数组，与 <code>Images/{type}</code> 里的 Screenshot 对应。</td></tr>
+          <tr><td class="col-field"><code>fingerprint</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>文件「大小:修改时间」组合。重复扫描时相同即跳过 ffprobe，是增量扫描的关键。</td></tr>
+          <tr><td class="col-field"><code>nfo_mtime</code></td><td class="col-type">INTEGER</td><td class="col-cons">NOT NULL DEFAULT 0</td><td>NFO 文件修改时间。视频没变但 NFO 改了也要重新入库。</td></tr>
+        </tbody>
+      </table>
+      <div class="note">
+        <b>索引：</b><code>library_id</code>、<code>parent_id</code>、<code>type</code>、<code>name</code>、
+        <code>sort_name</code>、<code>premiere_date</code> 各一条单列索引，
+        另有 <code>idx_items_library_created(library_id, date_created)</code> 服务「库内最新加入」。
+      </div>
+    </section>
+
+    <section class="card" id="user_data">
+      <h2><span class="tbl">user_data</span><span class="cn">用户数据</span></h2>
+      <p class="desc">
+        每个用户对每个条目的个人状态：收藏、已看、续播进度、观看历史。
+        这是「观看历史」「收藏」和播放进度记忆的唯一数据来源。
+      </p>
+      <div class="meta">
+        <div><b>主键</b> <code>(user_id, item_id)</code></div>
+        <div><b>写入方</b> <code>store/userdata.go</code> · 收藏 / 已看 / 播报进度</div>
+        <div><b>读取方</b> 列表查询的 <code>LEFT JOIN</code>、详情页 <code>UserData</code></div>
+      </div>
+      <table>
+        <thead><tr><th>字段</th><th>类型</th><th>约束 / 默认</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td class="col-field"><code>user_id</code> <span class="pk">PK</span> <span class="fk">FK</span></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL</td><td>用户，指向 <code>users.id</code>，与 <code>item_id</code> 组成联合主键。</td></tr>
+          <tr><td class="col-field"><code>item_id</code> <span class="pk">PK</span> <span class="fk">FK</span></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL</td><td>条目，指向 <code>items.id</code>。</td></tr>
+          <tr><td class="col-field"><code>is_favorite</code></td><td class="col-type">INTEGER</td><td class="col-cons">NOT NULL DEFAULT 0</td><td>1 = 已收藏。对应 <code>Filters=IsFavorite</code>。</td></tr>
+          <tr><td class="col-field"><code>played</code></td><td class="col-type">INTEGER</td><td class="col-cons">NOT NULL DEFAULT 0</td><td>1 = 已看完。播放停止上报时位置 ≥ 90% 自动置 1，也可手动标记。</td></tr>
+          <tr><td class="col-field"><code>playback_position_ticks</code></td><td class="col-type">INTEGER</td><td class="col-cons">NOT NULL DEFAULT 0</td><td>续播位置（100ns）。<code>played = 1</code> 时清零；&gt; 0 时卡片显示进度条并支持续播。</td></tr>
+          <tr><td class="col-field"><code>play_count</code></td><td class="col-type">INTEGER</td><td class="col-cons">NOT NULL DEFAULT 0</td><td>播放次数。手动标记已看时 +1。</td></tr>
+          <tr><td class="col-field"><code>last_played_date</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>最近播放时间。<b>观看历史的判定与排序依据</b>：非空即算播放过。</td></tr>
+        </tbody>
+      </table>
+      <div class="note">
+        <b>索引：</b><code>idx_user_data_played(user_id, last_played_date)</code> 服务按最近播放排序；
+        <code>idx_user_data_resume(user_id, played, last_played_date)</code> 名字沿用旧版「继续观看」，
+        当前服务于观看历史的时间过滤与排序。
+      </div>
+    </section>
+
+    <section class="card" id="play_sessions">
+      <h2><span class="tbl">play_sessions</span><span class="cn">播放会话</span></h2>
+      <p class="desc">
+        播放器每 10 秒上报一次的会话快照（<code>Sessions/Playing/Progress</code>），
+        用于「正在播放」类接口。它不是进度记忆的存储，进度以 <code>user_data</code> 为准。
+      </p>
+      <div class="meta">
+        <div><b>主键</b> <code>id</code>（客户端上送的 PlaySessionID）</div>
+        <div><b>写入方</b> <code>store.SavePlaySession</code></div>
+        <div><b>清理</b> <code>PurgeStalePlaySessions</code> 按 <code>updated_at</code> 定期删除</div>
+      </div>
+      <table>
+        <thead><tr><th>字段</th><th>类型</th><th>约束 / 默认</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td class="col-field"><code>id</code> <span class="pk">PK</span></td><td class="col-type">TEXT</td><td class="col-cons">PRIMARY KEY</td><td>会话 ID，直接使用客户端上送的 <code>PlaySessionId</code>。</td></tr>
+          <tr><td class="col-field"><code>user_id</code> <span class="fk">FK</span></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL</td><td>播放用户。</td></tr>
+          <tr><td class="col-field"><code>item_id</code> <span class="fk">FK</span></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL</td><td>正在播放的条目。</td></tr>
+          <tr><td class="col-field"><code>position_ticks</code></td><td class="col-type">INTEGER</td><td class="col-cons">NOT NULL DEFAULT 0</td><td>该会话最后一次上报的位置（100ns）。</td></tr>
+          <tr><td class="col-field"><code>updated_at</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL</td><td>最后上报时间，过期会话由清理任务删除。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card" id="persons">
+      <h2><span class="tbl">persons</span><span class="cn">演员主表</span></h2>
+      <p class="desc">
+        演员是独立主体：入库时没有就新建、有了就更新。条目被删除只清关联，这一行保留；
+        作品数归零后不再出现在演员列表里。展示信息以本表为准，<code>items.people</code> 只是快照。
+      </p>
+      <div class="meta">
+        <div><b>主键</b> <code>person_id</code></div>
+        <div><b>写入方</b> 扫描入库 / 演员刮削 / 手动编辑</div>
+        <div><b>被引用</b> <code>item_people.person_id</code>、<code>image_locks.entity_id</code></div>
+      </div>
+      <table>
+        <thead><tr><th>字段</th><th>类型</th><th>约束 / 默认</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td class="col-field"><code>person_id</code> <span class="pk">PK</span></td><td class="col-type">TEXT</td><td class="col-cons">PRIMARY KEY</td><td>人物 ID。</td></tr>
+          <tr><td class="col-field"><code>name</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL</td><td>姓名，索引 <code>idx_persons_name</code>（<code>COLLATE NOCASE</code>）支持忽略大小写的搜索。</td></tr>
+          <tr><td class="col-field"><code>sort_name</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>排序用姓名。</td></tr>
+          <tr><td class="col-field"><code>image_tag</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>头像（Primary）版本标记，换头像后变化以刷新客户端缓存。</td></tr>
+          <tr><td class="col-field"><code>backdrop_tags</code> <span class="json">JSON</span></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT '[]'</td><td>写真 / 背景图版本标记数组。</td></tr>
+          <tr><td class="col-field"><code>birth_date</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>出生日期。人物 DTO 用 <code>PremiereDate</code> 承载生日，列表取年份展示。</td></tr>
+          <tr><td class="col-field"><code>premiere_date</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>出道 / 首映日期，与生日分开存，来源与语义不同。</td></tr>
+          <tr><td class="col-field"><code>gender</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>性别。</td></tr>
+          <tr><td class="col-field"><code>cup_size</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>罩杯。Emby 协议外的扩展字段，供演员排序与筛选。</td></tr>
+          <tr><td class="col-field"><code>overview</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>人物介绍。</td></tr>
+          <tr><td class="col-field"><code>provider_ids</code> <span class="json">JSON</span></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT '{}'</td><td>与 items 同构的外部编号：<code>{"Tmdb":"123","Imdb":"nm456"}</code>。</td></tr>
+          <tr><td class="col-field"><code>manual_fields</code> <span class="json">JSON</span></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT '[]'</td><td>手动编辑过的字段名数组，刮削时跳过这些字段，避免覆盖人工修改。</td></tr>
+          <tr><td class="col-field"><code>scraped_at</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>上次 TMDB 刮削时间。</td></tr>
+          <tr><td class="col-field"><code>match_state</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>刮削匹配结果：<code>matched</code> / <code>ambiguous</code> / <code>not_found</code>。</td></tr>
+          <tr><td class="col-field"><code>item_count</code></td><td class="col-type">INTEGER</td><td class="col-cons">NOT NULL DEFAULT 0</td><td>作品数冗余值，关联变化时重算，避免列表页做全表聚合。</td></tr>
+          <tr><td class="col-field"><code>created_at</code> / <code>updated_at</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>创建 / 更新时间。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card" id="item_people">
+      <h2><span class="tbl">item_people</span><span class="cn">条目与演员关联</span></h2>
+      <p class="desc">
+        多对多关联表。同一演员在同一条内容里可能既是导演又是编剧，
+        所以唯一键必须包含 <code>type</code> 和 <code>role</code>。
+      </p>
+      <div class="meta">
+        <div><b>主键</b> <code>(item_id, person_id, type, role)</code></div>
+        <div><b>索引</b> <code>idx_item_people_person(person_id)</code></div>
+        <div><b>写入方</b> 扫描入库 / 演员关联维护</div>
+      </div>
+      <table>
+        <thead><tr><th>字段</th><th>类型</th><th>约束 / 默认</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td class="col-field"><code>item_id</code> <span class="pk">PK</span> <span class="fk">FK</span></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL</td><td>条目，指向 <code>items.id</code>。</td></tr>
+          <tr><td class="col-field"><code>person_id</code> <span class="pk">PK</span> <span class="fk">FK</span></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL</td><td>人物，指向 <code>persons.person_id</code>。</td></tr>
+          <tr><td class="col-field"><code>type</code> <span class="pk">PK</span></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>参与类型：<code>Actor</code> / <code>Director</code> / <code>Writer</code> 等。</td></tr>
+          <tr><td class="col-field"><code>role</code> <span class="pk">PK</span></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT ''</td><td>角色名（演员表里的饰演角色），导演/编剧通常为空。</td></tr>
+          <tr><td class="col-field"><code>sort_order</code></td><td class="col-type">INTEGER</td><td class="col-cons">NOT NULL DEFAULT 0</td><td>同类型内的展示顺序（演职员表次序）。</td></tr>
+        </tbody>
+      </table>
+      <div class="note">
+        <b>查询特征：</b>按演员筛选作品时用 <code>EXISTS (SELECT 1 FROM item_people ...)</code>，
+        天然为此人「导演 + 编剧」的多条关联去重。
+      </div>
+    </section>
+
+    <section class="card" id="item_groups">
+      <h2><span class="tbl">item_groups</span><span class="cn">分片影片归属</span></h2>
+      <p class="desc">
+        一部影片被切成 <code>_1</code> / <code>_2</code> 多个文件时，用它把同组的条目串起来。
+        单归属设计（<code>item_id</code> 作主键）：一个物理文件只可能是某部作品的一段。
+        只有带明确序号后缀的文件才写行，普通影片一条都不写。
+      </p>
+      <div class="meta">
+        <div><b>主键</b> <code>item_id</code></div>
+        <div><b>索引</b> <code>idx_item_groups_key(group_key)</code></div>
+        <div><b>写入方</b> 扫描旁路 + 老库 <code>BackfillItemGroups</code> 回填</div>
+      </div>
+      <table>
+        <thead><tr><th>字段</th><th>类型</th><th>约束 / 默认</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td class="col-field"><code>item_id</code> <span class="pk">PK</span> <span class="fk">FK</span></td><td class="col-type">TEXT</td><td class="col-cons">PRIMARY KEY</td><td>分片条目，指向 <code>items.id</code>。</td></tr>
+          <tr><td class="col-field"><code>group_key</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL</td><td>组标识 = <code>library_id | 相对目录 | 归一化标题</code>，算法见 <code>internal/partgroup</code>。</td></tr>
+          <tr><td class="col-field"><code>part_index</code></td><td class="col-type">INTEGER</td><td class="col-cons">NOT NULL DEFAULT 0</td><td>文件名里的原始序号（从 1 起）。存原始值而非组内位置，缺号时才看得出原始编号。</td></tr>
+          <tr><td class="col-field"><code>part_count</code></td><td class="col-type">INTEGER</td><td class="col-cons">NOT NULL DEFAULT 0</td><td>组内成员数，冗余字段，省掉详情页每次 <code>COUNT(*)</code>。</td></tr>
+          <tr><td class="col-field"><code>relation</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL DEFAULT 'part'</td><td>关系类型，当前固定 <code>part</code>，预留给将来的 series / collection。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card" id="image_locks">
+      <h2><span class="tbl">image_locks</span><span class="cn">图片锁</span></h2>
+      <p class="desc">
+        被锁定的条目 / 演员 / 媒体库，扫描导入与自动重拼封面都不会覆盖其图片。
+        单独一张表而不是在 items 加列，因为锁要同时覆盖三类实体。
+      </p>
+      <div class="meta">
+        <div><b>主键</b> <code>entity_id</code>（多态）</div>
+        <div><b>写入方</b> 图片上传 / 手动换图流程</div>
+        <div><b>指向</b> <code>items.id</code> 或 <code>persons.person_id</code> 或 <code>libraries.id</code></div>
+      </div>
+      <table>
+        <thead><tr><th>字段</th><th>类型</th><th>约束 / 默认</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td class="col-field"><code>entity_id</code> <span class="pk">PK</span></td><td class="col-type">TEXT</td><td class="col-cons">PRIMARY KEY</td><td>被锁实体 ID，类型由调用方上下文决定（条目 / 人物 / 媒体库）。</td></tr>
+          <tr><td class="col-field"><code>created_at</code></td><td class="col-type">TEXT</td><td class="col-cons">NOT NULL</td><td>加锁时间。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card" id="rules">
+      <h2><span class="tbl">业务规则</span><span class="cn">跨表约定</span></h2>
+      <ul class="plain">
+        <li><b>观看历史</b>：<code>user_data.last_played_date &lt;&gt; ''</code>，按该字段倒序。已看完的条目也保留。</li>
+        <li><b>续播进度</b>：<code>playback_position_ticks &gt; 0 AND played = 0</code> 时卡片显示进度条，起播时作为 <code>StartPositionTicks</code>。</li>
+        <li><b>看完判定</b>：只在 <code>Sessions/Playing/Stopped</code> 上报时判断，位置 ≥ 时长 90% 则 <code>played = 1</code> 并清零续播位置。</li>
+        <li><b>收藏</b>：<code>user_data.is_favorite = 1</code>，对应查询参数 <code>Filters=IsFavorite</code>。</li>
+        <li><b>增量扫描</b>：<code>items.fingerprint</code>（size:mtime）不变且 <code>nfo_mtime</code> 未变时跳过 ffprobe。</li>
+        <li><b>演员展示</b>：以 <code>persons</code> + <code>item_people</code> 为准，<code>items.people</code> 仅作入库快照。</li>
+        <li><b>图片缓存失效</b>：<code>image_tags</code> / <code>backdrop_tags</code> / <code>screenshot_tags</code> / <code>persons.image_tag</code> / <code>users.primary_image_tag</code> 变化即让旧 URL 失效。</li>
+        <li><b>外键</b>：schema 未声明 <code>FOREIGN KEY</code>，关联完整性由应用层与扫描流程保证。</li>
+      </ul>
+    </section>
+
+  </main>
+</div>
+
+<footer>
+  数据来源：<code>server/internal/store/schema.sql</code>（schema v9）与 <code>server/internal/store/*.go</code> 的读写逻辑。
+  表结构变更时请同步更新本文件。
+</footer>
+
+</body>
+</html>
