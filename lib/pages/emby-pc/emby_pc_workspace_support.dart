@@ -1246,32 +1246,239 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-// 首页主视觉：整块背景图 + 左侧信息层，点按进入详情，播放按钮直接起播。
-class _HomeHeroBanner extends StatefulWidget {
-  final EmbyPcItem item;
-  final VoidCallback onPlay;
-  final VoidCallback onOpen;
-  final VoidCallback? onFavorite;
-  final bool favoriteBusy;
+// 首页主视觉轮播：多张背景图循环切换，左侧信息层随页更新。
+class _HomeHeroCarousel extends StatefulWidget {
+  final List<EmbyPcItem> items;
+  final Set<String> favoriteBusyIds;
+  final ValueChanged<EmbyPcItem> onPlay;
+  final ValueChanged<EmbyPcItem> onOpen;
+  final ValueChanged<EmbyPcItem> onFavorite;
 
-  const _HomeHeroBanner({
-    required this.item,
+  const _HomeHeroCarousel({
+    required this.items,
+    required this.favoriteBusyIds,
     required this.onPlay,
     required this.onOpen,
-    this.onFavorite,
-    this.favoriteBusy = false,
+    required this.onFavorite,
   });
 
   @override
-  State<_HomeHeroBanner> createState() => _HomeHeroBannerState();
+  State<_HomeHeroCarousel> createState() => _HomeHeroCarouselState();
 }
 
-class _HomeHeroBannerState extends State<_HomeHeroBanner> {
+class _HomeHeroCarouselState extends State<_HomeHeroCarousel> {
+  // 自动轮播间隔与切换动画时长；悬停或手动滑动期间暂停。
+  static const Duration _autoInterval = Duration(seconds: 8);
+  static const Duration _slideDuration = Duration(milliseconds: 620);
+  // 无限循环页的基准圈层，规避最后一页回到第一页时的长距离倒滑。
+  static const int _basePage = 2000;
+
+  late final PageController _controller;
+  Timer? _timer;
+  int _rawPage = 0;
   bool _hovered = false;
+
+  int get _length => widget.items.length;
+
+  int get _initialPage => _length > 1 ? _length * _basePage : 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _rawPage = _initialPage;
+    _controller = PageController(initialPage: _initialPage);
+    _startAutoPlay();
+  }
+
+  @override
+  void didUpdateWidget(covariant _HomeHeroCarousel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.items.length != widget.items.length) {
+      _rawPage = _initialPage;
+      if (_controller.hasClients) _controller.jumpToPage(_rawPage);
+      _startAutoPlay();
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  // 只有两页以上才需要自动播放，单条内容退化为静态主视觉。
+  void _startAutoPlay() {
+    _timer?.cancel();
+    if (_length < 2) return;
+    _timer = Timer.periodic(_autoInterval, (_) {
+      if (!mounted || _hovered || !_controller.hasClients) return;
+      _controller.nextPage(
+        duration: _slideDuration,
+        curve: Curves.easeInOutCubic,
+      );
+    });
+  }
+
+  void _goTo(int index) {
+    if (!_controller.hasClients || _length < 2) return;
+    // 在当前圈层内前后移动，保持循环的同时避免跨圈跳页。
+    final target = _rawPage - (_rawPage % _length) + index;
+    _controller.animateToPage(
+      target,
+      duration: _slideDuration,
+      curve: Curves.easeInOutCubic,
+    );
+    _startAutoPlay();
+  }
+
+  bool _handleScroll(ScrollNotification notification) {
+    if (notification is ScrollStartNotification &&
+        notification.dragDetails != null) {
+      _timer?.cancel();
+    } else if (notification is ScrollEndNotification) {
+      _startAutoPlay();
+    }
+    return false;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final item = widget.item;
+    final items = widget.items;
+    if (items.isEmpty) return const SizedBox.shrink();
+    // 窄屏收窄留白并把标题降级，避免主视觉在小窗口里只剩半行字。
+    final narrow = MediaQuery.sizeOf(context).width < 600;
+    final current = _rawPage % items.length;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(narrow ? 12 : 28, 14, narrow ? 12 : 28, 4),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // 高度跟随窗口宽度，宽屏更像影院大屏，窄窗口也保留足够文字空间。
+          final height = narrow
+              ? (constraints.maxWidth * 0.66).clamp(280.0, 340.0)
+              : (constraints.maxWidth * 0.30).clamp(336.0, 424.0);
+          final compactHero = narrow || height < 380;
+          return SizedBox(
+            height: height,
+            child: MouseRegion(
+              onEnter: (_) => setState(() => _hovered = true),
+              onExit: (_) => setState(() => _hovered = false),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    NotificationListener<ScrollNotification>(
+                      onNotification: _handleScroll,
+                      child: PageView.builder(
+                        controller: _controller,
+                        // 单条内容不循环，避免重复渲染同一页。
+                        itemCount: items.length > 1 ? null : 1,
+                        onPageChanged: (page) =>
+                            setState(() => _rawPage = page),
+                        itemBuilder: (context, page) {
+                          final item = items[page % items.length];
+                          return _HeroSlide(
+                            item: item,
+                            hovered: _hovered,
+                            narrow: narrow,
+                            compactHero: compactHero,
+                            favoriteBusy: widget.favoriteBusyIds.contains(
+                              item.id,
+                            ),
+                            onPlay: () => widget.onPlay(item),
+                            onOpen: () => widget.onOpen(item),
+                            onFavorite: () => widget.onFavorite(item),
+                          );
+                        },
+                      ),
+                    ),
+                    if (items.length > 1) ...[
+                      // 悬停时才露出左右切换按钮，平时不遮挡画面。
+                      Positioned(
+                        right: 16,
+                        top: 0,
+                        bottom: 0,
+                        child: IgnorePointer(
+                          ignoring: !_hovered,
+                          child: AnimatedOpacity(
+                            opacity: _hovered ? 1 : 0,
+                            duration: const Duration(milliseconds: 180),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _HeroArrowButton(
+                                  icon: Icons.chevron_left_rounded,
+                                  onTap: () {
+                                    _controller.previousPage(
+                                      duration: _slideDuration,
+                                      curve: Curves.easeInOutCubic,
+                                    );
+                                    _startAutoPlay();
+                                  },
+                                ),
+                                const SizedBox(width: 8),
+                                _HeroArrowButton(
+                                  icon: Icons.chevron_right_rounded,
+                                  onTap: () {
+                                    _controller.nextPage(
+                                      duration: _slideDuration,
+                                      curve: Curves.easeInOutCubic,
+                                    );
+                                    _startAutoPlay();
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      // 指示器贴右下角，落在文字层下方的留白里。
+                      Positioned(
+                        right: narrow ? 14 : 24,
+                        bottom: narrow ? 4 : 8,
+                        child: _HeroDots(
+                          count: items.length,
+                          index: current,
+                          onTap: _goTo,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// 单张主视觉：整块背景图 + 左侧信息层，点按进入详情，播放按钮直接起播。
+class _HeroSlide extends StatelessWidget {
+  final EmbyPcItem item;
+  final bool hovered;
+  final bool narrow;
+  final bool compactHero;
+  final bool favoriteBusy;
+  final VoidCallback onPlay;
+  final VoidCallback onOpen;
+  final VoidCallback? onFavorite;
+
+  const _HeroSlide({
+    required this.item,
+    required this.hovered,
+    required this.narrow,
+    required this.compactHero,
+    required this.favoriteBusy,
+    required this.onPlay,
+    required this.onOpen,
+    this.onFavorite,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     final progress = item.runTimeTicks <= 0
         ? 0.0
         : (item.playbackPositionTicks / item.runTimeTicks)
@@ -1287,271 +1494,230 @@ class _HomeHeroBannerState extends State<_HomeHeroBanner> {
       if (item.runtimeLabel.isNotEmpty) item.runtimeLabel,
       ...item.genres.take(2),
     ];
-    // 窄屏收窄留白并把标题降级，避免主视觉在小窗口里只剩半行字。
-    final narrow = MediaQuery.sizeOf(context).width < 600;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(narrow ? 12 : 28, 14, narrow ? 12 : 28, 4),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          // 高度跟随窗口宽度，宽屏更像影院大屏，窄窗口也保留足够文字空间。
-          final height = narrow
-              ? (constraints.maxWidth * 0.66).clamp(280.0, 340.0)
-              : (constraints.maxWidth * 0.30).clamp(336.0, 424.0);
-          final compactHero = narrow || height < 380;
-          return SizedBox(
-            height: height,
-            child: MouseRegion(
-              cursor: SystemMouseCursors.click,
-              onEnter: (_) => setState(() => _hovered = true),
-              onExit: (_) => setState(() => _hovered = false),
-              child: GestureDetector(
-                onTap: widget.onOpen,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(20),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      AnimatedScale(
-                        scale: _hovered ? 1.02 : 1,
-                        duration: const Duration(milliseconds: 420),
-                        curve: Curves.easeOut,
-                        child: EmbyPcNetworkImage(url: imageUrl),
-                      ),
-                      // 左侧压暗保证文字可读，右侧保留画面细节。
-                      const DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.centerLeft,
-                            end: Alignment.centerRight,
-                            colors: [
-                              Color(0xF20A0C10),
-                              Color(0x8C0A0C10),
-                              Color(0x000A0C10),
-                            ],
-                            stops: [0, 0.48, 1],
-                          ),
-                        ),
-                      ),
-                      const DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.bottomCenter,
-                            end: Alignment.topCenter,
-                            colors: [Color(0xD90A0C10), Color(0x000A0C10)],
-                            stops: [0, 0.66],
-                          ),
-                        ),
-                      ),
-                      Positioned(
-                        left: narrow ? 18 : 40,
-                        right: narrow ? 18 : 40,
-                        bottom: narrow ? 22 : 34,
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                _HeroTag(
-                                  label: progress > 0
-                                      ? '继续观看'
-                                      : _heroTypeLabel(item.type),
-                                  accent: progress > 0,
-                                ),
-                                if (item.communityRating != null) ...[
-                                  const SizedBox(width: 12),
-                                  const Icon(
-                                    Icons.star_rounded,
-                                    size: 16,
-                                    color: Color(0xFFF5B942),
-                                  ),
-                                  const SizedBox(width: 3),
-                                  Text(
-                                    item.communityRating!.toStringAsFixed(1),
-                                    style: const TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w700,
-                                      color: Color(0xFFF7C863),
-                                    ),
-                                  ),
-                                ],
-                                if (item.officialRating.isNotEmpty) ...[
-                                  const SizedBox(width: 10),
-                                  Text(
-                                    item.officialRating,
-                                    style: TextStyle(
-                                      fontSize: 11.5,
-                                      fontWeight: FontWeight.w600,
-                                      color: Colors.white.withValues(
-                                        alpha: 0.8,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            Text(
-                              item.name,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontFamily: 'Microsoft YaHei UI',
-                                fontSize: compactHero ? 28 : 34,
-                                fontWeight: FontWeight.w800,
-                                height: 1.18,
-                                letterSpacing: 0.5,
-                                color: Colors.white,
-                                shadows: const [
-                                  Shadow(
-                                    color: Color(0x99000000),
-                                    blurRadius: 16,
-                                    offset: Offset(0, 4),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            if (meta.isNotEmpty) ...[
-                              const SizedBox(height: 10),
-                              Text(
-                                meta.join('  ·  '),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 12.5,
-                                  letterSpacing: 0.3,
-                                  color: Colors.white.withValues(alpha: 0.78),
-                                ),
-                              ),
-                            ],
-                            if (!narrow && item.overview.isNotEmpty) ...[
-                              const SizedBox(height: 10),
-                              ConstrainedBox(
-                                constraints: const BoxConstraints(
-                                  maxWidth: 580,
-                                ),
-                                child: Text(
-                                  item.overview.replaceAll('\n', ' '),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    height: 1.55,
-                                    color: Colors.white.withValues(alpha: 0.72),
-                                  ),
-                                ),
-                              ),
-                            ],
-                            const SizedBox(height: 20),
-                            Wrap(
-                              spacing: 12,
-                              runSpacing: 10,
-                              crossAxisAlignment: WrapCrossAlignment.center,
-                              children: [
-                                FilledButton.icon(
-                                  onPressed: widget.onPlay,
-                                  style: FilledButton.styleFrom(
-                                    backgroundColor: Colors.white,
-                                    foregroundColor: const Color(0xFF12151A),
-                                    minimumSize: const Size(140, 46),
-                                    shape: const StadiumBorder(),
-                                    textStyle: const TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                  icon: const Icon(
-                                    Icons.play_arrow_rounded,
-                                    size: 24,
-                                  ),
-                                  label: Text(progress > 0 ? '继续播放' : '播放正片'),
-                                ),
-                                OutlinedButton.icon(
-                                  onPressed: widget.onOpen,
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: Colors.white,
-                                    minimumSize: const Size(0, 46),
-                                    backgroundColor: Colors.white.withValues(
-                                      alpha: 0.10,
-                                    ),
-                                    side: BorderSide(
-                                      color: Colors.white.withValues(
-                                        alpha: 0.34,
-                                      ),
-                                    ),
-                                    shape: const StadiumBorder(),
-                                    textStyle: const TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  icon: const Icon(
-                                    Icons.info_outline_rounded,
-                                    size: 19,
-                                  ),
-                                  label: const Text('详情'),
-                                ),
-                                if (widget.onFavorite != null)
-                                  IconButton(
-                                    tooltip: item.isFavorite ? '取消收藏' : '收藏',
-                                    onPressed: widget.favoriteBusy
-                                        ? null
-                                        : widget.onFavorite,
-                                    style: IconButton.styleFrom(
-                                      minimumSize: const Size.square(46),
-                                      backgroundColor: Colors.white.withValues(
-                                        alpha: 0.10,
-                                      ),
-                                      foregroundColor: item.isFavorite
-                                          ? const Color(0xFFFF5C7A)
-                                          : Colors.white,
-                                      side: BorderSide(
-                                        color: Colors.white.withValues(
-                                          alpha: 0.28,
-                                        ),
-                                      ),
-                                    ),
-                                    icon: widget.favoriteBusy
-                                        ? const SizedBox.square(
-                                            dimension: 16,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                              color: Colors.white,
-                                            ),
-                                          )
-                                        : Icon(
-                                            item.isFavorite
-                                                ? Icons.favorite_rounded
-                                                : Icons.favorite_border_rounded,
-                                            size: 21,
-                                          ),
-                                  ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (progress > 0)
-                        Positioned(
-                          left: 0,
-                          right: 0,
-                          bottom: 0,
-                          child: LinearProgressIndicator(
-                            value: progress,
-                            minHeight: 3,
-                            backgroundColor: Colors.white.withValues(
-                              alpha: 0.18,
-                            ),
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
-                        ),
-                    ],
-                  ),
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: onOpen,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            AnimatedScale(
+              scale: hovered ? 1.02 : 1,
+              duration: const Duration(milliseconds: 420),
+              curve: Curves.easeOut,
+              child: EmbyPcNetworkImage(url: imageUrl),
+            ),
+            // 左侧压暗保证文字可读，右侧保留画面细节。
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                  colors: [
+                    Color(0xF20A0C10),
+                    Color(0x8C0A0C10),
+                    Color(0x000A0C10),
+                  ],
+                  stops: [0, 0.48, 1],
                 ),
               ),
             ),
-          );
-        },
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: [Color(0xD90A0C10), Color(0x000A0C10)],
+                  stops: [0, 0.66],
+                ),
+              ),
+            ),
+            Positioned(
+              left: narrow ? 18 : 40,
+              right: narrow ? 18 : 40,
+              // 窄屏多留 8px，给右下角的轮播指示器腾出空间。
+              bottom: narrow ? 30 : 34,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      _HeroTag(
+                        label: progress > 0
+                            ? '继续观看'
+                            : _heroTypeLabel(item.type),
+                        accent: progress > 0,
+                      ),
+                      if (item.communityRating != null) ...[
+                        const SizedBox(width: 12),
+                        const Icon(
+                          Icons.star_rounded,
+                          size: 16,
+                          color: Color(0xFFF5B942),
+                        ),
+                        const SizedBox(width: 3),
+                        Text(
+                          item.communityRating!.toStringAsFixed(1),
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFFF7C863),
+                          ),
+                        ),
+                      ],
+                      if (item.officialRating.isNotEmpty) ...[
+                        const SizedBox(width: 10),
+                        Text(
+                          item.officialRating,
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white.withValues(alpha: 0.8),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    item.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontFamily: 'Microsoft YaHei UI',
+                      fontSize: compactHero ? 28 : 34,
+                      fontWeight: FontWeight.w800,
+                      height: 1.18,
+                      letterSpacing: 0.5,
+                      color: Colors.white,
+                      shadows: const [
+                        Shadow(
+                          color: Color(0x99000000),
+                          blurRadius: 16,
+                          offset: Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (meta.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      meta.join('  ·  '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        letterSpacing: 0.3,
+                        color: Colors.white.withValues(alpha: 0.78),
+                      ),
+                    ),
+                  ],
+                  if (!narrow && item.overview.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 580),
+                      child: Text(
+                        item.overview.replaceAll('\n', ' '),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          height: 1.55,
+                          color: Colors.white.withValues(alpha: 0.72),
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 10,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      FilledButton.icon(
+                        onPressed: onPlay,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: const Color(0xFF12151A),
+                          minimumSize: const Size(140, 46),
+                          shape: const StadiumBorder(),
+                          textStyle: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        icon: const Icon(Icons.play_arrow_rounded, size: 24),
+                        label: Text(progress > 0 ? '继续播放' : '播放正片'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: onOpen,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          minimumSize: const Size(0, 46),
+                          backgroundColor: Colors.white.withValues(alpha: 0.10),
+                          side: BorderSide(
+                            color: Colors.white.withValues(alpha: 0.34),
+                          ),
+                          shape: const StadiumBorder(),
+                          textStyle: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        icon: const Icon(Icons.info_outline_rounded, size: 19),
+                        label: const Text('详情'),
+                      ),
+                      if (onFavorite != null)
+                        IconButton(
+                          tooltip: item.isFavorite ? '取消收藏' : '收藏',
+                          onPressed: favoriteBusy ? null : onFavorite,
+                          style: IconButton.styleFrom(
+                            minimumSize: const Size.square(46),
+                            backgroundColor: Colors.white.withValues(
+                              alpha: 0.10,
+                            ),
+                            foregroundColor: item.isFavorite
+                                ? const Color(0xFFFF5C7A)
+                                : Colors.white,
+                            side: BorderSide(
+                              color: Colors.white.withValues(alpha: 0.28),
+                            ),
+                          ),
+                          icon: favoriteBusy
+                              ? const SizedBox.square(
+                                  dimension: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : Icon(
+                                  item.isFavorite
+                                      ? Icons.favorite_rounded
+                                      : Icons.favorite_border_rounded,
+                                  size: 21,
+                                ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            if (progress > 0)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: LinearProgressIndicator(
+                  value: progress,
+                  minHeight: 3,
+                  backgroundColor: Colors.white.withValues(alpha: 0.18),
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -1593,6 +1759,79 @@ class _HeroTag extends StatelessWidget {
       ),
     ),
   );
+}
+
+// 轮播左右切换按钮：半透明圆底，悬停时才浮现。
+class _HeroArrowButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _HeroArrowButton({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Colors.black.withValues(alpha: 0.42),
+    shape: const CircleBorder(),
+    clipBehavior: Clip.antiAlias,
+    child: InkWell(
+      onTap: onTap,
+      child: SizedBox.square(
+        dimension: 38,
+        child: Icon(icon, size: 24, color: Colors.white),
+      ),
+    ),
+  );
+}
+
+// 轮播指示器：当前页用胶囊形高亮，点击可直达对应内容。
+class _HeroDots extends StatelessWidget {
+  final int count;
+  final int index;
+  final ValueChanged<int> onTap;
+
+  const _HeroDots({
+    required this.count,
+    required this.index,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.32),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < count; i++)
+            GestureDetector(
+              onTap: () => onTap(i),
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 5),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOut,
+                  width: i == index ? 20 : 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: i == index
+                        ? colors.primary
+                        : Colors.white.withValues(alpha: 0.36),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 class _WorkspaceError extends StatelessWidget {

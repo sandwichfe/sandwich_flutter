@@ -145,7 +145,7 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
         onRetry: () => _c.loadHome(force: true),
       );
     }
-    final featured = _homeFeaturedItem;
+    final featured = _homeFeaturedItems;
     return CustomScrollView(
       controller: _scrollController,
       slivers: [
@@ -161,15 +161,15 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
               ],
             ),
           ),
-        // 顶部主视觉：优先继续观看，其次是带背景图的最新内容。
-        if (featured != null)
+        // 顶部主视觉轮播：继续观看优先，其次是带背景图的最新内容。
+        if (featured.isNotEmpty)
           SliverToBoxAdapter(
-            child: _HomeHeroBanner(
-              item: featured,
-              favoriteBusy: _favoriteBusyIds.contains(featured.id),
-              onPlay: () => _playItem(featured),
-              onOpen: () => _openItem(featured),
-              onFavorite: () => _toggleFavorite(featured),
+            child: _HomeHeroCarousel(
+              items: featured,
+              favoriteBusyIds: _favoriteBusyIds,
+              onPlay: _playItem,
+              onOpen: _openItem,
+              onFavorite: _toggleFavorite,
             ),
           ),
         SliverToBoxAdapter(child: _buildHomeLibraries(context)),
@@ -209,18 +209,27 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
     );
   }
 
-  // 主视觉优先选有进度、带背景图的条目，让“继续观看”自然成为首屏入口。
-  EmbyPcItem? get _homeFeaturedItem {
-    for (final item in _c.watchHistory) {
-      if (item.hasBackdropImage && item.playbackPositionTicks > 0) return item;
+  // 轮播候选：观看历史（带进度优先）→ 最新入库 → 各媒体库，只取带背景图的前 5 条。
+  List<EmbyPcItem> get _homeFeaturedItems {
+    const limit = 5;
+    final seen = <String>{};
+    final result = <EmbyPcItem>[];
+
+    void collect(Iterable<EmbyPcItem> source) {
+      for (final item in source) {
+        if (result.length >= limit) return;
+        if (!item.hasBackdropImage) continue;
+        if (seen.add(item.id)) result.add(item);
+      }
     }
-    for (final item in _c.watchHistory) {
-      if (item.hasBackdropImage) return item;
+
+    collect(_c.watchHistory.where((item) => item.playbackPositionTicks > 0));
+    collect(_c.watchHistory);
+    collect(_c.homeLatest);
+    for (final library in _c.libraries) {
+      collect(_c.homeLibraryItems[library.id] ?? const []);
     }
-    for (final item in _c.homeLatest) {
-      if (item.hasBackdropImage) return item;
-    }
-    return null;
+    return result;
   }
 
   // 分区标题：渐变竖条 + 标题 + “更多”入口，右侧可挂刷新/换一批。
