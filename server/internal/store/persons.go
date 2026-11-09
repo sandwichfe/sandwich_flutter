@@ -172,7 +172,7 @@ func upsertPerson(ctx context.Context, tx *sql.Tx, meta personMeta) error {
 }
 
 // refreshPersonCounts 重算指定演员的作品数。
-// 演员行本身不删除：没有作品的演员依然保留在 persons 里，只是不出现在列表里。
+// 演员行本身不删除：没有作品的演员依然保留在 persons 里，作品数为 0。
 func refreshPersonCounts(ctx context.Context, tx *sql.Tx, personIDs []string) error {
 	for _, personID := range personIDs {
 		if _, err := tx.ExecContext(ctx,
@@ -203,8 +203,9 @@ func (s *Store) Persons(ctx context.Context, userID, searchTerm string, favorite
 // PersonsSorted 在 Persons 之上接住客户端传来的排序字段
 // （演员列表支持名称/年龄/出道日期/罩杯）。
 func (s *Store) PersonsSorted(ctx context.Context, userID, searchTerm string, favoriteOnly bool, sortBy, sortOrder string, startIndex, limit int) ([]dto.BaseItemDto, int, error) {
-	// 列表只展示有作品的演员；没有作品的演员仍在 persons 里可查。
-	where := []string{"p.item_count > 0"}
+	// 列表返回 persons 全表：没有作品的演员作品数为 0，但依然展示，
+	// 只有搜索词与收藏筛选会额外缩小范围。
+	where := make([]string, 0, 2)
 	args := make([]any, 0, 2)
 
 	if term := strings.TrimSpace(searchTerm); term != "" {
@@ -215,7 +216,11 @@ func (s *Store) PersonsSorted(ctx context.Context, userID, searchTerm string, fa
 		where = append(where, "p.person_id IN (SELECT item_id FROM user_data WHERE user_id = ? AND is_favorite = 1)")
 		args = append(args, userID)
 	}
-	whereSQL := " WHERE " + strings.Join(where, " AND ")
+	// 没有筛选条件时不拼 WHERE，避免出现空条件的 " WHERE "。
+	whereSQL := ""
+	if len(where) > 0 {
+		whereSQL = " WHERE " + strings.Join(where, " AND ")
+	}
 
 	var total int
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM persons p`+whereSQL, args...).Scan(&total); err != nil {

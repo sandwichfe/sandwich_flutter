@@ -323,11 +323,11 @@ func TestDeleteItemKeepsPersons(t *testing.T) {
 	if err := st.DeleteItems(ctx, []string{"i1"}); err != nil {
 		t.Fatalf("删除条目失败: %v", err)
 	}
-	// 列表不再展示没有作品的演员……
-	if _, total, err := st.Persons(ctx, "u1", "", false, 0, 10); err != nil || total != 0 {
-		t.Fatalf("全部删除后列表 total=%d err=%v，期望 0", total, err)
+	// 列表现在会返回没有作品的演员，只是作品数为 0……
+	if _, total, err := st.Persons(ctx, "u1", "", false, 0, 10); err != nil || total != 2 {
+		t.Fatalf("全部删除后列表 total=%d err=%v，期望 2（演员保留、作品数归零）", total, err)
 	}
-	// ……但演员主表与关联表的行为是：演员留着、关联清空。
+	// ……演员主表与关联表的行为是：演员留着、关联清空。
 	var persons, links int
 	if err := st.DB().QueryRow(`SELECT COUNT(*) FROM persons`).Scan(&persons); err != nil {
 		t.Fatal(err)

@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS play_sessions (
 );
 
 -- 演员主表：演员是独立主体，入库时没有就新建、有了就更新信息。
--- 条目被删除时只清关联，这一行永远保留（作品数归零后不再出现在列表里）。
+-- 条目被删除时只清关联，这一行永远保留（作品数归零后仍出现在列表里）。
 -- items.people 的 JSON 退化为入库快照，展示以这张表为准。
 CREATE TABLE IF NOT EXISTS persons (
     person_id  TEXT PRIMARY KEY,
