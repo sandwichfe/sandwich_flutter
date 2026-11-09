@@ -25,8 +25,6 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
         _EmbyPcWorkspaceToolbar(
           this,
         )._buildWorkspaceHeader(context, compact: compact),
-        // 保留旧列表的同时用 2 像素细条提示正在刷新，避免整块白屏闪动。
-        if (_c.refreshing) const LinearProgressIndicator(minHeight: 2),
         // 已去掉页面大标题，非首页直接由筛选工具栏开始，条目数并入工具栏右侧。
         if (_c.view != 'home')
           _EmbyPcWorkspaceToolbar(this)._buildToolbar(context),
@@ -41,33 +39,47 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
             ],
           ),
         Expanded(
-          // 首页与媒体库共用同一份滚动控制器，回到顶部按钮跟随视图重算位置。
-          child: EmbyPcScrollToTop(
-            controller: _scrollController,
-            builder: (context, _) => _c.view == 'home'
-                ? _buildHomeContent(context)
-                // 观看历史行式布局自带加载与空状态，不走海报网格。
-                : _c.view == 'watch-history'
-                ? _buildHistorySection(context, compact: compact)
-                // 首屏也用骨架网格，和翻页占位保持同一套观感。
-                : _c.loading && _c.items.isEmpty
-                ? _buildMediaGrid(
-                    context,
-                    compact: compact,
-                    imageStyle: imageStyle,
-                    touchLayout: touchLayout,
-                  )
-                : _c.items.isEmpty
-                ? _EmptyState(
-                    hasFilters: _hasActiveFilters,
-                    onClearFilters: _clearAllFilters,
-                  )
-                : _buildMediaGrid(
-                    context,
-                    compact: compact,
-                    imageStyle: imageStyle,
-                    touchLayout: touchLayout,
-                  ),
+          child: Stack(
+            children: [
+              // 首页与媒体库共用同一份滚动控制器，回到顶部按钮跟随视图重算位置。
+              Positioned.fill(
+                child: EmbyPcScrollToTop(
+                  controller: _scrollController,
+                  builder: (context, _) => _c.view == 'home'
+                      ? _buildHomeContent(context)
+                      // 观看历史行式布局自带加载与空状态，不走海报网格。
+                      : _c.view == 'watch-history'
+                      ? _buildHistorySection(context, compact: compact)
+                      // 首屏也用骨架网格，和翻页占位保持同一套观感。
+                      : _c.loading && _c.items.isEmpty
+                      ? _buildMediaGrid(
+                          context,
+                          compact: compact,
+                          imageStyle: imageStyle,
+                          touchLayout: touchLayout,
+                        )
+                      : _c.items.isEmpty
+                      ? _EmptyState(
+                          hasFilters: _hasActiveFilters,
+                          onClearFilters: _clearAllFilters,
+                        )
+                      : _buildMediaGrid(
+                          context,
+                          compact: compact,
+                          imageStyle: imageStyle,
+                          touchLayout: touchLayout,
+                        ),
+                ),
+              ),
+              // 刷新提示浮在列表上方：不再插入 2 像素占位，查询时列表不会上下抖。
+              if (_c.refreshing)
+                const Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: LinearProgressIndicator(minHeight: 2),
+                ),
+            ],
           ),
         ),
       ],

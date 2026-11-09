@@ -295,12 +295,20 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                 );
               },
             ),
-            // 已选条件常驻展示，单个条件可以直接摘掉，不必重新打开面板。
-            if (chips.isNotEmpty)
-              Padding(
-                padding: EdgeInsets.only(top: compactMobileToolbar ? 6 : 8),
-                child: Wrap(spacing: 6, runSpacing: 6, children: chips),
-              ),
+            // 已选条件常驻展示；高度变化走动画，避免条件增减时下面整块列表瞬移。
+            AnimatedSize(
+              duration: const Duration(milliseconds: 160),
+              curve: Curves.easeOut,
+              alignment: Alignment.topCenter,
+              child: chips.isEmpty
+                  ? const SizedBox(width: double.infinity)
+                  : Padding(
+                      padding: EdgeInsets.only(
+                        top: compactMobileToolbar ? 6 : 8,
+                      ),
+                      child: Wrap(spacing: 6, runSpacing: 6, children: chips),
+                    ),
+            ),
           ],
         ),
       ),
@@ -660,7 +668,8 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
     };
     final sortOptions = peopleList ? peopleSortOptions : mediaSortOptions;
     final availableWidth = MediaQuery.sizeOf(context).width - 24;
-    final panelWidth = availableWidth > 320 ? 320.0 : availableWidth;
+    // 排序面板只有单列字段，宽度取窄一些，避免大面积空白。
+    final panelWidth = availableWidth > 220 ? 220.0 : availableWidth;
     final colors = Theme.of(context).colorScheme;
 
     return MenuAnchor(
@@ -675,69 +684,13 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
       menuChildren: [
         SizedBox(
           width: panelWidth,
+          // 只有一列字段，去掉标题后上下各留 8 像素即可。
           child: Padding(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Row(
-                  children: [
-                    Text(
-                      '排序字段',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const Spacer(),
-                    // 升降序独立成按钮，字段列表只负责选字段。
-                    SegmentedButton<String>(
-                      showSelectedIcon: false,
-                      segments: const [
-                        ButtonSegment(
-                          value: 'Ascending',
-                          icon: Tooltip(
-                            message: '升序',
-                            child: Icon(Icons.arrow_upward_rounded, size: 18),
-                          ),
-                        ),
-                        ButtonSegment(
-                          value: 'Descending',
-                          icon: Tooltip(
-                            message: '降序',
-                            child: Icon(Icons.arrow_downward_rounded, size: 18),
-                          ),
-                        ),
-                      ],
-                      selected: {_c.sortOrder},
-                      onSelectionChanged: _c.loading
-                          ? null
-                          : (selection) => _applySortOrder(selection.first),
-                      style: ButtonStyle(
-                        visualDensity: VisualDensity.compact,
-                        minimumSize: const WidgetStatePropertyAll(Size(0, 32)),
-                        foregroundColor: WidgetStateProperty.resolveWith(
-                          (states) => states.contains(WidgetState.selected)
-                              ? colors.onPrimary
-                              : colors.onSurfaceVariant,
-                        ),
-                        iconColor: WidgetStateProperty.resolveWith(
-                          (states) => states.contains(WidgetState.selected)
-                              ? colors.onPrimary
-                              : colors.onSurfaceVariant,
-                        ),
-                        backgroundColor: WidgetStateProperty.resolveWith(
-                          (states) => states.contains(WidgetState.selected)
-                              ? colors.primary
-                              : Colors.transparent,
-                        ),
-                        side: WidgetStatePropertyAll(
-                          BorderSide(color: colors.outlineVariant),
-                        ),
-                        shape: const WidgetStatePropertyAll(StadiumBorder()),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                // 字段列表只负责换字段，方向由顶部按钮统一控制。
+                // 字段列表只负责换字段，方向由工具栏按钮统一控制。
                 ...sortOptions.entries.map((entry) {
                   final active = entry.key == _c.sortBy;
                   return Padding(
