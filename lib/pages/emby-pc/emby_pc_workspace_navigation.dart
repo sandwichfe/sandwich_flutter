@@ -203,49 +203,8 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
       onSelected: (value) {
         if (value == 'logout') _logout();
       },
+      // 账号信息已在页头展示，菜单里只保留退出登录。
       itemBuilder: (_) => [
-        PopupMenuItem(
-          enabled: false,
-          height: 64,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Semantics(
-            container: true,
-            label: 'Emby 账号 $displayName',
-            child: Row(
-              children: [
-                buildAvatar(18),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        displayName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: colors.onSurface,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Emby 账号',
-                        style: TextStyle(
-                          color: colors.onSurfaceVariant,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const PopupMenuDivider(height: 1),
         PopupMenuItem(
           value: 'logout',
           height: 44,
