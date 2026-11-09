@@ -2,6 +2,33 @@ part of 'emby_pc_page.dart';
 
 // 查询工具栏集中承载筛选、排序和布局切换控件。
 extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
+  // 筛选项文案集中一处：面板选项与工具栏条件标签共用，避免两处维护。
+  static const Map<String, String> _itemTypeOptions = {
+    '': '全部类型',
+    'Movie': '电影',
+    'Series': '剧集',
+    'Video': '视频',
+  };
+  static const Map<String, String> _statusOptions = {
+    '': '全部状态',
+    'IsUnplayed': '未观看',
+    'IsPlayed': '已观看',
+    'IsResumable': '可继续',
+  };
+  static const Map<String, String> _videoTypeOptions = {
+    '': '全部视频',
+    'videofile': '视频文件',
+    'dvd': 'DVD',
+    'bluray': '蓝光',
+    'iso': 'ISO',
+  };
+  static const Map<String, String> _ratingOptions = {
+    '': '不限评分',
+    '7': '7 分以上',
+    '8': '8 分以上',
+    '9': '9 分以上',
+  };
+
   // 工作台唯一的顶部工具条：历史导航 + 全局搜索 + 账号 + 窗口按钮。
   Widget _buildWorkspaceHeader(BuildContext context, {required bool compact}) {
     final skin = EmbyPcSkin.of(context);
@@ -206,6 +233,8 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
     if (_c.view == 'watch-history') {
       return _buildHistoryToolbar(context, compact: compactMobileToolbar);
     }
+    // 人物列表共用影片筛选面板没有意义，这里不展示条件标签。
+    final chips = peopleList ? const <Widget>[] : _buildFilterChips(context);
     return Material(
       color: Colors.transparent,
       child: Container(
@@ -213,51 +242,159 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
         padding: compactMobileToolbar
             ? const EdgeInsets.fromLTRB(14, 6, 14, 12)
             : const EdgeInsets.fromLTRB(28, 8, 28, 14),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            // 安卓窄屏仅显示布局图标，完整含义继续由 Tooltip 提供。
-            final compactLayoutControl =
-                compactMobileToolbar || constraints.maxWidth < 420;
-            return Row(
-              children: [
-                if (!peopleList) ...[
-                  _buildFilterMenu(context, compact: compactMobileToolbar),
-                  SizedBox(width: compactMobileToolbar ? 6 : 8),
-                ],
-                _buildSortMenu(context, compact: compactMobileToolbar),
-                // 随机播放只对媒体列表有意义，人物列表不展示该入口。
-                if (!peopleList) ...[
-                  SizedBox(width: compactMobileToolbar ? 6 : 8),
-                  _buildShuffleButton(
-                    context,
-                    compact: compactMobileToolbar,
-                    // 每次点击都会重新请求；请求在途时禁用，避免连点堆叠。
-                    enabled: !_c.loading && !_c.refreshing && !_c.loadingMore,
-                  ),
-                ],
-                // 条目统计替代原来的页面副标题，右对齐贴在布局切换左侧。
-                Expanded(
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: compactMobileToolbar ? 8 : 12,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            LayoutBuilder(
+              builder: (context, constraints) {
+                // 安卓窄屏仅显示布局图标，完整含义继续由 Tooltip 提供。
+                final compactLayoutControl =
+                    compactMobileToolbar || constraints.maxWidth < 420;
+                return Row(
+                  children: [
+                    if (!peopleList) ...[
+                      _buildFilterMenu(context, compact: compactMobileToolbar),
+                      SizedBox(width: compactMobileToolbar ? 6 : 8),
+                    ],
+                    _buildSortMenu(context, compact: compactMobileToolbar),
+                    // 随机播放只对媒体列表有意义，人物列表不展示该入口。
+                    if (!peopleList) ...[
+                      SizedBox(width: compactMobileToolbar ? 6 : 8),
+                      _buildShuffleButton(
+                        context,
+                        compact: compactMobileToolbar,
+                        // 每次点击都会重新请求；请求在途时禁用，避免连点堆叠。
+                        enabled: !_c.loading && !_c.refreshing && !_c.loadingMore,
+                      ),
+                    ],
+                    // 条目统计替代原来的页面副标题，右对齐贴在布局切换左侧。
+                    Expanded(
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: compactMobileToolbar ? 8 : 12,
+                        ),
+                        child: Text(
+                          _pageStatusText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.right,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: skin.textSecondary,
+                          ),
+                        ),
+                      ),
                     ),
-                    child: Text(
-                      _pageStatusText,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.right,
-                      style: TextStyle(fontSize: 12, color: skin.textSecondary),
-                    ),
-                  ),
-                ),
-                if (!peopleList)
-                  _buildLayoutControl(context, compact: compactLayoutControl),
-              ],
-            );
-          },
+                    if (!peopleList)
+                      _buildLayoutControl(
+                        context,
+                        compact: compactLayoutControl,
+                      ),
+                  ],
+                );
+              },
+            ),
+            // 已选条件常驻展示，单个条件可以直接摘掉，不必重新打开面板。
+            if (chips.isNotEmpty)
+              Padding(
+                padding: EdgeInsets.only(top: compactMobileToolbar ? 6 : 8),
+                child: Wrap(spacing: 6, runSpacing: 6, children: chips),
+              ),
+          ],
         ),
       ),
     );
+  }
+
+  // 工具栏下方的筛选条件标签：点击叉号即可单独清除，并立刻重新查询。
+  List<Widget> _buildFilterChips(BuildContext context) {
+    final skin = EmbyPcSkin.of(context);
+    Widget chip(String label, VoidCallback onDeleted) => InputChip(
+      label: Text(label),
+      onDeleted: _c.loading ? null : onDeleted,
+      labelStyle: TextStyle(fontSize: 12, color: skin.scheme.onSurface),
+      labelPadding: const EdgeInsets.symmetric(horizontal: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      backgroundColor: skin.surfaceAlt.withValues(alpha: skin.dark ? 0.55 : 1),
+      side: BorderSide(color: skin.hairline),
+      deleteIcon: const Icon(Icons.close_rounded, size: 14),
+      deleteIconColor: skin.textTertiary,
+      shape: const StadiumBorder(),
+    );
+    final chips = <Widget>[];
+    if (_c.itemType.isNotEmpty) {
+      chips.add(
+        chip(
+          _itemTypeOptions[_c.itemType] ?? _c.itemType,
+          () => _clearSimpleFilter('type'),
+        ),
+      );
+    }
+    if (_c.statusFilter.isNotEmpty) {
+      chips.add(
+        chip(
+          _statusOptions[_c.statusFilter] ?? _c.statusFilter,
+          () => _clearSimpleFilter('status'),
+        ),
+      );
+    }
+    if (_c.videoType.isNotEmpty) {
+      chips.add(
+        chip(
+          _videoTypeOptions[_c.videoType] ?? _c.videoType,
+          () => _clearSimpleFilter('videoType'),
+        ),
+      );
+    }
+    final year = _yearController.text.trim();
+    if (year.isNotEmpty) {
+      chips.add(chip('$year 年', () => _clearSimpleFilter('year')));
+    }
+    if (_c.genreFilter.isNotEmpty) {
+      // 流派名来自懒加载的候选列表，未命中时退回通用文案。
+      var genreName = '流派';
+      for (final genre in _c.genreOptions) {
+        if (genre.id == _c.genreFilter) {
+          genreName = genre.name;
+          break;
+        }
+      }
+      chips.add(chip(genreName, () => _selectGenre('')));
+    }
+    if (_c.personFilter.isNotEmpty) {
+      chips.add(
+        chip('演员：${_c.personFilterName}', _clearPersonFilter),
+      );
+    }
+    if (_c.minRating != null) {
+      chips.add(
+        chip(
+          '${_c.minRating!.toStringAsFixed(0)} 分以上',
+          () => _selectMinRating(null),
+        ),
+      );
+    }
+    return chips;
+  }
+
+  // 条件标签里的单值清除：类型 / 播放状态 / 视频格式 / 年份。
+  void _clearSimpleFilter(String field) {
+    setState(() {
+      switch (field) {
+        case 'type':
+          _c.itemType = '';
+        case 'status':
+          _c.statusFilter = '';
+        case 'videoType':
+          _c.videoType = '';
+        case 'year':
+          _yearController.clear();
+      }
+    });
+    unawaited(_applyQuery());
   }
 
   // 观看历史的极简工具栏：左侧说明固定排序，右侧沿用统一的条目统计。
@@ -310,25 +447,6 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
       _activeFilterCount > 0 || _searchController.text.trim().isNotEmpty;
 
   Widget _buildFilterMenu(BuildContext context, {bool compact = false}) {
-    const itemTypes = {
-      '': '全部类型',
-      'Movie': '电影',
-      'Series': '剧集',
-      'Video': '视频',
-    };
-    const statuses = {
-      '': '全部状态',
-      'IsUnplayed': '未观看',
-      'IsPlayed': '已观看',
-      'IsResumable': '可继续',
-    };
-    const videoTypes = {
-      '': '全部视频',
-      'videofile': '视频文件',
-      'dvd': 'DVD',
-      'bluray': '蓝光',
-      'iso': 'ISO',
-    };
     final availableWidth = MediaQuery.sizeOf(context).width - 24;
     final panelWidth = availableWidth > 420 ? 420.0 : availableWidth;
     // 菜单内容左右各保留 14 像素内边距，选项宽度直接使用剩余空间计算。
@@ -360,7 +478,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                 children: [
                   _buildQueryGroup(
                     title: '类型',
-                    options: itemTypes,
+                    options: _itemTypeOptions,
                     selected: _c.itemType,
                     availableWidth: contentWidth,
                     onSelected: (value) {
@@ -386,12 +504,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                     ),
                     _buildQueryGroup(
                       title: '最低评分',
-                      options: const {
-                        '': '不限评分',
-                        '7': '7 分以上',
-                        '8': '8 分以上',
-                        '9': '9 分以上',
-                      },
+                      options: _ratingOptions,
                       selected: _c.minRating?.toInt().toString() ?? '',
                       availableWidth: contentWidth,
                       onSelected: (value) =>
@@ -401,7 +514,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                   if (showAdvancedFilters) ...[
                     _buildQueryGroup(
                       title: '播放状态',
-                      options: statuses,
+                      options: _statusOptions,
                       selected: _c.statusFilter,
                       availableWidth: contentWidth,
                       onSelected: (value) {
@@ -659,9 +772,14 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
           ),
         ),
       ],
+      // 按钮上直接显示当前字段和方向，不必打开面板才能确认排序规则。
       builder: (context, controller, child) => _buildQueryPill(
-        label: '排序',
-        icon: Icons.swap_vert,
+        label: compact
+            ? '排序'
+            : '排序 · ${sortOptions[_c.sortBy] ?? '默认'}',
+        icon: _c.sortOrder == 'Ascending'
+            ? Icons.arrow_upward_rounded
+            : Icons.arrow_downward_rounded,
         compact: compact,
         onPressed: _c.loading
             ? null

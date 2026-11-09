@@ -335,6 +335,16 @@ enum EmbyPcMediaAction {
   scrapePerson,
 }
 
+// 卡片右键菜单的动作项：包含播放/收藏这类入口，无法直接复用 EmbyPcMediaAction。
+enum _CardMenuAction {
+  play,
+  favorite,
+  togglePlayed,
+  editMetadata,
+  editImages,
+  refreshMetadata,
+}
+
 class EmbyPcMediaTile extends StatefulWidget {
   final EmbyPcItem item;
   final String imageStyle;
@@ -351,6 +361,8 @@ class EmbyPcMediaTile extends StatefulWidget {
   final bool hideDefaultMetadata;
   // 横向推荐位把标题压进图片底部，观感更接近视频平台的海报流。
   final bool overlayCaption;
+  // 触屏设备没有悬停，操作按钮需要常显，否则收藏/更多完全点不到。
+  final bool alwaysShowActions;
 
   const EmbyPcMediaTile({
     super.key,
@@ -365,6 +377,7 @@ class EmbyPcMediaTile extends StatefulWidget {
     this.secondaryLabel = '',
     this.hideDefaultMetadata = false,
     this.overlayCaption = false,
+    this.alwaysShowActions = false,
   });
 
   @override
@@ -373,6 +386,31 @@ class EmbyPcMediaTile extends StatefulWidget {
 
 class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
   bool _hovered = false;
+  bool _focused = false;
+  // 卡片自身持有焦点节点：方向键切换焦点、回车打开都由 InkWell 承担。
+  final FocusNode _focusNode = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode.addListener(_handleFocusChange);
+  }
+
+  @override
+  void dispose() {
+    _focusNode.removeListener(_handleFocusChange);
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _handleFocusChange() {
+    if (_focused == _focusNode.hasFocus) return;
+    setState(() => _focused = _focusNode.hasFocus);
+  }
+
+  // 悬停、键盘聚焦或触屏常显都视作"操作区可见"。
+  bool get _revealed =>
+      _hovered || _focused || widget.alwaysShowActions;
 
   @override
   Widget build(BuildContext context) {
@@ -406,15 +444,16 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
             curve: Curves.easeOut,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(14),
-              boxShadow: [
-                BoxShadow(
-                  color: _hovered
-                      ? skin.tint(skin.dark ? 0.24 : 0.16)
-                      : Colors.black.withValues(alpha: skin.dark ? 0.30 : 0.07),
-                  blurRadius: _hovered ? 26 : 12,
-                  offset: Offset(0, _hovered ? 12 : 5),
-                ),
-              ],
+              // 阴影只在悬停/聚焦时绘制：整屏几十张卡片常驻模糊阴影会拖慢滚动。
+              boxShadow: _hovered || _focused
+                  ? [
+                      BoxShadow(
+                        color: skin.tint(skin.dark ? 0.24 : 0.16),
+                        blurRadius: 26,
+                        offset: const Offset(0, 12),
+                      ),
+                    ]
+                  : const [],
             ),
             child: Material(
               color: Colors.transparent,
@@ -422,7 +461,11 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
               clipBehavior: Clip.antiAlias,
               child: InkWell(
                 onTap: widget.onOpen,
+                focusNode: _focusNode,
                 hoverColor: Colors.transparent,
+                // 桌面右键菜单：播放、收藏与条目维护，避免每次都先开详情页。
+                onSecondaryTapDown: (details) =>
+                    _showCardMenu(details.globalPosition),
                 child: widget.overlayCaption
                     ? _buildOverlayCard(
                         context,
@@ -507,9 +550,9 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
           Center(
             child: AnimatedOpacity(
               duration: const Duration(milliseconds: 200),
-              opacity: _hovered ? 1 : 0,
+              opacity: _revealed ? 1 : 0,
               child: IgnorePointer(
-                ignoring: !_hovered,
+                ignoring: !_revealed,
                 child: _CircleAction(
                   icon: Icons.play_arrow_rounded,
                   size: 52,
@@ -527,9 +570,9 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
             bottom: 12,
             child: AnimatedOpacity(
               duration: const Duration(milliseconds: 200),
-              opacity: _hovered ? 1 : 0,
+              opacity: _revealed ? 1 : 0,
               child: IgnorePointer(
-                ignoring: !_hovered,
+                ignoring: !_revealed,
                 child: _buildCardActionRow(context, compact: true),
               ),
             ),
@@ -708,9 +751,9 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
         Center(
           child: AnimatedOpacity(
             duration: const Duration(milliseconds: 200),
-            opacity: _hovered ? 1 : 0,
+            opacity: _revealed ? 1 : 0,
             child: IgnorePointer(
-              ignoring: !_hovered,
+              ignoring: !_revealed,
               child: _CircleAction(
                 icon: Icons.play_arrow_rounded,
                 size: 50,
@@ -728,9 +771,9 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
           child: AnimatedOpacity(
             duration: const Duration(milliseconds: 200),
             // 收藏状态只改变图标样式，不影响卡片操作按钮的悬浮显隐。
-            opacity: _hovered ? 1 : 0,
+            opacity: _revealed ? 1 : 0,
             child: IgnorePointer(
-              ignoring: !_hovered,
+              ignoring: !_revealed,
               child: _buildCardActionRow(context),
             ),
           ),
@@ -834,6 +877,79 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
       ],
     );
   }
+
+  // 右键菜单：桌面端常用操作不必先进详情页，也和卡片上的悬浮按钮保持一致。
+  Future<void> _showCardMenu(Offset globalPosition) async {
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (overlay == null) return;
+    final action = await showMenu<_CardMenuAction>(
+      context: context,
+      position: RelativeRect.fromRect(
+        Rect.fromPoints(globalPosition, globalPosition),
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        if (widget.onPlay != null)
+          _buildMenuItem(_CardMenuAction.play, Icons.play_arrow_rounded, '播放'),
+        if (widget.onFavorite != null)
+          _buildMenuItem(
+            _CardMenuAction.favorite,
+            widget.item.isFavorite
+                ? Icons.favorite_rounded
+                : Icons.favorite_border_rounded,
+            widget.item.isFavorite ? '取消收藏' : '收藏',
+          ),
+        if (widget.onAction != null) ...[
+          const PopupMenuDivider(),
+          _buildMenuItem(
+            _CardMenuAction.togglePlayed,
+            widget.item.played
+                ? Icons.visibility_off_outlined
+                : Icons.visibility_outlined,
+            widget.item.played ? '标记为未看' : '标记为已看',
+          ),
+          _buildMenuItem(_CardMenuAction.editMetadata, Icons.edit_outlined, '编辑元数据'),
+          _buildMenuItem(_CardMenuAction.editImages, Icons.image_outlined, '编辑图像'),
+          _buildMenuItem(
+            _CardMenuAction.refreshMetadata,
+            Icons.refresh_outlined,
+            '刷新元数据',
+          ),
+        ],
+      ],
+    );
+    if (action == null || !mounted) return;
+    switch (action) {
+      case _CardMenuAction.play:
+        widget.onPlay?.call();
+      case _CardMenuAction.favorite:
+        widget.onFavorite?.call();
+      case _CardMenuAction.togglePlayed:
+        widget.onAction?.call(EmbyPcMediaAction.togglePlayed);
+      case _CardMenuAction.editMetadata:
+        widget.onAction?.call(EmbyPcMediaAction.editMetadata);
+      case _CardMenuAction.editImages:
+        widget.onAction?.call(EmbyPcMediaAction.editImages);
+      case _CardMenuAction.refreshMetadata:
+        widget.onAction?.call(EmbyPcMediaAction.refreshMetadata);
+    }
+  }
+
+  PopupMenuItem<_CardMenuAction> _buildMenuItem(
+    _CardMenuAction value,
+    IconData icon,
+    String label,
+  ) => PopupMenuItem(
+    value: value,
+    child: Row(
+      children: [
+        Icon(icon, size: 20),
+        const SizedBox(width: 12),
+        Text(label),
+      ],
+    ),
+  );
 
   String _qualityLabel(EmbyPcItem item) {
     final width = item.width ?? 0;

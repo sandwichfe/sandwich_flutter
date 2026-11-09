@@ -6,10 +6,8 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
     // 人物没有背景图，演员列表和收藏演员均固定使用主图卡片。
     final peopleList = _c.view == 'people' || _c.view == 'favorite-people';
     final imageStyle = peopleList ? 'poster' : _c.imageStyle;
-    // 背景图卡片沿用首页约 270 x 205 的视觉比例，并放宽列宽阈值，
-    // 避免临界宽度下过早增加列数。
-    final mediaGridMaxExtent = imageStyle == 'backdrop' ? 336.0 : 214.0;
-    final mediaGridAspectRatio = imageStyle == 'backdrop' ? 1.28 : 0.585;
+    // 触屏设备没有悬停，卡片操作需要常显。
+    final touchLayout = _usesMobileWorkspaceLayout(MediaQuery.sizeOf(context).width);
     // 分片影片是独立的管理视图：自带搜索与刷新，不复用媒体库列表的筛选工具栏。
     if (_c.view == 'part-groups') {
       return Column(
@@ -48,81 +46,141 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
             controller: _scrollController,
             builder: (context, _) => _c.view == 'home'
                 ? _buildHomeContent(context)
+                // 观看历史行式布局自带加载与空状态，不走海报网格。
+                : _c.view == 'watch-history'
+                ? _buildHistorySection(context, compact: compact)
+                // 首屏也用骨架网格，和翻页占位保持同一套观感。
                 : _c.loading && _c.items.isEmpty
-                ? const Center(child: CircularProgressIndicator())
+                ? _buildMediaGrid(
+                    context,
+                    compact: compact,
+                    imageStyle: imageStyle,
+                    touchLayout: touchLayout,
+                  )
                 : _c.items.isEmpty
                 ? _EmptyState(
                     hasFilters: _hasActiveFilters,
                     onClearFilters: _clearAllFilters,
                   )
-                : _c.view == 'watch-history'
-                // 观看历史自带行式布局，不再走海报网格。
-                ? _buildHistoryList(context, compact: compact)
-                : CustomScrollView(
-                    controller: _scrollController,
-                    slivers: [
-                      SliverPadding(
-                        // 媒体库详情仅展示视频网格，不再插入精选横幅。
-                        padding: EdgeInsets.fromLTRB(
-                          compact ? 14 : 28,
-                          10,
-                          compact ? 14 : 28,
-                          40,
-                        ),
-                        sliver: SliverGrid.builder(
-                          gridDelegate:
-                              SliverGridDelegateWithMaxCrossAxisExtent(
-                                maxCrossAxisExtent: mediaGridMaxExtent,
-                                crossAxisSpacing: 18,
-                                mainAxisSpacing: 24,
-                                childAspectRatio: mediaGridAspectRatio,
-                              ),
-                          itemCount: _c.items.length,
-                          itemBuilder: (context, index) {
-                            final item = _c.items[index];
-                            return EmbyPcMediaTile(
-                              item: item,
-                              imageStyle: imageStyle,
-                              secondaryLabel: peopleList
-                                  ? _personBirthYear(item)
-                                  : '',
-                              hideDefaultMetadata: peopleList,
-                              favoriteBusy: _favoriteBusyIds.contains(item.id),
-                              actionBusy: _mediaActionBusyIds.contains(item.id),
-                              onOpen: () => _openItem(item),
-                              onPlay: peopleList ? null : () => _playItem(item),
-                              onFavorite: () => _toggleFavorite(item),
-                              onAction: (action) =>
-                                  _handleMediaAction(item, action),
-                            );
-                          },
-                        ),
-                      ),
-                      if (_c.loadingMore)
-                        SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(26, 0, 26, 30),
-                          sliver: SliverGrid.builder(
-                            gridDelegate:
-                                SliverGridDelegateWithMaxCrossAxisExtent(
-                                  maxCrossAxisExtent: mediaGridMaxExtent,
-                                  crossAxisSpacing: 20,
-                                  mainAxisSpacing: 22,
-                                  childAspectRatio: mediaGridAspectRatio,
-                                ),
-                            itemCount: 6, // 显示 6 个骨架屏占位符
-                            itemBuilder: (context, index) {
-                              return EmbyPcLoadingPlaceholder(
-                                isBackdrop: imageStyle == 'backdrop',
-                              );
-                            },
-                          ),
-                        ),
-                    ],
+                : _buildMediaGrid(
+                    context,
+                    compact: compact,
+                    imageStyle: imageStyle,
+                    touchLayout: touchLayout,
                   ),
           ),
         ),
       ],
     );
+  }
+
+  // 媒体网格：先按列宽算出每列宽度，再推导卡片高度，
+  // 这样海报严格保持 2:3，不会因为窗口变窄被压胖。
+  Widget _buildMediaGrid(
+    BuildContext context, {
+    required bool compact,
+    required String imageStyle,
+    required bool touchLayout,
+  }) {
+    final peopleList = _c.view == 'people' || _c.view == 'favorite-people';
+    final backdrop = imageStyle == 'backdrop';
+    final horizontalPadding = compact ? 14.0 : 28.0;
+    const crossSpacing = 18.0;
+    final scaler = MediaQuery.textScalerOf(context);
+    // 卡片下方文字区高度随系统字号伸缩，避免大字号下溢出。
+    final captionHeight =
+        10 + scaler.scale(14) * 1.5 + 4 + scaler.scale(12) * 1.5 + 2;
+    // 没有条目时说明还在首屏加载，用骨架屏填满网格。
+    final skeleton = _c.items.isEmpty;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 极限窄窗口下也保留至少 1 像素可用宽度，避免列宽算出负值。
+        final available = (constraints.maxWidth - horizontalPadding * 2)
+            .clamp(1.0, double.infinity)
+            .toDouble();
+        final columns = (available / (backdrop ? 336.0 : 214.0))
+            .ceil()
+            .clamp(1, 12);
+        final itemWidth = (available - crossSpacing * (columns - 1)) / columns;
+        // 海报按 2:3 单独加文字区高度；背景图卡片沿用原有整体比例，避免列表变稀。
+        final itemHeight = backdrop
+            ? itemWidth / 1.28
+            : itemWidth * 1.5 + captionHeight;
+        final gridDelegate = SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: columns,
+          crossAxisSpacing: crossSpacing,
+          mainAxisSpacing: 24,
+          mainAxisExtent: itemHeight,
+        );
+        return CustomScrollView(
+          controller: _scrollController,
+          slivers: [
+            SliverPadding(
+              // 媒体库详情仅展示视频网格，不再插入精选横幅。
+              padding: EdgeInsets.fromLTRB(
+                horizontalPadding,
+                10,
+                horizontalPadding,
+                40,
+              ),
+              sliver: SliverGrid.builder(
+                gridDelegate: gridDelegate,
+                // 列表为空说明首屏正在加载，直接铺三行骨架屏。
+                itemCount: skeleton ? columns * 3 : _c.items.length,
+                itemBuilder: (context, index) {
+                  if (skeleton) {
+                    return EmbyPcLoadingPlaceholder(isBackdrop: backdrop);
+                  }
+                  final item = _c.items[index];
+                  return EmbyPcMediaTile(
+                    item: item,
+                    imageStyle: imageStyle,
+                    secondaryLabel: peopleList ? _personBirthYear(item) : '',
+                    hideDefaultMetadata: peopleList,
+                    alwaysShowActions: touchLayout,
+                    favoriteBusy: _favoriteBusyIds.contains(item.id),
+                    actionBusy: _mediaActionBusyIds.contains(item.id),
+                    onOpen: () => _openItem(item),
+                    onPlay: peopleList ? null : () => _playItem(item),
+                    onFavorite: () => _toggleFavorite(item),
+                    onAction: (action) => _handleMediaAction(item, action),
+                  );
+                },
+              ),
+            ),
+            if (_c.loadingMore)
+              SliverPadding(
+                padding: EdgeInsets.fromLTRB(
+                  horizontalPadding,
+                  0,
+                  horizontalPadding,
+                  30,
+                ),
+                sliver: SliverGrid.builder(
+                  gridDelegate: gridDelegate,
+                  itemCount: columns * 2, // 按当前列数铺两行骨架屏占位
+                  itemBuilder: (context, index) =>
+                      EmbyPcLoadingPlaceholder(isBackdrop: backdrop),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  // 观看历史的加载/空状态与其它列表保持一致，只有列表本体换成行式排版。
+  Widget _buildHistorySection(BuildContext context, {required bool compact}) {
+    if (_c.loading && _c.items.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_c.items.isEmpty) {
+      return _EmptyState(
+        hasFilters: _hasActiveFilters,
+        onClearFilters: _clearAllFilters,
+      );
+    }
+    return _buildHistoryList(context, compact: compact);
   }
 
   // 观看历史列表：行式排版 + 细分隔线，滚动时按需构建。
