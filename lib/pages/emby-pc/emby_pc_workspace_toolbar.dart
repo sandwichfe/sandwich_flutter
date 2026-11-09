@@ -671,8 +671,11 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
     // 排序面板只有单列字段，宽度取窄一些，避免大面积空白。
     final panelWidth = availableWidth > 220 ? 220.0 : availableWidth;
     final colors = Theme.of(context).colorScheme;
+    // 字段列表不是 MenuItemButton，选中后需要手动收起面板。
+    final menuController = MenuController();
 
     return MenuAnchor(
+      controller: menuController,
       style: MenuStyle(
         backgroundColor: WidgetStatePropertyAll(
           Theme.of(context).colorScheme.surface,
@@ -709,10 +712,12 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                         borderRadius: BorderRadius.circular(6),
                         clipBehavior: Clip.antiAlias,
                         child: InkWell(
-                          // 已选中的字段不再响应点击，避免误以为还能切换方向。
-                          onTap: _c.loading || active
+                          // 点击后立刻收起面板；已选中的字段只收起不重复查询。
+                          onTap: _c.loading
                               ? null
                               : () {
+                                  menuController.close();
+                                  if (active) return;
                                   setState(() {
                                     // 手动指定排序即退出随机播放，回到常规列表。
                                     _c.exitRandomMode();
