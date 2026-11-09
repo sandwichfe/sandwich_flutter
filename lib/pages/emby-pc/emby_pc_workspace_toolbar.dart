@@ -680,14 +680,66 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text('排序字段', style: Theme.of(context).textTheme.titleMedium),
+                Row(
+                  children: [
+                    Text(
+                      '排序字段',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const Spacer(),
+                    // 升降序独立成按钮，字段列表只负责选字段。
+                    SegmentedButton<String>(
+                      showSelectedIcon: false,
+                      segments: const [
+                        ButtonSegment(
+                          value: 'Ascending',
+                          icon: Tooltip(
+                            message: '升序',
+                            child: Icon(Icons.arrow_upward_rounded, size: 18),
+                          ),
+                        ),
+                        ButtonSegment(
+                          value: 'Descending',
+                          icon: Tooltip(
+                            message: '降序',
+                            child: Icon(Icons.arrow_downward_rounded, size: 18),
+                          ),
+                        ),
+                      ],
+                      selected: {_c.sortOrder},
+                      onSelectionChanged: _c.loading
+                          ? null
+                          : (selection) => _applySortOrder(selection.first),
+                      style: ButtonStyle(
+                        visualDensity: VisualDensity.compact,
+                        minimumSize: const WidgetStatePropertyAll(Size(0, 32)),
+                        foregroundColor: WidgetStateProperty.resolveWith(
+                          (states) => states.contains(WidgetState.selected)
+                              ? colors.onPrimary
+                              : colors.onSurfaceVariant,
+                        ),
+                        iconColor: WidgetStateProperty.resolveWith(
+                          (states) => states.contains(WidgetState.selected)
+                              ? colors.onPrimary
+                              : colors.onSurfaceVariant,
+                        ),
+                        backgroundColor: WidgetStateProperty.resolveWith(
+                          (states) => states.contains(WidgetState.selected)
+                              ? colors.primary
+                              : Colors.transparent,
+                        ),
+                        side: WidgetStatePropertyAll(
+                          BorderSide(color: colors.outlineVariant),
+                        ),
+                        shape: const WidgetStatePropertyAll(StadiumBorder()),
+                      ),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 8),
-                // 当前字段再次点击时切换方向，其他字段沿用当前排序方向。
+                // 字段列表只负责换字段，方向由顶部按钮统一控制。
                 ...sortOptions.entries.map((entry) {
                   final active = entry.key == _c.sortBy;
-                  final ascending = _c.sortOrder == 'Ascending';
-                  final currentOrder = ascending ? '升序' : '降序';
-                  final nextOrder = ascending ? '降序' : '升序';
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 2),
                     child: Semantics(
@@ -695,7 +747,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                       selected: active,
                       excludeSemantics: true,
                       label: active
-                          ? '${entry.value}，当前$currentOrder，点击切换为$nextOrder'
+                          ? '${entry.value}，当前排序字段'
                           : '${entry.value}，点击按此字段排序',
                       child: Material(
                         color: active
@@ -704,19 +756,14 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                         borderRadius: BorderRadius.circular(6),
                         clipBehavior: Clip.antiAlias,
                         child: InkWell(
-                          onTap: _c.loading
+                          // 已选中的字段不再响应点击，避免误以为还能切换方向。
+                          onTap: _c.loading || active
                               ? null
                               : () {
                                   setState(() {
                                     // 手动指定排序即退出随机播放，回到常规列表。
                                     _c.exitRandomMode();
-                                    if (active) {
-                                      _c.sortOrder = ascending
-                                          ? 'Descending'
-                                          : 'Ascending';
-                                    } else {
-                                      _c.sortBy = entry.key;
-                                    }
+                                    _c.sortBy = entry.key;
                                   });
                                   _applyQuery();
                                 },
@@ -748,15 +795,10 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                                     ),
                                   ),
                                   if (active)
-                                    Tooltip(
-                                      message: currentOrder,
-                                      child: Icon(
-                                        ascending
-                                            ? Icons.arrow_upward_rounded
-                                            : Icons.arrow_downward_rounded,
-                                        size: 18,
-                                        color: colors.primary,
-                                      ),
+                                    Icon(
+                                      Icons.check_rounded,
+                                      size: 18,
+                                      color: colors.primary,
                                     ),
                                 ],
                               ),
@@ -772,20 +814,110 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
           ),
         ),
       ],
-      // 按钮上直接显示当前字段和方向，不必打开面板才能确认排序规则。
-      builder: (context, controller, child) => _buildQueryPill(
-        label: compact
-            ? '排序'
-            : '排序 · ${sortOptions[_c.sortBy] ?? '默认'}',
-        icon: _c.sortOrder == 'Ascending'
-            ? Icons.arrow_upward_rounded
-            : Icons.arrow_downward_rounded,
+      // 胶囊拆成两段：左箭头直接切升降序，右侧字段名展开字段列表。
+      builder: (context, controller, child) => _buildSortPill(
+        label: sortOptions[_c.sortBy] ?? '排序',
         compact: compact,
-        onPressed: _c.loading
-            ? null
-            : () => controller.isOpen ? controller.close() : controller.open(),
+        onToggleOrder: _toggleSortOrder,
+        onOpenMenu: () =>
+            controller.isOpen ? controller.close() : controller.open(),
       ),
     );
+  }
+
+  // 排序胶囊：左侧箭头点击即切换升降序，右侧显示当前字段并展开字段列表。
+  Widget _buildSortPill({
+    required String label,
+    required bool compact,
+    required VoidCallback onToggleOrder,
+    required VoidCallback onOpenMenu,
+  }) {
+    final skin = EmbyPcSkin.of(context);
+    final enabled = !_c.loading;
+    final ascending = _c.sortOrder == 'Ascending';
+    final orderLabel = ascending ? '升序' : '降序';
+    final textColor = enabled
+        ? skin.scheme.onSurface
+        : skin.textTertiary.withValues(alpha: 0.4);
+    return Material(
+      color: skin.surfaceAlt.withValues(alpha: skin.dark ? 0.55 : 1),
+      shape: StadiumBorder(side: BorderSide(color: skin.hairline)),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        height: 38,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            InkWell(
+              onTap: enabled ? onOpenMenu : null,
+              // 整段 38 高都可点，避免只有文字那一行能命中。
+              child: SizedBox(
+                height: 38,
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(compact ? 10 : 14, 0, 6, 0),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        label,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: textColor,
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                      Icon(
+                        Icons.keyboard_arrow_down_rounded,
+                        size: 17,
+                        color: textColor,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            // 两段之间用发丝线分隔，点击区域互不干扰。
+            Container(width: 1, height: 16, color: skin.hairline),
+            // 升降序按钮固定在右侧，和字段名分开点击。
+            Tooltip(
+              message: '当前$orderLabel，点击切换',
+              child: InkWell(
+                onTap: enabled ? onToggleOrder : null,
+                child: SizedBox(
+                  width: compact ? 30 : 34,
+                  height: 38,
+                  child: Center(
+                    child: Icon(
+                      ascending
+                          ? Icons.arrow_upward_rounded
+                          : Icons.arrow_downward_rounded,
+                      size: 17,
+                      color: textColor,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 升降序切换：与换字段一样退出随机模式并立即重查。
+  void _toggleSortOrder() {
+    if (_c.loading) return;
+    _applySortOrder(_c.sortOrder == 'Ascending' ? 'Descending' : 'Ascending');
+  }
+
+  void _applySortOrder(String order) {
+    if (_c.sortOrder == order) return;
+    setState(() {
+      _c.exitRandomMode();
+      _c.sortOrder = order;
+    });
+    unawaited(_applyQuery());
   }
 
   // 随机播放：向服务端重新要一批随机条目（每次点按都换一批），并回到顶部。
