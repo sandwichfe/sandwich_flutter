@@ -120,69 +120,70 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
       ),
     );
     final avatar = buildAvatar(14);
-    // 窄窗口只剩头像时左右内边距必须对称，否则头像会偏在胶囊一侧。
+    // 宽窗口展示昵称等信息；窄窗口只留头像本身，
+    // 不再套外层胶囊底色和描边，避免头像周围多出一圈圆底。
     final showAccountDetails = MediaQuery.sizeOf(context).width >= 1100;
     final pill = Semantics(
       button: true,
       label: '用户 $displayName，打开账号菜单',
-      child: Container(
-        height: 40,
-        padding: showAccountDetails
-            ? const EdgeInsets.fromLTRB(4, 4, 10, 4)
-            : const EdgeInsets.symmetric(horizontal: 5),
-        decoration: BoxDecoration(
-          color: skin.surfaceAlt.withValues(alpha: skin.dark ? 0.62 : 1),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: skin.hairline),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            avatar,
-            // 窄窗口只留头像，避免账号区挤占搜索框。
-            if (showAccountDetails) ...[
-              const SizedBox(width: 9),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 110),
-                child: Text(
-                  displayName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontFamily: 'Microsoft YaHei UI',
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: skin.scheme.onSurface,
+      child: showAccountDetails
+          ? Container(
+              height: 40,
+              padding: const EdgeInsets.fromLTRB(4, 4, 10, 4),
+              decoration: BoxDecoration(
+                color: skin.surfaceAlt.withValues(alpha: skin.dark ? 0.62 : 1),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: skin.hairline),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  avatar,
+                  const SizedBox(width: 9),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 110),
+                    child: Text(
+                      displayName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontFamily: 'Microsoft YaHei UI',
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: skin.scheme.onSurface,
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(width: 7),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  gradient: skin.accentFill,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: const Text(
-                  'EMBY',
-                  style: TextStyle(
-                    fontSize: 8.5,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.8,
-                    color: Colors.white,
+                  const SizedBox(width: 7),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      gradient: skin.accentFill,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: const Text(
+                      'EMBY',
+                      style: TextStyle(
+                        fontSize: 8.5,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.8,
+                        color: Colors.white,
+                      ),
+                    ),
                   ),
-                ),
+                  const SizedBox(width: 3),
+                  Icon(
+                    Icons.keyboard_arrow_down_rounded,
+                    size: 16,
+                    color: skin.textSecondary,
+                  ),
+                ],
               ),
-              const SizedBox(width: 3),
-              Icon(
-                Icons.keyboard_arrow_down_rounded,
-                size: 16,
-                color: skin.textSecondary,
-              ),
-            ],
-          ],
-        ),
-      ),
+            )
+          : avatar,
     );
     // 账号菜单只承载账号相关的退出登录，设置入口已放到页头。
     final menu = PopupMenuButton<String>(
