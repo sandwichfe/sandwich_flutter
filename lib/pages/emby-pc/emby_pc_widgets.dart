@@ -845,6 +845,228 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
   }
 }
 
+// 观看历史行：左侧 16:9 缩略图带续播进度，右侧标题与最近播放摘要，
+// 比海报网格更贴近「最近在看」的清单感，也让一行里的信息密度更高。
+class EmbyPcWatchHistoryRow extends StatefulWidget {
+  final EmbyPcItem item;
+  final VoidCallback onOpen;
+  final VoidCallback? onPlay;
+
+  const EmbyPcWatchHistoryRow({
+    super.key,
+    required this.item,
+    required this.onOpen,
+    this.onPlay,
+  });
+
+  @override
+  State<EmbyPcWatchHistoryRow> createState() => _EmbyPcWatchHistoryRowState();
+}
+
+class _EmbyPcWatchHistoryRowState extends State<EmbyPcWatchHistoryRow> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = widget.item.runTimeTicks <= 0
+        ? 0.0
+        : (widget.item.playbackPositionTicks / widget.item.runTimeTicks)
+              .clamp(0.0, 1.0)
+              .toDouble();
+    return RepaintBoundary(
+      child: Semantics(
+        button: true,
+        label: '打开 ${widget.item.name}',
+        child: MouseRegion(
+          onEnter: (_) => setState(() => _hovered = true),
+          onExit: (_) => setState(() => _hovered = false),
+          cursor: SystemMouseCursors.click,
+          child: _buildRowContainer(
+            context,
+            child: Row(
+              children: [
+                _buildThumbnail(context, progress),
+                const SizedBox(width: 14),
+                Expanded(child: _buildSummary(context, progress)),
+                if (widget.onPlay != null) ...[
+                  const SizedBox(width: 10),
+                  _buildPlayButton(context),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // 悬停时整行浮起淡色底，未悬停保持透明，列表看起来像干净的清单。
+  Widget _buildRowContainer(
+    BuildContext context, {
+    required Widget child,
+  }) {
+    final skin = EmbyPcSkin.of(context);
+    return Material(
+      color: _hovered ? skin.tint(skin.dark ? 0.12 : 0.06) : Colors.transparent,
+      borderRadius: BorderRadius.circular(10),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: widget.onOpen,
+        hoverColor: Colors.transparent,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          child: child,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildThumbnail(BuildContext context, double progress) {
+    final skin = EmbyPcSkin.of(context);
+    final item = widget.item;
+    // 影视条目优先用背景图，取不到时退回竖版主图，避免整行出现空白占位。
+    final useBackdrop = item.hasBackdropImage;
+    final hasImage = useBackdrop ? item.hasBackdropImage : item.hasPrimaryImage;
+    final imageUrl = hasImage
+        ? EmbyPcService.instance.imageUrlForItem(
+            item,
+            type: useBackdrop ? 'Backdrop' : 'Primary',
+            maxWidth: 480,
+          )
+        : '';
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: SizedBox(
+        width: 132,
+        height: 74,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            EmbyPcNetworkImage(url: imageUrl),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              color: Colors.black.withValues(alpha: _hovered ? 0.22 : 0.04),
+            ),
+            if (item.runtimeLabel.isNotEmpty)
+              Positioned(
+                right: 6,
+                bottom: progress > 0 ? 9 : 6,
+                child: _MediaBadge(label: item.runtimeLabel),
+              ),
+            if (progress > 0)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: _PlaybackProgress(value: progress, color: skin.accent),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSummary(BuildContext context, double progress) {
+    final skin = EmbyPcSkin.of(context);
+    final item = widget.item;
+    final percent = (progress * 100).round();
+    final meta = <String>[
+      _historyTimeLabel(item.lastPlayedDate),
+      if (item.productionYear != null) '${item.productionYear}',
+      if (item.played)
+        '已看完'
+      else if (percent > 0)
+        '已看 $percent%',
+    ].where((value) => value.isNotEmpty).join(' · ');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        AnimatedDefaultTextStyle(
+          duration: const Duration(milliseconds: 180),
+          style: TextStyle(
+            fontFamily: 'Microsoft YaHei UI',
+            fontSize: 14.5,
+            fontWeight: FontWeight.w600,
+            color: _hovered ? skin.accent : skin.scheme.onSurface,
+          ),
+          child: Text(
+            item.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            if (item.communityRating != null) ...[
+              const Icon(Icons.star_rounded, size: 14, color: Color(0xFFF3B33D)),
+              const SizedBox(width: 2),
+              Text(
+                item.communityRating!.toStringAsFixed(1),
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: skin.textSecondary,
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
+            Flexible(
+              child: Text(
+                meta,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12, color: skin.textSecondary),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPlayButton(BuildContext context) {
+    final skin = EmbyPcSkin.of(context);
+    final played = widget.item.played;
+    return Tooltip(
+      message: played ? '重新播放' : '继续播放',
+      child: IconButton(
+        onPressed: widget.onPlay,
+        style: IconButton.styleFrom(
+          minimumSize: const Size.square(38),
+          padding: EdgeInsets.zero,
+          backgroundColor: _hovered
+              ? skin.tint(0.16)
+              : skin.surfaceAlt.withValues(alpha: skin.dark ? 0.55 : 1),
+          foregroundColor: _hovered ? skin.accent : skin.textSecondary,
+          side: BorderSide(color: _hovered ? skin.tint(0.5) : skin.hairline),
+          shape: const CircleBorder(),
+        ),
+        icon: const Icon(Icons.play_arrow_rounded, size: 21),
+      ),
+    );
+  }
+}
+
+// 观看历史摘要里的时间用相对表述更直观：当天/昨天给时刻，更早按天或日期显示。
+String _historyTimeLabel(String isoDate) {
+  final parsed = DateTime.tryParse(isoDate);
+  if (parsed == null) return '';
+  final local = parsed.toLocal();
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final playedDay = DateTime(local.year, local.month, local.day);
+  final days = today.difference(playedDay).inDays;
+  String twoDigits(int value) => value.toString().padLeft(2, '0');
+  final clock = '${twoDigits(local.hour)}:${twoDigits(local.minute)}';
+  if (days <= 0) return '今天 $clock';
+  if (days == 1) return '昨天 $clock';
+  if (days < 7) return '$days 天前';
+  if (local.year == now.year) return '${local.month} 月 ${local.day} 日';
+  return '${local.year}-${twoDigits(local.month)}-${twoDigits(local.day)}';
+}
+
 class _MediaMetadata extends StatelessWidget {
   final EmbyPcItem item;
   final bool onDark;

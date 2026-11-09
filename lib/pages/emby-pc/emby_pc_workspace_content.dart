@@ -55,6 +55,9 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
                     hasFilters: _hasActiveFilters,
                     onClearFilters: _clearAllFilters,
                   )
+                : _c.view == 'watch-history'
+                // 观看历史自带行式布局，不再走海报网格。
+                ? _buildHistoryList(context, compact: compact)
                 : CustomScrollView(
                     controller: _scrollController,
                     slivers: [
@@ -82,8 +85,6 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
                               imageStyle: imageStyle,
                               secondaryLabel: peopleList
                                   ? _personBirthYear(item)
-                                  : _c.view == 'watch-history'
-                                  ? item.lastPlayedLabel
                                   : '',
                               hideDefaultMetadata: peopleList,
                               favoriteBusy: _favoriteBusyIds.contains(item.id),
@@ -120,6 +121,54 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
                   ),
           ),
         ),
+      ],
+    );
+  }
+
+  // 观看历史列表：行式排版 + 细分隔线，滚动时按需构建。
+  Widget _buildHistoryList(BuildContext context, {required bool compact}) {
+    final skin = EmbyPcSkin.of(context);
+    return CustomScrollView(
+      controller: _scrollController,
+      slivers: [
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(
+            compact ? 8 : 18,
+            2,
+            compact ? 8 : 18,
+            40,
+          ),
+          sliver: SliverList.separated(
+            itemCount: _c.items.length,
+            itemBuilder: (context, index) {
+              final item = _c.items[index];
+              return EmbyPcWatchHistoryRow(
+                item: item,
+                onOpen: () => _openItem(item),
+                onPlay: () => _playItem(item),
+              );
+            },
+            separatorBuilder: (context, index) => Divider(
+              height: 1,
+              thickness: 1,
+              indent: 8,
+              endIndent: 8,
+              color: skin.hairline,
+            ),
+          ),
+        ),
+        if (_c.loadingMore)
+          const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.only(bottom: 24),
+              child: Center(
+                child: SizedBox.square(
+                  dimension: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            ),
+          ),
       ],
     );
   }

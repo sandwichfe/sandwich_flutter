@@ -201,6 +201,11 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
     );
     // 人物接口没有视频筛选和布局参数，避免展示不会影响请求的控件。
     final peopleList = _c.view == 'people' || _c.view == 'favorite-people';
+    // 观看历史固定按最近播放时间倒序，筛选/排序/随机入口都失去意义，
+    // 这里只保留一行排序说明和条目统计。
+    if (_c.view == 'watch-history') {
+      return _buildHistoryToolbar(context, compact: compactMobileToolbar);
+    }
     return Material(
       color: Colors.transparent,
       child: Container(
@@ -251,6 +256,40 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
             );
           },
         ),
+      ),
+    );
+  }
+
+  // 观看历史的极简工具栏：左侧说明固定排序，右侧沿用统一的条目统计。
+  Widget _buildHistoryToolbar(
+    BuildContext context, {
+    required bool compact,
+  }) {
+    final skin = EmbyPcSkin.of(context);
+    return Container(
+      constraints: const BoxConstraints(minHeight: 44),
+      padding: compact
+          ? const EdgeInsets.fromLTRB(16, 2, 16, 10)
+          : const EdgeInsets.fromLTRB(28, 0, 28, 12),
+      child: Row(
+        children: [
+          Icon(Icons.history_rounded, size: 15, color: skin.textTertiary),
+          const SizedBox(width: 6),
+          Text(
+            '按最近播放时间排序',
+            style: TextStyle(fontSize: 12, color: skin.textTertiary),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              _pageStatusText,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.right,
+              style: TextStyle(fontSize: 12, color: skin.textSecondary),
+            ),
+          ),
+        ],
       ),
     );
   }
