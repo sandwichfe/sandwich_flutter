@@ -7,93 +7,69 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
     final skin = EmbyPcSkin.of(context);
     final mobile = _usesMobileWorkspaceLayout(MediaQuery.sizeOf(context).width);
     final showWindowButtons = _usesWindowsChrome;
-    final content = Row(
-      children: [
-        Expanded(
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(
-              compact ? 8 : 14,
-              10,
-              showWindowButtons ? 8 : (compact ? 10 : 16),
-              10,
-            ),
-            child: Row(
-              children: [
-                if (compact) ...[
-                  _buildCompactLibraryMenu(),
-                  const SizedBox(width: 2),
-                ],
-                if (!mobile) ...[
-                  _buildHistoryButton(
-                    icon: Icons.chevron_left_rounded,
-                    tooltip: '后退',
-                    onPressed: _canGoBack ? _goBackView : null,
-                  ),
-                  _buildHistoryButton(
-                    icon: Icons.chevron_right_rounded,
-                    tooltip: '前进',
-                    onPressed: _canGoForward ? _goForwardView : null,
-                  ),
-                  const SizedBox(width: 10),
-                ],
-                // 搜索框吸收剩余空间，宽屏限制最大宽度，避免拉成一条长条。
-                Expanded(
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 420),
-                      child: _EmbyPcWorkspaceNavigation(
-                        this,
-                      )._buildSearchField(double.infinity),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                _buildHeaderAction(
-                  icon: Icons.refresh_rounded,
-                  tooltip: _c.view == 'home' ? '刷新首页' : '刷新列表',
-                  onPressed: _c.view == 'part-groups'
-                      ? null
-                      : () => unawaited(_refreshCurrentView()),
-                ),
-                // 移动端设置入口在抽屉里，页头省下空间给搜索框。
-                if (!mobile)
-                  _buildHeaderAction(
-                    icon: Icons.settings_rounded,
-                    tooltip: '设置',
-                    onPressed: () => unawaited(_openSettings()),
-                  ),
-                const SizedBox(width: 8),
-                _EmbyPcWorkspaceNavigation(this)._buildAccountMenu(context),
-              ],
-            ),
-          ),
+    // 背景、分割线、窗口拖动区与窗口按钮统一由页头外壳处理。
+    return EmbyPcTopBarShell(
+      color: skin.sidebar.withValues(alpha: skin.dark ? 0.94 : 0.96),
+      hairline: skin.hairline,
+      showWindowButtons: showWindowButtons,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          compact ? 8 : 14,
+          10,
+          showWindowButtons ? 8 : (compact ? 10 : 16),
+          10,
         ),
-        if (showWindowButtons) ...[
-          // 窗口按钮占满整个页头高度，悬停背景才不会被上下留白切断。
-          Container(width: 1, height: 24, color: skin.hairline),
-          const WindowsCaptionButtons(height: 62),
-        ],
-      ],
-    );
-
-    return Container(
-      height: 62,
-      decoration: BoxDecoration(
-        color: skin.sidebar.withValues(alpha: skin.dark ? 0.94 : 0.96),
-        border: Border(bottom: BorderSide(color: skin.hairline)),
-      ),
-      child: showWindowButtons
-          // 空白处可拖动窗口；按钮和输入框位于上层，优先响应鼠标事件。
-          ? Stack(
-              children: [
-                Positioned.fill(
-                  child: WindowsDragArea(child: const SizedBox.expand()),
+        child: Row(
+          children: [
+            if (compact) ...[
+              _buildCompactLibraryMenu(),
+              const SizedBox(width: 2),
+            ],
+            if (!mobile) ...[
+              _buildHistoryButton(
+                icon: Icons.chevron_left_rounded,
+                tooltip: '后退',
+                onPressed: _canGoBack ? _goBackView : null,
+              ),
+              _buildHistoryButton(
+                icon: Icons.chevron_right_rounded,
+                tooltip: '前进',
+                onPressed: _canGoForward ? _goForwardView : null,
+              ),
+              const SizedBox(width: 10),
+            ],
+            // 搜索框吸收剩余空间，宽屏限制最大宽度，避免拉成一条长条。
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 420),
+                  child: _EmbyPcWorkspaceNavigation(
+                    this,
+                  )._buildSearchField(double.infinity),
                 ),
-                Positioned.fill(child: content),
-              ],
-            )
-          : content,
+              ),
+            ),
+            const SizedBox(width: 10),
+            _buildHeaderAction(
+              icon: Icons.refresh_rounded,
+              tooltip: _c.view == 'home' ? '刷新首页' : '刷新列表',
+              onPressed: _c.view == 'part-groups'
+                  ? null
+                  : () => unawaited(_refreshCurrentView()),
+            ),
+            // 移动端设置入口在抽屉里，页头省下空间给搜索框。
+            if (!mobile)
+              _buildHeaderAction(
+                icon: Icons.settings_rounded,
+                tooltip: '设置',
+                onPressed: () => unawaited(_openSettings()),
+              ),
+            const SizedBox(width: 8),
+            _EmbyPcWorkspaceNavigation(this)._buildAccountMenu(context),
+          ],
+        ),
+      ),
     );
   }
 

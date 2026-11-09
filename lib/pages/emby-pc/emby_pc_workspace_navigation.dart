@@ -120,12 +120,16 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
       ),
     );
     final avatar = buildAvatar(14);
+    // 窄窗口只剩头像时左右内边距必须对称，否则头像会偏在胶囊一侧。
+    final showAccountDetails = MediaQuery.sizeOf(context).width >= 1100;
     final pill = Semantics(
       button: true,
       label: '用户 $displayName，打开账号菜单',
       child: Container(
         height: 40,
-        padding: const EdgeInsets.fromLTRB(4, 4, 10, 4),
+        padding: showAccountDetails
+            ? const EdgeInsets.fromLTRB(4, 4, 10, 4)
+            : const EdgeInsets.symmetric(horizontal: 5),
         decoration: BoxDecoration(
           color: skin.surfaceAlt.withValues(alpha: skin.dark ? 0.62 : 1),
           borderRadius: BorderRadius.circular(20),
@@ -136,7 +140,7 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
           children: [
             avatar,
             // 窄窗口只留头像，避免账号区挤占搜索框。
-            if (MediaQuery.sizeOf(context).width >= 1100) ...[
+            if (showAccountDetails) ...[
               const SizedBox(width: 9),
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 110),
@@ -409,19 +413,22 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
         ),
       );
     }
-    // 高度与页头对齐（62），品牌标与搜索框处在同一条视觉基线上。
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 13, 10, 13),
-      child: Row(
-        children: [
-          mark,
-          const SizedBox(width: 12),
-          Expanded(
-            // 品牌文字区同时作为窗口拖动区，符合桌面端从左上角拖窗口的习惯。
-            child: _brandTitleArea(context),
-          ),
-          _buildSidebarToggle(context),
-        ],
+    // 高度与页头共用同一常量，品牌标与搜索框处在同一条视觉基线上。
+    return SizedBox(
+      height: EmbyPcHeaderMetrics.height,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 0, 10, 0),
+        child: Row(
+          children: [
+            mark,
+            const SizedBox(width: 12),
+            Expanded(
+              // 品牌文字区同时作为窗口拖动区，符合桌面端从左上角拖窗口的习惯。
+              child: _brandTitleArea(context),
+            ),
+            _buildSidebarToggle(context),
+          ],
+        ),
       ),
     );
   }
@@ -475,7 +482,8 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
         child: Column(
           children: [
             SizedBox(
-              height: 62,
+              // 抽屉品牌区与页头同高，两套导航观感一致。
+              height: EmbyPcHeaderMetrics.height,
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 child: Row(

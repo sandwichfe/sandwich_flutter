@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../../widgets/windows_title_bar.dart';
 import 'emby_pc_models.dart';
 import 'emby_pc_service.dart';
 import 'emby_pc_theme.dart';
@@ -1168,6 +1169,76 @@ class EmbyPcLoadingPlaceholder extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// 页头统一高度：工作台、详情/人物页顶栏与侧栏品牌区共用同一数值，
+// 切换页面时内容区不会上下跳动。
+class EmbyPcHeaderMetrics {
+  const EmbyPcHeaderMetrics._();
+
+  static const double height = 64;
+}
+
+// 桌面页头外壳：统一背景、底部分割线、窗口拖动区与窗口按钮，
+// 页头只需提供内容，窗口按钮高度自动跟随页头高度。
+class EmbyPcTopBarShell extends StatelessWidget {
+  final Widget child;
+  final Color color;
+  final Color hairline;
+  final double height;
+  final bool showWindowButtons;
+  // 深色页头（如播放器）可以覆盖窗口按钮配色。
+  final Color? captionForegroundColor;
+  final Color? captionHoverColor;
+
+  const EmbyPcTopBarShell({
+    super.key,
+    required this.child,
+    required this.color,
+    required this.hairline,
+    this.height = EmbyPcHeaderMetrics.height,
+    this.showWindowButtons = false,
+    this.captionForegroundColor,
+    this.captionHoverColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final content = Row(
+      children: [
+        Expanded(child: child),
+        if (showWindowButtons) ...[
+          // 窗口按钮占满整个页头高度，悬停背景才不会被上下留白切断。
+          Container(width: 1, height: 24, color: hairline),
+          WindowsCaptionButtons(
+            height: height,
+            foregroundColor: captionForegroundColor,
+            hoverColor: captionHoverColor,
+          ),
+        ],
+      ],
+    );
+    return Material(
+      color: color,
+      child: Container(
+        height: height,
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: hairline)),
+        ),
+        child: showWindowButtons
+            // 空白处可拖动窗口；按钮和输入框位于上层，优先响应鼠标事件。
+            ? Stack(
+                children: [
+                  Positioned.fill(
+                    child: WindowsDragArea(child: const SizedBox.expand()),
+                  ),
+                  Positioned.fill(child: content),
+                ],
+              )
+            : content,
+      ),
     );
   }
 }

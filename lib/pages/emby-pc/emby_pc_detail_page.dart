@@ -74,18 +74,13 @@ class EmbyPcImmersiveTopBar extends StatelessWidget {
         ),
       ),
     );
-    return Material(
+    // 与工作台页头共用外壳，高度由统一常量控制，切页时不会跳动。
+    return EmbyPcTopBarShell(
       color: colors.surface.withValues(alpha: 0.78),
-      child: Container(
-        height: 68,
+      hairline: colors.outlineVariant.withValues(alpha: 0.56),
+      showWindowButtons: windowsChrome,
+      child: Padding(
         padding: EdgeInsets.only(left: 14, right: windowsChrome ? 0 : 14),
-        decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(
-              color: colors.outlineVariant.withValues(alpha: 0.56),
-            ),
-          ),
-        ),
         child: Row(
           children: [
             IconButton(
@@ -110,7 +105,6 @@ class EmbyPcImmersiveTopBar extends StatelessWidget {
               ),
               const SizedBox(width: 10),
             ],
-            if (windowsChrome) const WindowsCaptionButtons(height: 68),
           ],
         ),
       ),
