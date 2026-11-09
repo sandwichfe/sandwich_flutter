@@ -301,14 +301,16 @@ func personOrderBy(sortBy, sortOrder string) string {
 // PersonByID 按 ID 查演员详情。演员不随影片删除，所以作品数为 0 时依然返回。
 func (s *Store) PersonByID(ctx context.Context, personID string) (*dto.BaseItemDto, error) {
 	var row personRow
-	var backdropJSON, providerJSON string
+	var backdropJSON, providerJSON, aliasJSON string
 	err := s.db.QueryRowContext(ctx, `
 		SELECT person_id, name, image_tag, item_count,
-			backdrop_tags, birth_date, premiere_date, gender, cup_size, overview, provider_ids
+			backdrop_tags, birth_date, premiere_date, gender, cup_size, body_height, measurements,
+			aliases, overview, provider_ids
 		FROM persons WHERE person_id = ?`, personID,
 	).Scan(&row.id, &row.name, &row.imageTag, &row.itemCount,
 		&backdropJSON, &row.birthDate, &row.premiereDate, &row.gender,
-		&row.cupSize, &row.overview, &providerJSON)
+		&row.cupSize, &row.bodyHeight, &row.measurements, &aliasJSON,
+		&row.overview, &providerJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -316,6 +318,7 @@ func (s *Store) PersonByID(ctx context.Context, personID string) (*dto.BaseItemD
 		return nil, err
 	}
 	unmarshalJSON(backdropJSON, &row.backdropTags)
+	unmarshalJSON(aliasJSON, &row.aliases)
 	unmarshalJSON(providerJSON, &row.providerIDs)
 	result := row.toDto()
 	return &result, nil
@@ -423,6 +426,19 @@ func (s *Store) UpdatePersonMetadata(ctx context.Context, personID string, paylo
 	setString("premiere_date", "PremiereDate")
 	setString("gender", "Gender")
 	setString("cup_size", "CupSize")
+	setString("body_height", "BodyHeight")
+	setString("measurements", "Measurements")
+
+	if aliases, ok := payload["Aliases"].([]any); ok {
+		values := make([]string, 0, len(aliases))
+		for _, alias := range aliases {
+			if value := strings.TrimSpace(fmt.Sprint(alias)); value != "" {
+				values = append(values, value)
+			}
+		}
+		sets = append(sets, "aliases = ?")
+		args = append(args, marshalJSON(values))
+	}
 
 	// 记录哪些字段被手动编辑过：刮削会跳过这些字段，人工数据优先。
 	if touched := touchedManualFields(payload); len(touched) > 0 {
@@ -491,6 +507,9 @@ type personRow struct {
 	premiereDate string
 	gender       string
 	cupSize      string
+	bodyHeight   string
+	measurements string
+	aliases      []string
 	overview     string
 	providerIDs  map[string]string
 	itemCount    int
@@ -513,6 +532,9 @@ func (row personRow) toDto() dto.BaseItemDto {
 		PremiereDate:      row.premiereDate,
 		Gender:            row.gender,
 		CupSize:           row.cupSize,
+		BodyHeight:        row.bodyHeight,
+		Measurements:      row.measurements,
+		Aliases:           row.aliases,
 		ProviderIDs:       row.providerIDs,
 		ImageTags:         imageTags,
 		PrimaryImageTag:   row.imageTag,

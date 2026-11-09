@@ -73,7 +73,7 @@ func (s *Server) handleCreatePersonScrapeJob(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if s.personScrape == nil {
-		writeError(w, http.StatusBadRequest, "未配置 TMDB API Key，无法刮削演员资料")
+		writeError(w, http.StatusBadRequest, "演员刮削未启用，请在 config.yaml 配置 tmdb.api_key 或开启 jav.enabled")
 		return
 	}
 
@@ -140,7 +140,7 @@ func (s *Server) handlePersonScrapeJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.personScrape == nil {
-		writeError(w, http.StatusBadRequest, "未配置 TMDB API Key，无法刮削演员资料")
+		writeError(w, http.StatusBadRequest, "演员刮削未启用，请在 config.yaml 配置 tmdb.api_key 或开启 jav.enabled")
 		return
 	}
 	snapshot, ok := s.personScrape.Snapshot(strings.TrimSpace(r.PathValue("jobId")))
@@ -157,7 +157,7 @@ func (s *Server) handleCancelPersonScrapeJob(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if s.personScrape == nil {
-		writeError(w, http.StatusBadRequest, "未配置 TMDB API Key，无法刮削演员资料")
+		writeError(w, http.StatusBadRequest, "演员刮削未启用，请在 config.yaml 配置 tmdb.api_key 或开启 jav.enabled")
 		return
 	}
 	snapshot, err := s.personScrape.Cancel(strings.TrimSpace(r.PathValue("jobId")))
@@ -179,7 +179,7 @@ func (s *Server) handleScrapePerson(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.personScrape == nil {
-		writeError(w, http.StatusBadRequest, "未配置 TMDB API Key，无法刮削演员资料")
+		writeError(w, http.StatusBadRequest, "演员刮削未启用，请在 config.yaml 配置 tmdb.api_key 或开启 jav.enabled")
 		return
 	}
 

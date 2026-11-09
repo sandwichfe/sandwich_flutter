@@ -36,7 +36,7 @@ type Store struct {
 
 // schemaVersion 对应 schema.sql 的表结构版本号。
 // 改表结构时递增，并在 schemaMigrations 里补上「上一版 → 这一版」的语句。
-const schemaVersion = 9
+const schemaVersion = 10
 
 // schemaVersionBackfillGroups 是「分片归属」开始生效的版本：
 // 从这个版本起，打开老库要按现存 items 回填 item_groups，不重扫也能生效。
@@ -112,6 +112,12 @@ var schemaMigrations = map[int][]string{
 			relation   TEXT NOT NULL DEFAULT 'part'
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_item_groups_key ON item_groups(group_key)`,
+	},
+	// 9 → 10：演员补充身高/三围/别名，供 AV 女优档案站合并写入。
+	9: {
+		`ALTER TABLE persons ADD COLUMN body_height TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE persons ADD COLUMN measurements TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE persons ADD COLUMN aliases TEXT NOT NULL DEFAULT '[]'`,
 	},
 }
 

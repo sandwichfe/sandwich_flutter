@@ -111,6 +111,12 @@ CREATE TABLE IF NOT EXISTS persons (
     premiere_date TEXT NOT NULL DEFAULT '',
     gender        TEXT NOT NULL DEFAULT '',
     cup_size      TEXT NOT NULL DEFAULT '',
+    -- 身高与三围来自 AV 女优档案站（MinnanoAV/JavDatabase/JavModel），单位直接跟值走。
+    -- 列名用 body_height 而不是 height，避免和视频画面高度混淆。
+    body_height   TEXT NOT NULL DEFAULT '',
+    measurements  TEXT NOT NULL DEFAULT '',
+    -- aliases 是别名（日文名/罗马名/中文名）JSON 数组，用于跨站点与重名匹配。
+    aliases       TEXT NOT NULL DEFAULT '[]',
     overview      TEXT NOT NULL DEFAULT '',
     -- provider_ids 与 items 同构：{"Tmdb":"123","Imdb":"nm456"}。
     provider_ids  TEXT NOT NULL DEFAULT '{}',
