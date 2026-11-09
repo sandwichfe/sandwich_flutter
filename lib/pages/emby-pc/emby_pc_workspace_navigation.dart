@@ -1,21 +1,7 @@
 part of 'emby_pc_page.dart';
 
-// 工作台导航区域集中处理标题、账号菜单和桌面侧栏。
+// 工作台导航区域集中处理账号菜单和桌面侧栏。
 extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
-  String get _pageTitle {
-    if (_c.view == 'home') return '首页';
-    if (_c.view == 'watch-history') return '观看历史';
-    if (_c.view == 'latest') return '最新入库';
-    if (_c.view == 'people') return '演员列表';
-    if (_c.view == 'part-groups') return '分片影片';
-    if (_c.view == 'favorite-movies') return '收藏影片';
-    if (_c.view == 'favorite-people') return '收藏演员';
-    for (final library in _c.libraries) {
-      if (library.id == _c.activeId) return library.name;
-    }
-    return '媒体库';
-  }
-
   Widget _buildSearchField(double width) {
     final skin = EmbyPcSkin.of(context);
     return SizedBox(

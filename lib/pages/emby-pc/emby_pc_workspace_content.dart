@@ -17,7 +17,7 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
           _EmbyPcWorkspaceToolbar(
             this,
           )._buildWorkspaceHeader(context, compact: compact),
-          _EmbyPcWorkspaceToolbar(this)._buildPageHeading(context),
+          // 分片视图自带搜索与刷新，页头下方直接开始列表。
           Expanded(child: EmbyPcPartGroupsView(onOpenItem: _openItem)),
         ],
       );
@@ -29,9 +29,7 @@ extension _EmbyPcWorkspaceContent on _EmbyPcWorkspaceState {
         )._buildWorkspaceHeader(context, compact: compact),
         // 保留旧列表的同时用 2 像素细条提示正在刷新，避免整块白屏闪动。
         if (_c.refreshing) const LinearProgressIndicator(minHeight: 2),
-        // 首页直接让主视觉接住页头，内容页则用大标题作为页面级标题。
-        if (_c.view != 'home')
-          _EmbyPcWorkspaceToolbar(this)._buildPageHeading(context),
+        // 已去掉页面大标题，非首页直接由筛选工具栏开始，条目数并入工具栏右侧。
         if (_c.view != 'home')
           _EmbyPcWorkspaceToolbar(this)._buildToolbar(context),
         if (_c.view != 'home' && _c.error.isNotEmpty)

@@ -141,56 +141,13 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
     await _c.loadItems(reset: true);
   }
 
-  // 内容页大标题：放在页头下方，像视频/音乐客户端一样作为页面级标题。
-  Widget _buildPageHeading(BuildContext context) {
-    final skin = EmbyPcSkin.of(context);
-    final narrow = MediaQuery.sizeOf(context).width < 600;
-    final subtitle = _c.view == 'home'
-        ? (_c.homeLoading && !_c.homeLoaded
-              ? '正在为你挑选内容'
-              : '共 ${_c.libraries.length} 个媒体库 · 最近更新优先')
-        // 分片视图的条目数由视图自己维护，页头只描述用途。
-        : _c.view == 'part-groups'
-        ? '核对同一部影片的多文件归属 · 只读视图'
-        : _c.loading && _c.items.isEmpty
-        ? '正在载入'
-        : _c.randomMode
-        ? '随机 ${_c.items.length} 条 / 共 ${_c.total} 条'
-        : '已加载 ${_c.items.length} 条 / 共 ${_c.total} 条';
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        narrow ? 16 : 28,
-        narrow ? 14 : 18,
-        narrow ? 16 : 28,
-        2,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            _pageTitle,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontFamily: 'Microsoft YaHei UI',
-              fontSize: narrow ? 22 : 26,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.6,
-              height: 1.2,
-              color: skin.scheme.onSurface,
-            ),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            subtitle,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 12, color: skin.textSecondary),
-          ),
-        ],
-      ),
-    );
-  }
+  // 列表进度摘要：页面大标题已去掉，条目数改为显示在工具栏右侧。
+  String get _pageStatusText =>
+      _c.loading && _c.items.isEmpty
+      ? '正在载入'
+      : _c.randomMode
+      ? '随机 ${_c.items.length} 条 / 共 ${_c.total} 条'
+      : '已加载 ${_c.items.length} 条 / 共 ${_c.total} 条';
 
   Widget _buildCompactLibraryMenu() {
     if (_usesMobileWorkspaceLayout(MediaQuery.sizeOf(context).width)) {
@@ -237,6 +194,7 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
   }
 
   Widget _buildToolbar(BuildContext context) {
+    final skin = EmbyPcSkin.of(context);
     // 移动端缩小工具栏留白，桌面端继续沿用原有间距。
     final compactMobileToolbar = _usesMobileWorkspaceLayout(
       MediaQuery.sizeOf(context).width,
@@ -272,7 +230,21 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                     enabled: !_c.loading && !_c.refreshing && !_c.loadingMore,
                   ),
                 ],
-                const Spacer(),
+                // 条目统计替代原来的页面副标题，右对齐贴在布局切换左侧。
+                Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: compactMobileToolbar ? 8 : 12,
+                    ),
+                    child: Text(
+                      _pageStatusText,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.right,
+                      style: TextStyle(fontSize: 12, color: skin.textSecondary),
+                    ),
+                  ),
+                ),
                 if (!peopleList)
                   _buildLayoutControl(context, compact: compactLayoutControl),
               ],
