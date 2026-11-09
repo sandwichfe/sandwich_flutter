@@ -268,6 +268,15 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
   bool get _usesWindowCloseGuard =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
 
+  // mpv 的 volume 属性内部按 gain=(v/100)^3 衰减，桌面端直接把 UI 百分比写进去，
+  // 会让 0-70 这一段几乎无声。这里先开三次方，使滑条位置与听感近似线性。
+  static double _playerVolumeFor(double percent) =>
+      100 * math.pow((percent / 100).clamp(0.0, 1.0), 1 / 3).toDouble();
+
+  // 播放器回读 volume 时反向换算，页面内部始终保存 0-100 的用户百分比语义。
+  static double _uiPercentFor(double playerVolume) =>
+      100 * math.pow((playerVolume / 100).clamp(0.0, 1.0), 3).toDouble();
+
   Future<void> _setWindowCloseGuard(bool enabled) async {
     try {
       await windowManager.setPreventClose(enabled);
@@ -312,11 +321,16 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
     _playerSubscriptions.add(
       _player.stream.volume.listen((volume) {
         if (!mounted || _windowClosing || _usesAndroidSystemVolume) return;
-        final safeVolume = volume.clamp(0.0, 100.0).toDouble();
+        // mpv 回读的是原始 volume，先反算回 UI 百分比再同步滑条。
+        final safeVolume = _uiPercentFor(volume);
         setState(() {
-          _volume = safeVolume;
-          _muted = safeVolume <= 0;
-          if (safeVolume > 0) _volumeBeforeMute = safeVolume;
+          // 往返换算有极小浮点误差，差异不足半个单位时保留用户当前值避免抖动。
+          final displayed = (_volume - safeVolume).abs() < 0.5
+              ? _volume
+              : safeVolume;
+          _volume = displayed;
+          _muted = displayed <= 0;
+          if (displayed > 0) _volumeBeforeMute = displayed;
         });
       }),
     );
@@ -398,9 +412,10 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
         ),
         start: startPosition,
       );
-      // Android 只使用系统媒体音量，播放器内部保持满音量以避免重复衰减。
+      // Android 只使用系统媒体音量，播放器内部保持满音量以避免重复衰减；
+      // 桌面端按 mpv 音量曲线换算后再写入。
       await _player.setVolume(
-        _usesAndroidSystemVolume ? 100.0 : _sessionVolume,
+        _usesAndroidSystemVolume ? 100.0 : _playerVolumeFor(_sessionVolume),
       );
       await _observeNetworkSpeed();
       await _player.open(media);
@@ -639,7 +654,7 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
         _synchronizeAndroidSystemVolume(actualVolume);
       }
     } else {
-      await _player.setVolume(targetVolume);
+      await _player.setVolume(_playerVolumeFor(targetVolume));
     }
   }
 
@@ -661,7 +676,8 @@ class _EmbyPcPlayerPageState extends State<EmbyPcPlayerPage>
         _synchronizeAndroidSystemVolume(actualVolume);
       }
     } else {
-      await _player.setVolume(safeVolume);
+      // 桌面端写入前换算到 mpv 音量曲线，页面与会话值仍保存 UI 百分比。
+      await _player.setVolume(_playerVolumeFor(safeVolume));
     }
   }
 
