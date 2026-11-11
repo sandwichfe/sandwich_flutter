@@ -232,7 +232,8 @@ class _HomeLibraryTileState extends State<_HomeLibraryTile> {
                           fallbackLabel: '媒体库',
                         ),
                       ),
-                      // 底部渐变压暗，保证白色库名在任何封面上都可读。
+                      // 底部缓入式压暗：从半高开始缓慢加深，中间多段过渡把曲线摊平，
+                      // 峰值只到 65% 且用冷调深色，浅色占位底上也不会出现生硬的灰→黑分界线。
                       const Positioned.fill(
                         child: DecoratedBox(
                           decoration: BoxDecoration(
@@ -240,11 +241,13 @@ class _HomeLibraryTileState extends State<_HomeLibraryTile> {
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
                               colors: [
-                                Color(0x00000000),
-                                Color(0x22000000),
-                                Color(0xE6000000),
+                                Color(0x0010141A),
+                                Color(0x0D10141A),
+                                Color(0x2610141A),
+                                Color(0x5C10141A),
+                                Color(0xA610141A),
                               ],
-                              stops: [0.30, 0.62, 1],
+                              stops: [0.42, 0.56, 0.70, 0.85, 1],
                             ),
                           ),
                         ),
@@ -1510,18 +1513,20 @@ class _HeroSlide extends StatelessWidget {
               curve: Curves.easeOut,
               child: EmbyPcNetworkImage(url: imageUrl),
             ),
-            // 左侧压暗保证文字可读，右侧保留画面细节。
+            // 左侧压暗保证文字可读，右侧保留画面细节；多段过渡让暗部收得柔和。
             const DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.centerLeft,
                   end: Alignment.centerRight,
                   colors: [
-                    Color(0xF20A0C10),
-                    Color(0x8C0A0C10),
-                    Color(0x000A0C10),
+                    Color(0xF210141A),
+                    Color(0xC410141A),
+                    Color(0x8C10141A),
+                    Color(0x3810141A),
+                    Color(0x0010141A),
                   ],
-                  stops: [0, 0.48, 1],
+                  stops: [0, 0.24, 0.48, 0.74, 1],
                 ),
               ),
             ),
@@ -1530,8 +1535,13 @@ class _HeroSlide extends StatelessWidget {
                 gradient: LinearGradient(
                   begin: Alignment.bottomCenter,
                   end: Alignment.topCenter,
-                  colors: [Color(0xD90A0C10), Color(0x000A0C10)],
-                  stops: [0, 0.66],
+                  colors: [
+                    Color(0xC910141A),
+                    Color(0x8C10141A),
+                    Color(0x3D10141A),
+                    Color(0x0010141A),
+                  ],
+                  stops: [0, 0.24, 0.52, 0.80],
                 ),
               ),
             ),

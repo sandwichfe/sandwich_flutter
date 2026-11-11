@@ -506,13 +506,20 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
               ? Colors.black.withValues(alpha: 0.20)
               : Colors.transparent,
         ),
+        // 底部压暗与媒体库卡片保持一致：冷调深色 + 多段缓入，浅色占位底上不出现硬分界。
         const DecoratedBox(
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [Color(0x00000000), Color(0x33000000), Color(0xE6000000)],
-              stops: [0.34, 0.60, 1],
+              colors: [
+                Color(0x0010141A),
+                Color(0x0D10141A),
+                Color(0x2610141A),
+                Color(0x5C10141A),
+                Color(0xA610141A),
+              ],
+              stops: [0.36, 0.50, 0.65, 0.82, 1],
             ),
           ),
         ),
@@ -1336,7 +1343,7 @@ class EmbyPcNetworkImage extends StatelessWidget {
   }
 }
 
-// 无封面占位：固定使用深色海报底，浅色/深色主题下都能与压暗的白色标题自然衔接。
+// 无封面占位：固定使用浅色海报底，与深色画布形成克制的对比，文字/图标统一压低饱和度。
 class _ImagePlaceholder extends StatelessWidget {
   final Color color;
   final bool loading;
@@ -1371,19 +1378,19 @@ class _ImagePlaceholder extends StatelessWidget {
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [Color(0xFF2B2F39), Color(0xFF1A1D24)],
+              colors: [Color(0xFFFAFBFC), Color(0xFFE6EAF0)],
             ),
           ),
           child: Stack(
             children: [
-              // 顶部柔光让深色底不至于是一块死板的纯色。
+              // 左上角白色柔光让浅色底不至于是一块死板的灰板。
               const Positioned.fill(
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: RadialGradient(
                       center: Alignment(-0.55, -0.9),
                       radius: 1.15,
-                      colors: [Color(0x14FFFFFF), Color(0x00FFFFFF)],
+                      colors: [Color(0xB3FFFFFF), Color(0x00FFFFFF)],
                     ),
                   ),
                 ),
@@ -1396,16 +1403,17 @@ class _ImagePlaceholder extends StatelessWidget {
                       width: badgeSize,
                       height: badgeSize,
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.06),
+                        // 浅底上用半透明白色徽标 + 极淡描边，避免图标区域糊成一片。
+                        color: Colors.white.withValues(alpha: 0.78),
                         borderRadius: BorderRadius.circular(badgeSize * 0.32),
                         border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.10),
+                          color: Colors.black.withValues(alpha: 0.06),
                         ),
                       ),
                       child: Icon(
                         icon ?? Icons.movie_outlined,
                         size: iconSize,
-                        color: Colors.white.withValues(alpha: 0.55),
+                        color: Colors.black.withValues(alpha: 0.34),
                       ),
                     ),
                     if (showLabel) ...[
@@ -1419,7 +1427,7 @@ class _ImagePlaceholder extends StatelessWidget {
                           height: 1.1,
                           letterSpacing: 1.2,
                           fontWeight: FontWeight.w600,
-                          color: Colors.white.withValues(alpha: 0.38),
+                          color: Colors.black.withValues(alpha: 0.34),
                         ),
                       ),
                     ],
