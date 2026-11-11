@@ -4,26 +4,26 @@ import (
 	"context"
 	"errors"
 	"flag"
-	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
 	"embyx/internal/config"
 	"embyx/internal/httpapi"
+	"embyx/internal/logging"
 	"embyx/internal/media"
 	"embyx/internal/metadata"
 	"embyx/internal/store"
 )
 
 func main() {
-	setupLogging()
+	// 日志初始化必须在任何 log 调用之前：控制台与按日期切分的文件双写。
+	logging.Setup()
 
 	// rootCtx 是后台任务（媒体扫描、海报生成、BIF 预生成）的父 context。
 	// 收到 Ctrl+C 后先取消它让 ffmpeg 子进程结束，再关闭 HTTP 服务。
@@ -107,7 +107,7 @@ func main() {
 
 	go func() {
 		log.Printf("Emby 兼容服务已启动: http://localhost%s/emby", cfg.Addr)
-		// 密码不进日志：日志会长期留在 embyx.log 里，也可能被贴到 issue 中。
+		// 密码不进日志：日志会长期留在 embyx-日期.log 里，也可能被贴到 issue 中。
 		// 只提示账号，以及"密码还是内置默认值"这一件事。
 		log.Printf("默认账号: %s", cfg.AdminUser)
 		if cfg.AdminPassword == config.DefaultAdminPassword {
@@ -152,85 +152,5 @@ func purgeStalePlaySessions(ctx context.Context, st *store.Store, maxAge time.Du
 			return
 		case <-ticker.C:
 		}
-	}
-}
-
-// setupLogging 同时输出到控制台与 exe 同目录的 embyx.log。
-// 双击运行时控制台会随进程退出关闭，日志文件是排查启动失败的唯一线索。
-func setupLogging() {
-	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
-	log.SetPrefix("[embyx] ")
-
-	executable, err := os.Executable()
-	if err != nil {
-		return
-	}
-	logPath := filepath.Join(filepath.Dir(executable), "embyx.log")
-
-	// 按大小轮转（S4.3）：长期运行只靠启动时判断会让日志无限增长。
-	writer, err := newRotatingWriter(logPath, 5<<20)
-	if err != nil {
-		return
-	}
-	log.SetOutput(io.MultiWriter(os.Stderr, writer))
-}
-
-// rotatingWriter 按大小轮转日志文件：写满 maxSize 后把当前文件改名为 .old 再重新打开。
-// 轮转在写入时判断，不需要额外的定时协程；旧文件只留一份。
-type rotatingWriter struct {
-	mu      sync.Mutex
-	path    string
-	maxSize int64
-	file    *os.File
-	size    int64
-}
-
-func newRotatingWriter(path string, maxSize int64) (*rotatingWriter, error) {
-	writer := &rotatingWriter{path: path, maxSize: maxSize}
-	if err := writer.open(); err != nil {
-		return nil, err
-	}
-	return writer, nil
-}
-
-// open 以追加方式打开日志，并记下当前长度（重启后继续按总量判断）。
-func (w *rotatingWriter) open() error {
-	file, err := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return err
-	}
-	info, err := file.Stat()
-	if err != nil {
-		file.Close()
-		return err
-	}
-	w.file = file
-	w.size = info.Size()
-	return nil
-}
-
-func (w *rotatingWriter) Write(p []byte) (int, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	if w.file == nil {
-		return 0, os.ErrClosed
-	}
-	if w.size+int64(len(p)) > w.maxSize {
-		w.rotate()
-	}
-	n, err := w.file.Write(p)
-	w.size += int64(n)
-	return n, err
-}
-
-// rotate 关闭当前文件、覆盖旧备份并重新打开。任何一步失败都尽量保住可用性：
-// 即使改名失败也继续往原文件写，日志丢失比进程崩溃更容易接受。
-func (w *rotatingWriter) rotate() {
-	_ = w.file.Close()
-	_ = os.Remove(w.path + ".old")
-	_ = os.Rename(w.path, w.path+".old")
-	if err := w.open(); err != nil {
-		w.file = nil
 	}
 }
