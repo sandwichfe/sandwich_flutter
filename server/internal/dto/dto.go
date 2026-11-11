@@ -84,6 +84,11 @@ type BaseItemDto struct {
 	BirthDate string `json:"BirthDate,omitempty"`
 	Gender    string `json:"Gender,omitempty"`
 	CupSize   string `json:"CupSize,omitempty"`
+	// BodyHeight/Measurements/Aliases 来自 AV 女优档案站。
+	// 用 BodyHeight 而不是 Height：BaseItemDto.Height 是视频画面高度。
+	BodyHeight   string   `json:"BodyHeight,omitempty"`
+	Measurements string   `json:"Measurements,omitempty"`
+	Aliases      []string `json:"Aliases,omitempty"`
 
 	MediaSources []MediaSourceInfo `json:"MediaSources,omitempty"`
 	Chapters     []ChapterInfo     `json:"Chapters,omitempty"`

@@ -17,21 +17,29 @@ const (
 
 // manualFields 是手动编辑接口会锁定的字段名。
 // 被锁住的字段刮削一律不覆盖，保证人工整理的内容不会被第三方数据冲掉。
-var manualFields = []string{"Name", "SortName", "Overview", "BirthDate", "PremiereDate", "Gender", "CupSize", "ProviderIds"}
+var manualFields = []string{"Name", "SortName", "Overview", "BirthDate", "PremiereDate", "Gender", "CupSize", "BodyHeight", "Measurements", "Aliases", "ProviderIds"}
 
-// ScrapedPersonData 是 TMDB 刮削回来、准备写库的演员资料。
+// ScrapedPersonData 是刮削回来、准备写库的演员资料。
+// 字段按「多来源字段级合并」的最终结果填写，来源优先级由 metadata.PersonSource 决定。
 type ScrapedPersonData struct {
-	Overview    string
-	BirthDate   string
-	Gender      string
-	ProviderIDs map[string]string
+	Overview     string
+	BirthDate    string
+	PremiereDate string
+	Gender       string
+	CupSize      string
+	BodyHeight   string
+	Measurements string
+	Aliases      []string
+	ProviderIDs  map[string]string
 }
 
 // PersonScrapeTarget 是刮削任务的工作单元。
 // MovieTmdb/MovieNames 用于「按影片反查」与重名打分，避免只靠姓名搜索认错人。
+// Aliases 是本地已记录的别名（日文名/罗马名/中文名），优先用于跨站点搜索。
 type PersonScrapeTarget struct {
 	ID           string
 	Name         string
+	Aliases      []string
 	ProviderIDs  map[string]string
 	ManualFields []string
 	MovieTmdb    []string
@@ -41,16 +49,17 @@ type PersonScrapeTarget struct {
 }
 
 // PersonScrapeTargets 列出有作品、值得刮削的演员。
-// onlyMissing 为 true 时只返回还没有 Tmdb 编号或从未刮削过的人，供增量刷新使用。
+// onlyMissing 为 true 时只返回从未刮削过的人。
+// 这里不再以「有没有 Tmdb 编号」判断：AV 女优在 TMDB 上通常查不到，
+// 用编号判断会让他们每次增量刷新都重跑一遍、永远重试。
 func (s *Store) PersonScrapeTargets(ctx context.Context, onlyMissing bool) ([]PersonScrapeTarget, error) {
-	query := `SELECT person_id, name, provider_ids, manual_fields, scraped_at, match_state
+	query := `SELECT person_id, name, aliases, provider_ids, manual_fields, scraped_at, match_state
 		FROM persons WHERE item_count > 0
 		ORDER BY name COLLATE NOCASE ASC`
 	if onlyMissing {
-		query = `SELECT person_id, name, provider_ids, manual_fields, scraped_at, match_state
+		query = `SELECT person_id, name, aliases, provider_ids, manual_fields, scraped_at, match_state
 			FROM persons
-			WHERE item_count > 0
-			  AND (provider_ids NOT LIKE '%"Tmdb"%' OR scraped_at = '')
+			WHERE item_count > 0 AND scraped_at = ''
 			ORDER BY name COLLATE NOCASE ASC`
 	}
 	rows, err := s.db.QueryContext(ctx, query)
@@ -62,13 +71,15 @@ func (s *Store) PersonScrapeTargets(ctx context.Context, onlyMissing bool) ([]Pe
 	for rows.Next() {
 		var (
 			target                   PersonScrapeTarget
+			aliasJSON                string
 			providerJSON, manualJSON string
 		)
-		if err := rows.Scan(&target.ID, &target.Name, &providerJSON, &manualJSON,
+		if err := rows.Scan(&target.ID, &target.Name, &aliasJSON, &providerJSON, &manualJSON,
 			&target.ScrapedAt, &target.MatchState); err != nil {
 			rows.Close()
 			return nil, err
 		}
+		unmarshalJSON(aliasJSON, &target.Aliases)
 		unmarshalJSON(providerJSON, &target.ProviderIDs)
 		unmarshalJSON(manualJSON, &target.ManualFields)
 		targets = append(targets, target)
@@ -96,18 +107,21 @@ func (s *Store) PersonScrapeTargets(ctx context.Context, onlyMissing bool) ([]Pe
 func (s *Store) PersonScrapeTargetByID(ctx context.Context, personID string) (*PersonScrapeTarget, error) {
 	var (
 		target                   PersonScrapeTarget
+		aliasJSON                string
 		providerJSON, manualJSON string
 	)
 	err := s.db.QueryRowContext(ctx, `
-		SELECT person_id, name, provider_ids, manual_fields, scraped_at, match_state
+		SELECT person_id, name, aliases, provider_ids, manual_fields, scraped_at, match_state
 		FROM persons WHERE person_id = ?`, personID,
-	).Scan(&target.ID, &target.Name, &providerJSON, &manualJSON, &target.ScrapedAt, &target.MatchState)
+	).Scan(&target.ID, &target.Name, &aliasJSON, &providerJSON, &manualJSON,
+		&target.ScrapedAt, &target.MatchState)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
+	unmarshalJSON(aliasJSON, &target.Aliases)
 	unmarshalJSON(providerJSON, &target.ProviderIDs)
 	unmarshalJSON(manualJSON, &target.ManualFields)
 
@@ -172,13 +186,16 @@ func (s *Store) personMovieSources(ctx context.Context) (map[string]personMovieS
 // force 为 true 时才用新值覆盖。provider_ids 按键合并，不清掉已有编号。
 func (s *Store) ApplyScrapedPerson(ctx context.Context, personID string, data ScrapedPersonData, force bool) (bool, error) {
 	var (
-		overview, birthDate, gender string
-		providerJSON, manualJSON    string
+		overview, birthDate, premiereDate         string
+		gender, cupSize, bodyHeight, measurements string
+		aliasJSON, providerJSON, manualJSON       string
 	)
 	err := s.db.QueryRowContext(ctx, `
-		SELECT overview, birth_date, gender, provider_ids, manual_fields
+		SELECT overview, birth_date, premiere_date, gender, cup_size, body_height, measurements,
+			aliases, provider_ids, manual_fields
 		FROM persons WHERE person_id = ?`, personID,
-	).Scan(&overview, &birthDate, &gender, &providerJSON, &manualJSON)
+	).Scan(&overview, &birthDate, &premiereDate, &gender, &cupSize, &bodyHeight, &measurements,
+		&aliasJSON, &providerJSON, &manualJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, ErrNotFound
 	}
@@ -193,8 +210,8 @@ func (s *Store) ApplyScrapedPerson(ctx context.Context, personID string, data Sc
 		locked[field] = true
 	}
 
-	sets := make([]string, 0, 5)
-	args := make([]any, 0, 6)
+	sets := make([]string, 0, 10)
+	args := make([]any, 0, 11)
 
 	addString := func(column, field, incoming, current string) {
 		if incoming == "" || locked[field] {
@@ -211,7 +228,23 @@ func (s *Store) ApplyScrapedPerson(ctx context.Context, personID string, data Sc
 	}
 	addString("overview", "Overview", data.Overview, overview)
 	addString("birth_date", "BirthDate", data.BirthDate, birthDate)
+	addString("premiere_date", "PremiereDate", data.PremiereDate, premiereDate)
 	addString("gender", "Gender", data.Gender, gender)
+	addString("cup_size", "CupSize", data.CupSize, cupSize)
+	addString("body_height", "BodyHeight", data.BodyHeight, bodyHeight)
+	addString("measurements", "Measurements", data.Measurements, measurements)
+
+	// 别名只做并集：不同来源可能各给一部分（日文名/罗马名/中文名），
+	// 清空重写会丢掉之前已经匹配上的名字。
+	if !locked["Aliases"] && len(data.Aliases) > 0 {
+		var existing []string
+		unmarshalJSON(aliasJSON, &existing)
+		merged, changed := mergeStringSet(existing, data.Aliases)
+		if changed {
+			sets = append(sets, "aliases = ?")
+			args = append(args, marshalJSON(merged))
+		}
+	}
 
 	if !locked["ProviderIds"] && len(data.ProviderIDs) > 0 {
 		merged := map[string]string{}
@@ -264,6 +297,31 @@ func mergeManualFields(existing, added []string) []string {
 		}
 	}
 	return result
+}
+
+// mergeStringSet 把 additions 并入 existing（忽略大小写重复），返回合并结果与是否有新增。
+func mergeStringSet(existing, additions []string) ([]string, bool) {
+	result := make([]string, 0, len(existing)+len(additions))
+	seen := make(map[string]bool, len(existing)+len(additions))
+	for _, value := range existing {
+		key := strings.ToLower(strings.TrimSpace(value))
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		result = append(result, strings.TrimSpace(value))
+	}
+	changed := false
+	for _, value := range additions {
+		key := strings.ToLower(strings.TrimSpace(value))
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		result = append(result, strings.TrimSpace(value))
+		changed = true
+	}
+	return result, changed
 }
 
 // MarkPersonMatchState 记录「重名待确认 / 没找到」，不改动任何资料字段。

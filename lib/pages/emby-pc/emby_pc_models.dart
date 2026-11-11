@@ -31,6 +31,11 @@ class EmbyPcItem {
   final String gender;
   final String cupSize;
 
+  // AV 女优档案站补全的字段：身高、三围、别名（同样属于扩展字段）。
+  final String bodyHeight;
+  final String measurements;
+  final List<String> aliases;
+
   // 上次播放时间来自用户数据，只在服务端返回该字段时展示。
   final String lastPlayedDate;
   final bool isFavorite;
@@ -74,6 +79,9 @@ class EmbyPcItem {
     this.birthDate = '',
     this.gender = '',
     this.cupSize = '',
+    this.bodyHeight = '',
+    this.measurements = '',
+    this.aliases = const [],
     this.lastPlayedDate = '',
     this.isFavorite = false,
     this.played = false,
@@ -117,6 +125,9 @@ class EmbyPcItem {
       birthDate: _text(json['BirthDate']),
       gender: _text(json['Gender']),
       cupSize: _text(json['CupSize']),
+      bodyHeight: _text(json['BodyHeight']),
+      measurements: _text(json['Measurements']),
+      aliases: _strings(json['Aliases']),
       lastPlayedDate: _text(userData['LastPlayedDate']),
       isFavorite: userData['IsFavorite'] == true,
       played: userData['Played'] == true,
@@ -173,6 +184,9 @@ class EmbyPcItem {
     birthDate: birthDate,
     gender: gender,
     cupSize: cupSize,
+    bodyHeight: bodyHeight,
+    measurements: measurements,
+    aliases: aliases,
     lastPlayedDate: lastPlayedDate,
     isFavorite: isFavorite ?? this.isFavorite,
     played: played ?? this.played,

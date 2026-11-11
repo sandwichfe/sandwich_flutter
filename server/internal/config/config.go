@@ -41,6 +41,13 @@ type Config struct {
 	TmdbRateLimit    int
 	TmdbMaxBackdrops int
 
+	// AV 女优档案站（MinnanoAV / JavDatabase / JavModel / JavDB）。
+	// 只在手动触发演员刮削时联网；默认开启，关掉后只走 TMDB。
+	JavEnabled   bool
+	JavProxy     string
+	JavRateLimit int
+	JavUserAgent string
+
 	// ConfigPath 记录实际使用的配置文件位置，便于启动日志提示。
 	ConfigPath string
 }
@@ -73,6 +80,13 @@ type fileConfig struct {
 		RateLimit    *int   `yaml:"rate_limit"`
 		MaxBackdrops *int   `yaml:"max_backdrops"`
 	} `yaml:"tmdb"`
+	Jav struct {
+		// Enabled 用指针区分「没写」与「显式关掉」，默认 true。
+		Enabled   *bool  `yaml:"enabled"`
+		Proxy     string `yaml:"proxy"`
+		RateLimit *int   `yaml:"rate_limit"`
+		UserAgent string `yaml:"user_agent"`
+	} `yaml:"jav"`
 }
 
 // DefaultAdminPassword 是内置的初始管理员密码，仅用于提示"还没改密码"。
@@ -93,6 +107,8 @@ func Default() Config {
 		TmdbLanguage:       "zh-CN",
 		TmdbRateLimit:      4,
 		TmdbMaxBackdrops:   6,
+		JavEnabled:         true,
+		JavRateLimit:       1,
 	}
 }
 
@@ -246,6 +262,19 @@ func (c *Config) applyFile(fc fileConfig) {
 	if fc.Tmdb.RateLimit != nil {
 		c.TmdbRateLimit = clamp(*fc.Tmdb.RateLimit, 1, 10)
 	}
+	if fc.Jav.Enabled != nil {
+		c.JavEnabled = *fc.Jav.Enabled
+	}
+	if value := strings.TrimSpace(fc.Jav.Proxy); value != "" {
+		c.JavProxy = value
+	}
+	if fc.Jav.RateLimit != nil {
+		// 档案站都是个人维护的小站，速率上限压到 5 次/秒以内。
+		c.JavRateLimit = clamp(*fc.Jav.RateLimit, 1, 5)
+	}
+	if value := strings.TrimSpace(fc.Jav.UserAgent); value != "" {
+		c.JavUserAgent = value
+	}
 }
 
 func (c *Config) applyEnv() {
@@ -282,6 +311,12 @@ func (c *Config) applyEnv() {
 		} else {
 			log.Printf("EMBYX_TMDB_RATE_LIMIT 不是整数（示例 4），保持默认值: %q", value)
 		}
+	}
+	if value := lookupEnv("EMBYX_JAV_ENABLED"); value != "" {
+		c.JavEnabled = !strings.EqualFold(value, "false") && value != "0"
+	}
+	if value := lookupEnv("EMBYX_JAV_PROXY"); value != "" {
+		c.JavProxy = value
 	}
 }
 
@@ -417,4 +452,16 @@ tmdb:
   rate_limit: 4
   # 每位演员最多保存多少张写真（0 表示不下载写真）
   max_backdrops: 6
+
+# AV 女优档案来源（MinnanoAV / JavDatabase / JavModel / JavDB）。
+# 仅在手动触发演员刮削时联网，与影片刮削无关。
+jav:
+  # 关掉后演员刮削只走 TMDB
+  enabled: true
+  # 这些站点国内通常也需要代理
+  proxy: ''
+  # 每个站点每秒请求上限（1~5），小站建议保持 1
+  rate_limit: 1
+  # 留空使用内置浏览器 UA；被 Cloudflare 拦截时可换成自己的
+  user_agent: ''
 `

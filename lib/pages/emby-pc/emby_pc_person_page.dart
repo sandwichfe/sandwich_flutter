@@ -507,7 +507,7 @@ class _PersonContent extends StatelessWidget {
                     value: EmbyPcMediaAction.scrapePerson,
                     child: _PersonActionEntry(
                       icon: Icons.person_search_outlined,
-                      label: '从 TMDB 刮削',
+                      label: '刮削演员资料',
                     ),
                   ),
                   PopupMenuItem(
@@ -656,6 +656,9 @@ class _PersonContent extends StatelessWidget {
     if (person.birthDate.isNotEmpty) '生日：${_formatDate(person.birthDate)}',
     if (person.gender.isNotEmpty) '性别：${_genderLabel(person.gender)}',
     if (person.cupSize.isNotEmpty) '罩杯：${person.cupSize}',
+    if (person.bodyHeight.isNotEmpty) '身高：${person.bodyHeight}',
+    if (person.measurements.isNotEmpty) '三围：${person.measurements}',
+    if (person.aliases.isNotEmpty) '别名：${person.aliases.join('、')}',
     if (person.premiereDate.isNotEmpty)
       '首映日期：${_formatDate(person.premiereDate)}',
     if (person.dateCreated.isNotEmpty)
@@ -800,6 +803,10 @@ class _PersonMetadataDialogState extends State<_PersonMetadataDialog> {
   late final TextEditingController _birthDateController;
   late final TextEditingController _genderController;
   late final TextEditingController _cupSizeController;
+  late final TextEditingController _premiereDateController;
+  late final TextEditingController _bodyHeightController;
+  late final TextEditingController _measurementsController;
+  late final TextEditingController _aliasesController;
   late final TextEditingController _imdbController;
   late final TextEditingController _tmdbController;
   late final TextEditingController _tvdbController;
@@ -832,6 +839,19 @@ class _PersonMetadataDialogState extends State<_PersonMetadataDialog> {
     _cupSizeController = TextEditingController(
       text: _personText(widget.item['CupSize']),
     );
+    // 出道日期与生日分开编辑：一个是最早作品日期，一个是出生日期。
+    _premiereDateController = TextEditingController(
+      text: _personFormatDate(_personText(widget.item['PremiereDate'])),
+    );
+    _bodyHeightController = TextEditingController(
+      text: _personText(widget.item['BodyHeight']),
+    );
+    _measurementsController = TextEditingController(
+      text: _personText(widget.item['Measurements']),
+    );
+    _aliasesController = TextEditingController(
+      text: _personStrings(widget.item['Aliases']).join(', '),
+    );
     _imdbController = TextEditingController(
       text: _personText(providerIds['Imdb']),
     );
@@ -854,6 +874,10 @@ class _PersonMetadataDialogState extends State<_PersonMetadataDialog> {
     _birthDateController.dispose();
     _genderController.dispose();
     _cupSizeController.dispose();
+    _premiereDateController.dispose();
+    _bodyHeightController.dispose();
+    _measurementsController.dispose();
+    _aliasesController.dispose();
     _imdbController.dispose();
     _tmdbController.dispose();
     _tvdbController.dispose();
@@ -916,6 +940,10 @@ class _PersonMetadataDialogState extends State<_PersonMetadataDialog> {
       ..['BirthDate'] = _personIsoDate(_birthDateController.text)
       ..['Gender'] = _genderController.text.trim()
       ..['CupSize'] = _cupSizeController.text.trim()
+      ..['PremiereDate'] = _personIsoDate(_premiereDateController.text)
+      ..['BodyHeight'] = _bodyHeightController.text.trim()
+      ..['Measurements'] = _measurementsController.text.trim()
+      ..['Aliases'] = _personSplitValues(_aliasesController.text)
       ..['ProviderIds'] = providerIds
       ..['Tags'] = _personSplitValues(_tagsController.text);
     try {
@@ -1044,6 +1072,46 @@ class _PersonMetadataDialogState extends State<_PersonMetadataDialog> {
                                 decoration: const InputDecoration(
                                   labelText: '罩杯',
                                   hintText: '如 C / D',
+                                  border: OutlineInputBorder(),
+                                ),
+                              ),
+                            ),
+                            SizedBox(
+                              width: fieldWidth,
+                              child: _personDateField(
+                                _premiereDateController,
+                                '出道日期',
+                              ),
+                            ),
+                            SizedBox(
+                              width: fieldWidth,
+                              child: TextFormField(
+                                controller: _bodyHeightController,
+                                decoration: const InputDecoration(
+                                  labelText: '身高',
+                                  hintText: '如 158cm',
+                                  border: OutlineInputBorder(),
+                                ),
+                              ),
+                            ),
+                            SizedBox(
+                              width: fieldWidth,
+                              child: TextFormField(
+                                controller: _measurementsController,
+                                decoration: const InputDecoration(
+                                  labelText: '三围',
+                                  hintText: '如 B84 / W58 / H88',
+                                  border: OutlineInputBorder(),
+                                ),
+                              ),
+                            ),
+                            SizedBox(
+                              width: fieldWidth,
+                              child: TextFormField(
+                                controller: _aliasesController,
+                                decoration: const InputDecoration(
+                                  labelText: '别名',
+                                  hintText: '日文名/罗马名/中文名，逗号分隔',
                                   border: OutlineInputBorder(),
                                 ),
                               ),

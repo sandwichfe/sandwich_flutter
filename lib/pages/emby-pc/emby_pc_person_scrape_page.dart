@@ -6,7 +6,8 @@ import 'emby_pc_models.dart';
 import 'emby_pc_service.dart';
 import 'emby_pc_toast.dart';
 
-// 设置页入口：从 TMDB 批量刮削演员资料（简介/生日/性别/Tmdb 与 IMDb 编号）与图片。
+// 设置页入口：批量刮削演员资料（简介/生日/身高/三围/罩杯/别名等）与图片，
+// 来源按 MinnanoAV > JavDatabase > JavModel > JavDB > TMDB 的优先级合并。
 // 刮削只在服务端手动触发，本页负责提交范围参数并轮询进度。
 class EmbyPcPersonScrapePage extends StatefulWidget {
   // embedded 为 true 时只输出内容区，供设置页内嵌显示，不再套一层 Scaffold。
@@ -241,16 +242,16 @@ class _EmbyPcPersonScrapePageState extends State<EmbyPcPersonScrapePage> {
                 Icon(Icons.key_off_outlined, size: 18, color: colors.error),
                 const SizedBox(width: 8),
                 const Text(
-                  '未配置 TMDB API Key',
+                  '演员刮削未启用',
                   style: TextStyle(fontWeight: FontWeight.w600),
                 ),
               ],
             ),
             const SizedBox(height: 8),
             Text(
-              '在 config.yaml 的 tmdb.api_key 填入 TMDB 免费申请的 Key'
-              '（或设置环境变量 EMBYX_TMDB_API_KEY），重启服务后即可使用。'
-              '国内网络通常还需要配置 tmdb.proxy。',
+              '在 config.yaml 的 tmdb.api_key 填入 TMDB Key，或开启 jav.enabled'
+              '（MinnanoAV / JavDatabase / JavModel / JavDB），重启服务后即可使用。'
+              '国内网络通常还需要配置 tmdb.proxy 或 jav.proxy。',
               style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
             ),
           ],
@@ -296,7 +297,7 @@ class _EmbyPcPersonScrapePageState extends State<EmbyPcPersonScrapePage> {
             const SizedBox(height: 8),
             Text(
               _onlyMissing
-                  ? '只处理还没有 TMDB 编号或从未刮削过的演员，适合日常增量刷新。'
+                  ? '只处理从未刮削过的演员，适合日常增量刷新。'
                   : '重新刮削所有有作品的演员，人数多时耗时较长。',
               style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
             ),
@@ -311,8 +312,8 @@ class _EmbyPcPersonScrapePageState extends State<EmbyPcPersonScrapePage> {
               title: const Text('覆盖已有资料'),
               subtitle: Text(
                 _force
-                    ? '简介、生日、性别等字段会用 TMDB 数据覆盖；手动编辑过的字段与锁定的图片仍然保留。'
-                    : '只填空字段，已有内容一律不动（推荐）。',
+                    ? '简介、生日、身高、三围等字段会用最新刮削结果覆盖；手动编辑过的字段与锁定的图片仍然保留。'
+                    : '只填空字段，已有内容一律不动（推荐）。字段按 MinnanoAV > JavDatabase > JavModel > TMDB 的顺序合并。',
                 style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
               ),
             ),

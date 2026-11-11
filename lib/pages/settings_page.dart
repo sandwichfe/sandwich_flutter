@@ -48,7 +48,7 @@ extension _SettingMeta on _SettingId {
     _SettingId.avatar => '头像上传到 Emby 服务端账号，客户端只做裁剪与压缩。',
     _SettingId.libraryAdmin => '新建、编辑、删除与扫描媒体库，右侧「排序」可直接调整侧栏顺序，需要管理员权限。',
     _SettingId.thumbnail => '按媒体库批量预生成进度条缩略图，可控抽帧间隔并查看进度。',
-    _SettingId.personScrape => '从 TMDB 补齐演员简介、生日与头像写真，按需手动触发。',
+    _SettingId.personScrape => '从 MinnanoAV / JavDatabase / JavModel 与 TMDB 补齐演员资料，按需手动触发。',
     _SettingId.darkMode => '深色模式同时影响页面画布、卡片与导航的明暗层次。',
     _SettingId.backgroundColor => '画布底色，卡片与导航会基于它自动派生层级。',
     _SettingId.seedColor => '主题色决定按钮、选中态与强调文字的颜色。',

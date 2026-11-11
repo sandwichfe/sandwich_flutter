@@ -60,19 +60,50 @@ func main() {
 	scanner := media.NewScanner(st, prober, images, bifCache)
 	thumbs := media.NewThumbnailJobManager(bifCache)
 
-	// 演员刮削只在手动触发时联网；没配 Key 就不装配，接口会提示"未配置"。
-	var personScrape *metadata.PersonScrapeJobManager
+	// 演员刮削只在手动触发时联网。来源优先级：
+	// MinnanoAV > JavDatabase > JavModel > JavDB（仅链接）> TMDB（兜底）。
+	var tmdbClient *metadata.Client
 	if strings.TrimSpace(cfg.TmdbAPIKey) != "" {
 		client, err := metadata.NewClient(cfg.TmdbAPIKey, cfg.TmdbLanguage, cfg.TmdbProxy)
 		if err != nil {
 			log.Fatalf("初始化 TMDB 客户端失败: %v", err)
 		}
 		client.SetRateLimit(cfg.TmdbRateLimit)
-		scraper := metadata.NewPersonScraper(st, images, client, cfg.TmdbMaxBackdrops)
+		tmdbClient = client
+	}
+
+	sources := make([]metadata.PersonSource, 0, 4)
+	if cfg.JavEnabled {
+		minnano, err := metadata.NewMinnanoAVSource("", cfg.JavProxy, cfg.JavUserAgent, cfg.JavRateLimit)
+		if err != nil {
+			log.Fatalf("初始化 MinnanoAV 数据源失败: %v", err)
+		}
+		javDatabase, err := metadata.NewJavDatabaseSource("", cfg.JavProxy, cfg.JavUserAgent, cfg.JavRateLimit)
+		if err != nil {
+			log.Fatalf("初始化 JavDatabase 数据源失败: %v", err)
+		}
+		javModel, err := metadata.NewJavModelSource("", cfg.JavProxy, cfg.JavUserAgent, cfg.JavRateLimit)
+		if err != nil {
+			log.Fatalf("初始化 JavModel 数据源失败: %v", err)
+		}
+		javDB, err := metadata.NewJavDBSource("", cfg.JavProxy, cfg.JavUserAgent, cfg.JavRateLimit)
+		if err != nil {
+			log.Fatalf("初始化 JavDB 数据源失败: %v", err)
+		}
+		sources = append(sources, minnano, javDatabase, javModel, javDB)
+	}
+
+	var personScrape *metadata.PersonScrapeJobManager
+	if tmdbClient != nil || len(sources) > 0 {
+		scraper := metadata.NewPersonScraper(st, images, tmdbClient, cfg.TmdbMaxBackdrops)
 		scraper.SetLogger(func(format string, args ...any) { log.Printf(format, args...) })
+		scraper.SetSourceProxy(cfg.JavProxy)
+		for _, source := range sources {
+			scraper.AddSource(source)
+		}
 		personScrape = metadata.NewPersonScrapeJobManager(scraper)
-		log.Printf("演员刮削已启用: 语言=%s 限速=%d 次/秒 写真上限=%d 代理=%v",
-			cfg.TmdbLanguage, client.RateLimit(), cfg.TmdbMaxBackdrops, cfg.TmdbProxy != "")
+		log.Printf("演员刮削已启用: AV来源=%d个 限速=%d 次/秒 写真上限=%d TMDB=%v 代理=%v",
+			len(sources), cfg.JavRateLimit, cfg.TmdbMaxBackdrops, tmdbClient != nil, cfg.JavProxy != "")
 	}
 
 	api := httpapi.New(cfg, st, images, bifCache, scanner, thumbs, prober, personScrape)
