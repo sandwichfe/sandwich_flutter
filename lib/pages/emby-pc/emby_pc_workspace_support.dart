@@ -227,6 +227,9 @@ class _HomeLibraryTileState extends State<_HomeLibraryTile> {
                         curve: Curves.easeOut,
                         child: EmbyPcNetworkImage(
                           url: widget.library.hasPrimaryImage ? imageUrl : '',
+                          // 媒体库没有封面时用库图标占位，白字库名仍压在深色底上。
+                          fallbackIcon: Icons.video_library_outlined,
+                          fallbackLabel: '媒体库',
                         ),
                       ),
                       // 底部渐变压暗，保证白色库名在任何封面上都可读。

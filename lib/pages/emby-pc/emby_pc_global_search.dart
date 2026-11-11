@@ -405,7 +405,13 @@ class _GlobalSearchListTile extends StatelessWidget {
           height: 54,
           child: ClipRRect(
             borderRadius: BorderRadius.circular(5),
-            child: EmbyPcNetworkImage(url: imageUrl),
+            child: EmbyPcNetworkImage(
+              url: imageUrl,
+              fallbackIcon: isPerson
+                  ? Icons.person_outline_rounded
+                  : embyPcFallbackIcon(item.type),
+              fallbackLabel: embyPcFallbackLabel(item.type),
+            ),
           ),
         ),
         title: Text(

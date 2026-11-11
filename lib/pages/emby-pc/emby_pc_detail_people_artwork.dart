@@ -182,6 +182,7 @@ class _CastCard extends StatelessWidget {
                               maxWidth: 260,
                             )
                             : '',
+                    fallbackIcon: Icons.person_outline_rounded,
                   ),
                 ),
               ),

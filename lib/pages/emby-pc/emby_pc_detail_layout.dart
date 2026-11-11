@@ -103,6 +103,8 @@ class _DetailContent extends StatelessWidget {
                         maxWidth: 500,
                       )
                       : '',
+              fallbackIcon: embyPcFallbackIcon(detail.type),
+              fallbackLabel: embyPcFallbackLabel(detail.type),
             ),
           ),
         ),

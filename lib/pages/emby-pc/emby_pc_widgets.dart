@@ -495,7 +495,11 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
     return Stack(
       fit: StackFit.expand,
       children: [
-        EmbyPcNetworkImage(url: imageUrl),
+        EmbyPcNetworkImage(
+          url: imageUrl,
+          fallbackIcon: embyPcFallbackIcon(widget.item.type),
+          fallbackLabel: embyPcFallbackLabel(widget.item.type),
+        ),
         AnimatedContainer(
           duration: const Duration(milliseconds: 180),
           color: _hovered
@@ -668,7 +672,11 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            EmbyPcNetworkImage(url: imageUrl),
+            EmbyPcNetworkImage(
+              url: imageUrl,
+              fallbackIcon: embyPcFallbackIcon(widget.item.type),
+              fallbackLabel: embyPcFallbackLabel(widget.item.type),
+            ),
             AnimatedContainer(
               duration: const Duration(milliseconds: 180),
               decoration: BoxDecoration(
@@ -1058,7 +1066,11 @@ class _EmbyPcWatchHistoryRowState extends State<EmbyPcWatchHistoryRow> {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            EmbyPcNetworkImage(url: imageUrl),
+            EmbyPcNetworkImage(
+              url: imageUrl,
+              fallbackIcon: embyPcFallbackIcon(item.type),
+              fallbackLabel: embyPcFallbackLabel(item.type),
+            ),
             AnimatedContainer(
               duration: const Duration(milliseconds: 180),
               color: Colors.black.withValues(alpha: _hovered ? 0.22 : 0.04),
@@ -1246,21 +1258,52 @@ class _PlaybackProgress extends StatelessWidget {
   );
 }
 
+// 无封面占位的类型图标：按条目类型换图形，比统一的影片图标更易辨认。
+IconData embyPcFallbackIcon(String type) => switch (type) {
+  'Series' || 'Season' || 'Episode' => Icons.live_tv_outlined,
+  'BoxSet' => Icons.collections_bookmark_outlined,
+  'Person' => Icons.person_outline_rounded,
+  'MusicAlbum' || 'Audio' || 'MusicVideo' => Icons.music_note_rounded,
+  'Photo' || 'PhotoAlbum' => Icons.photo_outlined,
+  _ => Icons.movie_outlined,
+};
+
+// 无封面占位的类型文案，与图标成对出现，尺寸过小的地方会自动隐藏。
+String embyPcFallbackLabel(String type) => switch (type) {
+  'Movie' => '电影',
+  'Series' || 'Season' || 'Episode' => '剧集',
+  'BoxSet' => '合集',
+  'Person' => '人物',
+  'MusicAlbum' || 'Audio' || 'MusicVideo' => '音乐',
+  'Photo' || 'PhotoAlbum' => '照片',
+  _ => '媒体',
+};
+
 class EmbyPcNetworkImage extends StatelessWidget {
   final String url;
   final BoxFit fit;
+
+  // 无封面时使用的类型图标与低饱和标签，卡片场景传入可让占位更有辨识度。
+  final IconData? fallbackIcon;
+  final String? fallbackLabel;
 
   const EmbyPcNetworkImage({
     super.key,
     required this.url,
     this.fit = BoxFit.cover,
+    this.fallbackIcon,
+    this.fallbackLabel,
   });
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     if (url.isEmpty) {
-      return _ImagePlaceholder(color: colors.surfaceContainerHigh);
+      return _ImagePlaceholder(
+        color: colors.surfaceContainerHigh,
+        icon: fallbackIcon,
+        label: fallbackLabel,
+      );
     }
     // 按实际显示宽度解码：列表卡片不必把 1600px 原图整张放进内存缓存。
     return LayoutBuilder(
@@ -1282,33 +1325,111 @@ class EmbyPcNetworkImage extends StatelessWidget {
             color: colors.surfaceContainerHigh,
             loading: true,
           ),
-          errorWidget: (_, _, _) =>
-              _ImagePlaceholder(color: colors.surfaceContainerHigh),
+          errorWidget: (_, _, _) => _ImagePlaceholder(
+            color: colors.surfaceContainerHigh,
+            icon: fallbackIcon,
+            label: fallbackLabel,
+          ),
         );
       },
     );
   }
 }
 
+// 无封面占位：固定使用深色海报底，浅色/深色主题下都能与压暗的白色标题自然衔接。
 class _ImagePlaceholder extends StatelessWidget {
   final Color color;
   final bool loading;
+  final IconData? icon;
+  final String? label;
 
-  const _ImagePlaceholder({required this.color, this.loading = false});
+  const _ImagePlaceholder({
+    required this.color,
+    this.loading = false,
+    this.icon,
+    this.label,
+  });
 
   @override
   Widget build(BuildContext context) {
     // 图片加载期间使用低对比度呼吸骨架，避免列表中同时出现多个转圈动画。
     if (loading) return _ImageLoadingSkeleton(color: color);
-    return ColoredBox(
-      color: color,
-      child: Center(
-        child: Icon(
-          Icons.movie_outlined,
-          size: 42,
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
-        ),
-      ),
+    final text = label ?? '';
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.hasBoundedWidth ? constraints.maxWidth : 240.0;
+        final height = constraints.hasBoundedHeight
+            ? constraints.maxHeight
+            : 180.0;
+        final shortest = width < height ? width : height;
+        // 小缩略图只留图标，文字在空间不足时隐藏，避免被压成一团。
+        final showLabel = text.isNotEmpty && shortest >= 118 && height >= 96;
+        final badgeSize = (shortest * 0.42).clamp(26.0, 60.0);
+        final iconSize = (badgeSize * 0.5).clamp(12.0, 28.0);
+        return DecoratedBox(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFF2B2F39), Color(0xFF1A1D24)],
+            ),
+          ),
+          child: Stack(
+            children: [
+              // 顶部柔光让深色底不至于是一块死板的纯色。
+              const Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: RadialGradient(
+                      center: Alignment(-0.55, -0.9),
+                      radius: 1.15,
+                      colors: [Color(0x14FFFFFF), Color(0x00FFFFFF)],
+                    ),
+                  ),
+                ),
+              ),
+              Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: badgeSize,
+                      height: badgeSize,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.06),
+                        borderRadius: BorderRadius.circular(badgeSize * 0.32),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.10),
+                        ),
+                      ),
+                      child: Icon(
+                        icon ?? Icons.movie_outlined,
+                        size: iconSize,
+                        color: Colors.white.withValues(alpha: 0.55),
+                      ),
+                    ),
+                    if (showLabel) ...[
+                      SizedBox(height: badgeSize * 0.22),
+                      Text(
+                        text,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          height: 1.1,
+                          letterSpacing: 1.2,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white.withValues(alpha: 0.38),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

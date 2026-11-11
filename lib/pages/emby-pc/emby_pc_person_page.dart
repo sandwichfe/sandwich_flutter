@@ -399,6 +399,8 @@ class _PersonContent extends StatelessWidget {
                         maxWidth: 520,
                       )
                     : '',
+                fallbackIcon: Icons.person_outline_rounded,
+                fallbackLabel: '人物',
               ),
             ),
           ),
