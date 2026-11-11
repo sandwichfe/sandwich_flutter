@@ -1,4 +1,5 @@
 data/
+log/
 config.yaml
 embyx.log
 embyx.log.old
