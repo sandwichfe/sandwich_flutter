@@ -2,76 +2,52 @@ part of 'emby_pc_page.dart';
 
 // 工作台导航区域集中处理账号菜单和桌面侧栏。
 extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
+  // 页头搜索框只作入口：点击直接打开全局搜索浮层，输入与结果都在浮层内完成。
   Widget _buildSearchField(double width) {
     final skin = EmbyPcSkin.of(context);
     return SizedBox(
       width: width,
       height: 44,
-      child: TextField(
-        controller: _searchController,
-        // 首页没有本地列表：回车直接打开全库搜索，其余视图继续走本地筛选。
-        onChanged: _c.view == 'home' ? null : _scheduleSearch,
-        onSubmitted: (value) {
-          if (_c.view == 'home') {
-            unawaited(_openGlobalSearch());
-            return;
-          }
-          _submitSearch(value);
-        },
-        style: const TextStyle(fontSize: 13.5),
-        decoration: InputDecoration(
-          isDense: true,
-          filled: true,
-          fillColor: skin.surfaceAlt.withValues(alpha: skin.dark ? 0.78 : 1),
-          hintText: '搜索片名、演员、类型',
-          hintStyle: TextStyle(fontSize: 13, color: skin.textTertiary),
-          contentPadding: const EdgeInsets.symmetric(vertical: 12),
-          // 收紧图标约束，44 高的圆角搜索框不会被默认 48 的图标撑高。
-          prefixIconConstraints: const BoxConstraints(
-            minWidth: 42,
-            minHeight: 38,
-          ),
-          suffixIconConstraints: const BoxConstraints(
-            minWidth: 40,
-            minHeight: 38,
-          ),
-          prefixIcon: Icon(
-            Icons.search_rounded,
-            size: 19,
-            color: skin.textSecondary,
-          ),
-          suffixIcon: _searchController.text.isEmpty
-              ? IconButton(
-                  tooltip: _c.view == 'home' ? '搜索全部内容' : '搜索',
-                  onPressed: _c.view == 'home'
-                      ? _openGlobalSearch
-                      : (_c.loading ? null : _applyQuery),
-                  icon: Icon(
-                    Icons.arrow_forward_rounded,
-                    size: 18,
-                    color: skin.textSecondary,
-                  ),
-                )
-              : IconButton(
-                  tooltip: '清除搜索',
-                  onPressed: _c.loading ? null : _clearSearch,
-                  icon: Icon(
-                    Icons.close_rounded,
-                    size: 17,
-                    color: skin.textSecondary,
-                  ),
+      child: Tooltip(
+        message: '搜索',
+        child: Semantics(
+          button: true,
+          label: '打开全局搜索',
+          child: Material(
+            color: skin.surfaceAlt.withValues(alpha: skin.dark ? 0.78 : 1),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(22),
+              side: BorderSide(color: skin.hairline),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: () => unawaited(_openGlobalSearch()),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 13),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.search_rounded,
+                      size: 19,
+                      color: skin.textSecondary,
+                    ),
+                    const SizedBox(width: 8),
+                    // 仅保留占位说明，实际输入交给浮层内的搜索框。
+                    Expanded(
+                      child: Text(
+                        '搜索片名、演员、类型',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: skin.textTertiary,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(22),
-            borderSide: BorderSide(color: skin.hairline),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(22),
-            borderSide: BorderSide(color: skin.hairline),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(22),
-            borderSide: BorderSide(color: skin.accent, width: 1.3),
+              ),
+            ),
           ),
         ),
       ),

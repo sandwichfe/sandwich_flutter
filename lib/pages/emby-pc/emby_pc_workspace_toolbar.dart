@@ -65,12 +65,12 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
               ),
               const SizedBox(width: 10),
             ],
-            // 搜索框吸收剩余空间，宽屏限制最大宽度，避免拉成一条长条。
+            // 搜索框只作为全局搜索入口，宽度收窄到 320，避免拉成一条长条。
             Expanded(
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 420),
+                  constraints: const BoxConstraints(maxWidth: 320),
                   child: _EmbyPcWorkspaceNavigation(
                     this,
                   )._buildSearchField(double.infinity),

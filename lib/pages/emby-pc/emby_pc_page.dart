@@ -147,8 +147,6 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
   final Set<String> _favoriteBusyIds = {};
   final Set<String> _libraryActionBusyIds = {};
   final Set<String> _mediaActionBusyIds = {};
-  // 媒体库搜索沿用首页搜索的短防抖，连续输入时只执行最后一次查询。
-  Timer? _searchDebounceTimer;
   Timer? _loadMoreDebounceTimer;
   // 视图切换历史：页头的后退/前进按钮复用同一份栈，避免做成装饰按钮。
   final List<_WorkspaceViewEntry> _viewHistory = [];
@@ -524,7 +522,6 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
   }
 
   void _resetQueryControllers() {
-    _searchDebounceTimer?.cancel();
     _searchController.clear();
     _yearController.clear();
     _personController.clear();
@@ -533,37 +530,8 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
   }
 
   Future<void> _applyQuery() async {
-    _searchDebounceTimer?.cancel();
     _syncQueryInput();
     await _c.applyQuery();
-  }
-
-  void _scheduleSearch(String value) {
-    _searchDebounceTimer?.cancel();
-    // 输入变化时立即让旧请求失效，避免旧关键词结果覆盖新输入。
-    _c.queryVersion++;
-    setState(() {});
-    if (value.trim().isEmpty) {
-      unawaited(_applyQuery());
-      return;
-    }
-    _searchDebounceTimer = Timer(
-      const Duration(milliseconds: 300),
-      () => unawaited(_applyQuery()),
-    );
-  }
-
-  void _submitSearch(String _) {
-    // 回车提交时跳过等待，并取消尚未执行的防抖查询。
-    _c.queryVersion++;
-    unawaited(_applyQuery());
-  }
-
-  Future<void> _clearSearch() async {
-    if (_searchController.text.isEmpty) return;
-    _c.queryVersion++;
-    setState(_searchController.clear);
-    await _applyQuery();
   }
 
   Future<void> _openGlobalSearch() async {
@@ -872,7 +840,6 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
     EmbyPcService.instance.unauthorizedRevision.removeListener(
       _handleSessionExpired,
     );
-    _searchDebounceTimer?.cancel();
     _searchController.dispose();
     _yearController.dispose();
     _personController.dispose();
