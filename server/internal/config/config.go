@@ -116,11 +116,7 @@ func Default() Config {
 func Load(explicitPath string) (Config, error) {
 	cfg := Default()
 	path, explicit := resolveConfigPath(explicitPath)
-	// 记录绝对路径：IDE 调试与命令行的工作目录可能不同，相对路径的日志看不出实际读的是哪份。
-	if abs, err := filepath.Abs(path); err == nil {
-		path = abs
-	}
-	cfg.ConfigPath = path
+	cfg.ConfigPath = absPath(path)
 
 	fileCfg, err := loadFile(path, explicit)
 	if err != nil {
@@ -133,6 +129,23 @@ func Load(explicitPath string) (Config, error) {
 		return cfg, err
 	}
 	return cfg, nil
+}
+
+// ResolvePath 返回 Load 实际会读取的配置文件绝对路径。
+// 日志要在 Load 之前落盘（配置写错时最需要日志文件），
+// 用它在启动最早阶段就能确定"配置文件旁边"这个位置。
+func ResolvePath(explicit string) string {
+	path, _ := resolveConfigPath(explicit)
+	return absPath(path)
+}
+
+// absPath 把路径转成绝对路径，失败时原样返回。
+// IDE 调试与命令行的工作目录可能不同，相对路径的日志看不出实际读的是哪份。
+func absPath(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return path
 }
 
 // resolveConfigPath 返回配置文件路径，以及该路径是否由用户显式指定。

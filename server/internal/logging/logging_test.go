@@ -7,6 +7,21 @@ import (
 	"time"
 )
 
+// 首次运行时日志目录还不存在，也应当自动建出来并写下当天文件。
+func TestNewDailyWriterCreatesDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), DirName)
+	writer, err := newDailyWriter(dir, "embyx", ".log", 7)
+	if err != nil {
+		t.Fatalf("创建 dailyWriter 失败: %v", err)
+	}
+	defer func() { writer.file.Close() }()
+
+	path := filepath.Join(dir, "embyx-"+time.Now().Format("2006-01-02")+".log")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("日志目录或文件未创建: %v", err)
+	}
+}
+
 // 跨零点后的第一次写入应切到新日期的文件，内容不能落到旧文件里。
 func TestDailyWriterSwitchesDayOnWrite(t *testing.T) {
 	dir := t.TempDir()

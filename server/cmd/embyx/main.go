@@ -22,16 +22,18 @@ import (
 )
 
 func main() {
-	// 日志初始化必须在任何 log 调用之前：控制台与按日期切分的文件双写。
-	logging.Setup()
+	configPath := flag.String("config", "", "配置文件路径（默认 ./config.yaml，也可用 EMBYX_CONFIG 指定）")
+	flag.Parse()
+
+	// 日志初始化必须赶在第一次 log 之前：配置写错、数据库打不开这类启动失败
+	// 最需要日志文件。日志目录固定为配置文件同目录的 log/，而不是 exe 所在目录
+	// —— IDE 调试时 exe 是临时构建产物，日志会跟着跑到临时目录里看不见。
+	logging.Setup(filepath.Join(filepath.Dir(config.ResolvePath(*configPath)), logging.DirName))
 
 	// rootCtx 是后台任务（媒体扫描、海报生成、BIF 预生成）的父 context。
 	// 收到 Ctrl+C 后先取消它让 ffmpeg 子进程结束，再关闭 HTTP 服务。
 	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-
-	configPath := flag.String("config", "", "配置文件路径（默认 ./config.yaml，也可用 EMBYX_CONFIG 指定）")
-	flag.Parse()
 
 	if wd, err := os.Getwd(); err == nil {
 		log.Printf("工作目录: %s", wd)
@@ -138,7 +140,7 @@ func main() {
 
 	go func() {
 		log.Printf("Emby 兼容服务已启动: http://localhost%s/emby", cfg.Addr)
-		// 密码不进日志：日志会长期留在 embyx-日期.log 里，也可能被贴到 issue 中。
+		// 密码不进日志：日志会长期留在 log/embyx-日期.log 里，也可能被贴到 issue 中。
 		// 只提示账号，以及"密码还是内置默认值"这一件事。
 		log.Printf("默认账号: %s", cfg.AdminUser)
 		if cfg.AdminPassword == config.DefaultAdminPassword {

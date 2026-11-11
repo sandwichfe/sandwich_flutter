@@ -1,5 +1,5 @@
 // Package logging 负责进程级日志的初始化：
-// 标准库 log 的输出同时进控制台，以及 exe 同目录下按日期切分的日志文件。
+// 标准库 log 的输出同时进控制台，以及指定目录下按日期切分的日志文件。
 package logging
 
 import (
@@ -13,27 +13,28 @@ import (
 )
 
 const (
+	// DirName 是日志目录名，由调用方拼到合适的位置（通常是配置文件所在目录）。
+	// 日志文件全部收在 log/ 里，避免和 config.yaml、数据库等文件混在一起。
+	DirName = "log"
 	// filePrefix 是日志文件名前缀，与日志行前缀 [embyx] 保持一致。
 	filePrefix = "embyx"
-	// fileExt 是日志文件扩展名，文件名形如 embyx-2026-11-11.log。
+	// fileExt 是日志文件扩展名，文件名形如 log/embyx-2026-11-11.log。
 	fileExt = ".log"
 	// retentionDays 是日志保留天数：换日时清理超过该天数的旧文件。
 	// 按天切分后单文件不再无界增长，历史文件靠这里回收。
 	retentionDays = 7
 )
 
-// Setup 把标准库 log 改成「控制台 + 按日期切分的文件」双写。
-// 双击运行时控制台会随进程退出关闭，日志文件是排查启动失败的唯一线索；
-// 取不到程序路径或文件打不开时保持默认的 stderr 输出，不能因此影响启动。
-func Setup() {
+// Setup 把标准库 log 改成「控制台 + dir 目录下按日期切分的文件」双写。
+// 目录由调用方给出，不能基于 exe 位置：IDE 调试时 exe 在临时构建目录，
+// 日志会跟着跑到那里去。双击运行时控制台会随进程退出关闭，
+// 日志文件是排查启动失败的唯一线索；目录建不出来或文件打不开时
+// 保持默认的 stderr 输出，不能因此影响启动。
+func Setup(dir string) {
 	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
 	log.SetPrefix("[" + filePrefix + "] ")
 
-	executable, err := os.Executable()
-	if err != nil {
-		return
-	}
-	writer, err := newDailyWriter(filepath.Dir(executable), filePrefix, fileExt, retentionDays)
+	writer, err := newDailyWriter(dir, filePrefix, fileExt, retentionDays)
 	if err != nil {
 		return
 	}
@@ -54,6 +55,10 @@ type dailyWriter struct {
 }
 
 func newDailyWriter(dir, prefix, ext string, retention int) (*dailyWriter, error) {
+	// 目录不存在时自己建：首次运行不该因为少一个文件夹就退化成只打控制台。
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
 	writer := &dailyWriter{dir: dir, prefix: prefix, ext: ext, retention: retention}
 	if err := writer.rotate(time.Now()); err != nil {
 		return nil, err
