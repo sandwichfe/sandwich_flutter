@@ -38,7 +38,8 @@ void main() async {
       minimumSize: const Size(720, 520),
       center: true,
       backgroundColor: ThemeManager().themeData.scaffoldBackgroundColor,
-      title: '媒体中心',
+      // 窗口标题用于任务栏与 Alt+Tab 显示，和侧栏品牌名保持一致。
+      title: 'sandwich-player',
       titleBarStyle: TitleBarStyle.hidden,
       windowButtonVisibility: false,
     );
@@ -61,7 +62,7 @@ class MyApp extends StatelessWidget {
       listenable: ThemeManager(),
       builder:
           (context, _) => MaterialApp(
-            title: '媒体中心',
+            title: 'sandwich-player',
             theme: ThemeManager().themeData,
             // 应用界面固定使用简体中文，日期和时间选择器会继承此设置。
             locale: const Locale('zh', 'CN'),

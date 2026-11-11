@@ -324,12 +324,13 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
     );
   }
 
-  // 侧栏顶部品牌区：渐变播放标 + 产品名，右侧提供折叠入口。
+  // 侧栏顶部品牌区：渐变字母标 + 小号副标，右侧提供折叠入口。
   Widget _buildSidebarBrand(BuildContext context) {
     final skin = EmbyPcSkin.of(context);
     final mark = Container(
       width: 36,
       height: 36,
+      alignment: Alignment.center,
       decoration: BoxDecoration(
         gradient: skin.brandGradient,
         borderRadius: BorderRadius.circular(12),
@@ -341,10 +342,16 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
           ),
         ],
       ),
-      child: const Icon(
-        Icons.play_arrow_rounded,
-        size: 23,
-        color: Colors.white,
+      // 品牌标保留渐变方块，用产品首字母替代播放图标。
+      child: const Text(
+        'S',
+        style: TextStyle(
+          fontFamily: 'Microsoft YaHei UI',
+          fontSize: 19,
+          fontWeight: FontWeight.w800,
+          color: Colors.white,
+          height: 1.1,
+        ),
       ),
     );
     if (_sidebarCollapsed) {
@@ -359,6 +366,21 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
         ),
       );
     }
+    // 小号副标只作装饰：字数固定、字号极小，不会像产品名那样挤占侧栏宽度。
+    final subtitle = Align(
+      alignment: Alignment.centerLeft,
+      child: Text(
+        'MEDIA CENTER',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 9.5,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 2.0,
+          color: skin.textTertiary,
+        ),
+      ),
+    );
     // 高度与页头共用同一常量，品牌标与搜索框处在同一条视觉基线上。
     return SizedBox(
       height: EmbyPcHeaderMetrics.height,
@@ -369,50 +391,16 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
             mark,
             const SizedBox(width: 12),
             Expanded(
-              // 品牌文字区同时作为窗口拖动区，符合桌面端从左上角拖窗口的习惯。
-              child: _brandTitleArea(context),
+              // 副标区域同时作为窗口拖动区，保住从左上角拖窗口的习惯。
+              child: _usesWindowsChrome
+                  ? WindowsDragArea(child: subtitle)
+                  : subtitle,
             ),
             _buildSidebarToggle(context),
           ],
         ),
       ),
     );
-  }
-
-  // 侧栏品牌文字：产品名 + 副标题，Windows 上兼作窗口拖动区。
-  Widget _brandTitleArea(BuildContext context) {
-    final skin = EmbyPcSkin.of(context);
-    final title = Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '媒体中心',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontFamily: 'Microsoft YaHei UI',
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.6,
-            color: skin.scheme.onSurface,
-          ),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          'EMBY · PC',
-          maxLines: 1,
-          style: TextStyle(
-            fontSize: 9,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 2.2,
-            color: skin.textTertiary,
-          ),
-        ),
-      ],
-    );
-    if (!_usesWindowsChrome) return title;
-    return WindowsDragArea(child: title);
   }
 
   Widget _buildMobileNavigationDrawer(BuildContext context) {
@@ -438,26 +426,33 @@ extension _EmbyPcWorkspaceNavigation on _EmbyPcWorkspaceState {
                     Container(
                       width: 30,
                       height: 30,
+                      alignment: Alignment.center,
                       decoration: BoxDecoration(
                         gradient: EmbyPcSkin.of(context).brandGradient,
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Icon(
-                        Icons.play_arrow_rounded,
-                        size: 19,
-                        color: Colors.white,
+                      child: const Text(
+                        'S',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                          height: 1.1,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 10),
+                    // 抽屉与桌面侧栏共用同一个小号副标。
                     Expanded(
                       child: Text(
-                        '媒体中心',
+                        'MEDIA CENTER',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          fontFamily: 'Microsoft YaHei UI',
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.5,
-                          color: EmbyPcSkin.of(context).scheme.onSurface,
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 2.0,
+                          color: EmbyPcSkin.of(context).textTertiary,
                         ),
                       ),
                     ),
