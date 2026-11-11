@@ -1304,7 +1304,17 @@ class _PlaybackProgress extends StatelessWidget {
       FractionallySizedBox(
         alignment: Alignment.centerLeft,
         widthFactor: value.clamp(0.0, 1.0),
-        child: ColoredBox(color: color),
+        // 进度段用主题色向略提亮的一端渐变，纯色会显得平，加一点光感更立体。
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                color,
+                Color.alphaBlend(Colors.white.withValues(alpha: 0.22), color),
+              ],
+            ),
+          ),
+        ),
       ),
     ],
   );
