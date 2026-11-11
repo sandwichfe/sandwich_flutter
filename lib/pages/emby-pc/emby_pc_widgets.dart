@@ -455,29 +455,45 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
                     ]
                   : const [],
             ),
-            child: Material(
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(14),
-              clipBehavior: Clip.antiAlias,
-              child: InkWell(
-                onTap: widget.onOpen,
-                focusNode: _focusNode,
-                hoverColor: Colors.transparent,
-                // 桌面右键菜单：播放、收藏与条目维护，避免每次都先开详情页。
-                onSecondaryTapDown: (details) =>
-                    _showCardMenu(details.globalPosition),
-                child: widget.overlayCaption
-                    ? _buildOverlayCard(
-                        context,
-                        imageUrl: hasImage ? imageUrl : '',
-                        progress: progress,
-                      )
-                    : _buildStandardCard(
-                        context,
-                        imageUrl: hasImage ? imageUrl : '',
-                        progress: progress,
-                      ),
-              ),
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: Material(
+                    color: Colors.transparent,
+                    borderRadius: BorderRadius.circular(14),
+                    clipBehavior: Clip.antiAlias,
+                    child: InkWell(
+                      onTap: widget.onOpen,
+                      focusNode: _focusNode,
+                      hoverColor: Colors.transparent,
+                      // 桌面右键菜单：播放、收藏与条目维护，避免每次都先开详情页。
+                      onSecondaryTapDown: (details) =>
+                          _showCardMenu(details.globalPosition),
+                      child: widget.overlayCaption
+                          ? _buildOverlayCard(
+                              context,
+                              imageUrl: hasImage ? imageUrl : '',
+                            )
+                          : _buildStandardCard(
+                              context,
+                              imageUrl: hasImage ? imageUrl : '',
+                              progress: progress,
+                            ),
+                    ),
+                  ),
+                ),
+                // 背景图卡的封面就是整张卡，进度条只能落在卡片底边；
+                // 放在 Material 裁剪层之上，两端才不会又被圆角重新收成圆弧。
+                if (widget.overlayCaption && progress > 0)
+                  Positioned(
+                    // 左右内缩与圆角半径一致，进度条两端正好落在圆角起点的竖直切线上。
+                    left: 14,
+                    right: 14,
+                    bottom: 0,
+                    height: embyPcProgressHeight,
+                    child: _PlaybackProgress(value: progress, color: skin.accent),
+                  ),
+              ],
             ),
           ),
         ),
@@ -485,12 +501,14 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
     );
   }
 
-  // 图片内嵌标题的横向卡片：整块是封面，底部用渐变压住文字。
-  Widget _buildOverlayCard(
-    BuildContext context, {
-    required String imageUrl,
-    required double progress,
-  }) {
+  // 图片内嵌标题的横向卡片：整块是封面，底部用渐变压住文字；
+  // 进度条由 build 叠在卡片底边上（封面本身铺满整卡，不留空带）。
+  Widget _buildOverlayCard(BuildContext context, {required String imageUrl}) {
+    return _buildOverlayArtwork(context, imageUrl);
+  }
+
+  // 封面本体：图片 + 压暗层 + 内嵌标题和悬浮操作，占满进度条槽位以上的空间。
+  Widget _buildOverlayArtwork(BuildContext context, String imageUrl) {
     final skin = EmbyPcSkin.of(context);
     return Stack(
       fit: StackFit.expand,
@@ -535,7 +553,7 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
           left: 14,
           // 右下角常驻收藏/更多按钮，文字区为它让出固定宽度。
           right: 92,
-          bottom: progress > 0 ? 13 : 12,
+          bottom: 12,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -587,13 +605,6 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
                 child: _buildCardActionRow(context, compact: true),
               ),
             ),
-          ),
-        if (progress > 0)
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: _PlaybackProgress(value: progress, color: skin.accent),
           ),
       ],
     );
@@ -674,53 +685,67 @@ class _EmbyPcMediaTileState extends State<EmbyPcMediaTile> {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: _hovered ? skin.tint(0.6) : skin.hairline),
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(11),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            EmbyPcNetworkImage(
-              url: imageUrl,
-              fallbackIcon: embyPcFallbackIcon(widget.item.type),
-              fallbackLabel: embyPcFallbackLabel(widget.item.type),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(11),
+              child: _buildPosterArtwork(context, imageUrl),
             ),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.black.withValues(alpha: _hovered ? 0.12 : 0),
-                    Colors.black.withValues(alpha: _hovered ? 0.34 : 0.10),
-                  ],
-                ),
-              ),
+          ),
+          // 画在圆角裁剪之上，两端保持直角；左右内缩 11 与图片框圆角一致，
+          // 端点正好落在圆角起点的竖直切线上，不会压到弧线。
+          if (progress > 0)
+            Positioned(
+              left: 11,
+              right: 11,
+              bottom: 0,
+              height: embyPcProgressHeight,
+              child: _PlaybackProgress(value: progress, color: skin.accent),
             ),
-            if (_qualityLabel(widget.item).isNotEmpty)
-              Positioned(
-                top: 9,
-                right: 9,
-                child: _MediaBadge(label: _qualityLabel(widget.item)),
-              ),
-            // 已看状态常驻左上角，和右上角的分辨率角标互不遮挡。
-            if (widget.item.played)
-              Positioned(
-                top: 9,
-                left: 9,
-                child: const _MediaBadge(label: '已看'),
-              ),
-            _buildCardActions(bottom: progress > 0 ? 10 : 8),
-            if (progress > 0)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: _PlaybackProgress(value: progress, color: skin.accent),
-              ),
-          ],
-        ),
+        ],
       ),
+    );
+  }
+
+  // 封面本体：图片 + 悬停压暗 + 角标与悬浮操作。
+  Widget _buildPosterArtwork(BuildContext context, String imageUrl) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        EmbyPcNetworkImage(
+          url: imageUrl,
+          fallbackIcon: embyPcFallbackIcon(widget.item.type),
+          fallbackLabel: embyPcFallbackLabel(widget.item.type),
+        ),
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.black.withValues(alpha: _hovered ? 0.12 : 0),
+                Colors.black.withValues(alpha: _hovered ? 0.34 : 0.10),
+              ],
+            ),
+          ),
+        ),
+        if (_qualityLabel(widget.item).isNotEmpty)
+          Positioned(
+            top: 9,
+            right: 9,
+            child: _MediaBadge(label: _qualityLabel(widget.item)),
+          ),
+        // 已看状态常驻左上角，和右上角的分辨率角标互不遮挡。
+        if (widget.item.played)
+          Positioned(
+            top: 9,
+            left: 9,
+            child: const _MediaBadge(label: '已看'),
+          ),
+        _buildCardActions(bottom: 8),
+      ],
     );
   }
 
@@ -1053,7 +1078,6 @@ class _EmbyPcWatchHistoryRowState extends State<EmbyPcWatchHistoryRow> {
   }
 
   Widget _buildThumbnail(BuildContext context, double progress) {
-    final skin = EmbyPcSkin.of(context);
     final item = widget.item;
     // 影视条目优先用背景图，取不到时退回竖版主图，避免整行出现空白占位。
     final useBackdrop = item.hasBackdropImage;
@@ -1065,38 +1089,52 @@ class _EmbyPcWatchHistoryRowState extends State<EmbyPcWatchHistoryRow> {
             maxWidth: 480,
           )
         : '';
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: SizedBox(
-        width: 132,
-        height: 74,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            EmbyPcNetworkImage(
-              url: imageUrl,
-              fallbackIcon: embyPcFallbackIcon(item.type),
-              fallbackLabel: embyPcFallbackLabel(item.type),
-            ),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              color: Colors.black.withValues(alpha: _hovered ? 0.22 : 0.04),
-            ),
-            if (item.runtimeLabel.isNotEmpty)
-              Positioned(
-                right: 6,
-                bottom: progress > 0 ? 9 : 6,
-                child: _MediaBadge(label: item.runtimeLabel),
+    return SizedBox(
+      width: 132,
+      height: 74,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  EmbyPcNetworkImage(
+                    url: imageUrl,
+                    fallbackIcon: embyPcFallbackIcon(item.type),
+                    fallbackLabel: embyPcFallbackLabel(item.type),
+                  ),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    color: Colors.black.withValues(
+                      alpha: _hovered ? 0.22 : 0.04,
+                    ),
+                  ),
+                  if (item.runtimeLabel.isNotEmpty)
+                    Positioned(
+                      right: 6,
+                      bottom: 6,
+                      child: _MediaBadge(label: item.runtimeLabel),
+                    ),
+                ],
               ),
-            if (progress > 0)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: _PlaybackProgress(value: progress, color: skin.accent),
+            ),
+          ),
+          // 与封面卡一致：进度条压在圆角裁剪之上，两端保持直角，
+          // 左右内缩 8 与缩略图圆角一致，端点不压到弧线。
+          if (progress > 0)
+            Positioned(
+              left: 8,
+              right: 8,
+              bottom: 0,
+              height: embyPcProgressHeight,
+              child: _PlaybackProgress(
+                value: progress,
+                color: EmbyPcSkin.of(context).accent,
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
@@ -1247,6 +1285,11 @@ class _MediaMetadata extends StatelessWidget {
   }
 }
 
+// 进度条厚度：叠在封面底边上，不参与卡片布局，所以有进度和无进度时卡片高度一致。
+const double embyPcProgressHeight = 4;
+
+// 进度条：两端按卡片圆角半径内缩，保持直角，看起来和圆角的小边平行；
+// 因为压在封面上，轨道用半透明深色兜底，亮图和浅色占位底上都能看清剩余部分。
 class _PlaybackProgress extends StatelessWidget {
   final double value;
   final Color color;
@@ -1254,14 +1297,16 @@ class _PlaybackProgress extends StatelessWidget {
   const _PlaybackProgress({required this.value, required this.color});
 
   @override
-  Widget build(BuildContext context) => SizedBox(
-    height: 3,
-    child: LinearProgressIndicator(
-      value: value,
-      minHeight: 3,
-      color: color,
-      backgroundColor: Colors.white.withValues(alpha: 0.28),
-    ),
+  Widget build(BuildContext context) => Stack(
+    fit: StackFit.expand,
+    children: [
+      const ColoredBox(color: Color(0x6610141A)),
+      FractionallySizedBox(
+        alignment: Alignment.centerLeft,
+        widthFactor: value.clamp(0.0, 1.0),
+        child: ColoredBox(color: color),
+      ),
+    ],
   );
 }
 
