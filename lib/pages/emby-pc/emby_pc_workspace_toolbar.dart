@@ -233,8 +233,8 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
     if (_c.view == 'watch-history') {
       return _buildHistoryToolbar(context, compact: compactMobileToolbar);
     }
-    // 人物列表共用影片筛选面板没有意义，这里不展示条件标签。
-    final chips = peopleList ? const <Widget>[] : _buildFilterChips(context);
+    // 人物列表共用影片筛选面板没有意义，条件区只保留关键词标签。
+    final chips = _buildFilterChips(context, keywordOnly: peopleList);
     return Material(
       color: Colors.transparent,
       child: Container(
@@ -268,6 +268,9 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                         enabled: !_c.loading && !_c.refreshing && !_c.loadingMore,
                       ),
                     ],
+                    // 放大镜跟在按钮组末尾，搜索框在其下方整行展开。
+                    SizedBox(width: compactMobileToolbar ? 6 : 8),
+                    _buildKeywordToggle(compact: compactMobileToolbar),
                     // 条目统计替代原来的页面副标题，右对齐贴在布局切换左侧。
                     Expanded(
                       child: Padding(
@@ -295,6 +298,27 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
                 );
               },
             ),
+            // 关键词搜索条：点放大镜后从按钮行下方展开，不挤压筛选/排序等按钮。
+            AnimatedSize(
+              duration: const Duration(milliseconds: 160),
+              curve: Curves.easeOut,
+              alignment: Alignment.topCenter,
+              child: _keywordBarVisible
+                  ? Padding(
+                      padding: EdgeInsets.only(
+                        top: compactMobileToolbar ? 8 : 10,
+                      ),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        // 窄屏占满整行，宽屏固定 320，避免拉成一条长线。
+                        child: SizedBox(
+                          width: compactMobileToolbar ? double.infinity : 320,
+                          child: _buildKeywordSearchBar(),
+                        ),
+                      ),
+                    )
+                  : const SizedBox(width: double.infinity),
+            ),
             // 已选条件常驻展示；高度变化走动画，避免条件增减时下面整块列表瞬移。
             AnimatedSize(
               duration: const Duration(milliseconds: 160),
@@ -315,8 +339,122 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
     );
   }
 
+  // 工具栏放大镜：展开/收起列表内关键词搜索条；已有关键词时保持高亮。
+  Widget _buildKeywordToggle({required bool compact}) {
+    final skin = EmbyPcSkin.of(context);
+    final active =
+        _keywordBarVisible || _searchController.text.trim().isNotEmpty;
+    return Tooltip(
+      message: _keywordBarVisible ? '收起搜索' : '在当前列表搜索',
+      child: OutlinedButton(
+        onPressed: _toggleKeywordBar,
+        style: OutlinedButton.styleFrom(
+          // 只放图标，尺寸固定成正方形，和筛选/排序胶囊同高。
+          fixedSize: Size(compact ? 34 : 38, 38),
+          padding: EdgeInsets.zero,
+          foregroundColor: active ? skin.accent : skin.scheme.onSurface,
+          backgroundColor: active
+              ? skin.tint(0.16)
+              : skin.surfaceAlt.withValues(alpha: skin.dark ? 0.55 : 1),
+          side: BorderSide(color: active ? skin.tint(0.5) : skin.hairline),
+          shape: const StadiumBorder(),
+        ),
+        // 与页头的全局搜索图标区分：这里是“在当前列表里查找”。
+        child: const Icon(Icons.manage_search_rounded, size: 19),
+      ),
+    );
+  }
+
+  // 列表内关键词搜索条：与筛选/排序条件叠加，走服务端 SearchTerm 查询。
+  // 宽度由调用方约束（工具栏一行、观看历史一行共用这份内容）。
+  Widget _buildKeywordSearchBar() {
+    final skin = EmbyPcSkin.of(context);
+    final hasKeyword = _searchController.text.isNotEmpty;
+    return Focus(
+      // 失去焦点且没有关键词时自动收起，空搜索条不再长期占位。
+      onFocusChange: (focused) {
+        if (focused ||
+            !_keywordBarVisible ||
+            _searchController.text.trim().isNotEmpty) {
+          return;
+        }
+        setState(() => _keywordBarVisible = false);
+      },
+      child: CallbackShortcuts(
+        bindings: {
+          // Esc 清空并收起，和全局搜索浮层的键盘习惯保持一致。
+          const SingleActivator(LogicalKeyboardKey.escape): () {
+            unawaited(_clearKeyword());
+            setState(() => _keywordBarVisible = false);
+          },
+        },
+        child: SizedBox(
+          height: 38,
+          child: TextField(
+            controller: _searchController,
+            autofocus: true,
+            textInputAction: TextInputAction.search,
+            textAlignVertical: TextAlignVertical.center,
+            // 查询期间保持可输入，刷新时机只由防抖决定。
+            onChanged: _scheduleSearch,
+            onSubmitted: (_) => _submitKeyword(),
+            style: const TextStyle(fontSize: 13),
+            decoration: InputDecoration(
+              isDense: true,
+              filled: true,
+              fillColor: skin.surfaceAlt.withValues(alpha: skin.dark ? 0.55 : 1),
+              hintText: '在当前列表搜索',
+              hintStyle: TextStyle(fontSize: 12.5, color: skin.textTertiary),
+              contentPadding: const EdgeInsets.symmetric(vertical: 10),
+              prefixIconConstraints: const BoxConstraints(
+                minWidth: 32,
+                minHeight: 36,
+              ),
+              prefixIcon: Icon(
+                Icons.search_rounded,
+                size: 17,
+                color: skin.textSecondary,
+              ),
+              suffixIcon: hasKeyword
+                  ? IconButton(
+                      tooltip: '清空关键词',
+                      onPressed: () => unawaited(_clearKeyword()),
+                      icon: Icon(
+                        Icons.close_rounded,
+                        size: 16,
+                        color: skin.textSecondary,
+                      ),
+                    )
+                  : null,
+              suffixIconConstraints: const BoxConstraints(
+                minWidth: 34,
+                minHeight: 36,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(19),
+                borderSide: BorderSide(color: skin.hairline),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(19),
+                borderSide: BorderSide(color: skin.hairline),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(19),
+                borderSide: BorderSide(color: skin.accent, width: 1.2),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   // 工具栏下方的筛选条件标签：点击叉号即可单独清除，并立刻重新查询。
-  List<Widget> _buildFilterChips(BuildContext context) {
+  // keywordOnly 供人物列表使用：那里没有影片类筛选项，只保留关键词标签。
+  List<Widget> _buildFilterChips(
+    BuildContext context, {
+    bool keywordOnly = false,
+  }) {
     final skin = EmbyPcSkin.of(context);
     Widget chip(String label, VoidCallback onDeleted) => InputChip(
       label: Text(label),
@@ -333,6 +471,12 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
       shape: const StadiumBorder(),
     );
     final chips = <Widget>[];
+    // 关键词标签让收起搜索条后仍能看到并一键清除当前条件。
+    final keyword = _searchController.text.trim();
+    if (keyword.isNotEmpty) {
+      chips.add(chip('关键词：$keyword', () => unawaited(_clearKeyword())));
+    }
+    if (keywordOnly) return chips;
     if (_c.itemType.isNotEmpty) {
       chips.add(
         chip(
@@ -416,23 +560,52 @@ extension _EmbyPcWorkspaceToolbar on _EmbyPcWorkspaceState {
       padding: compact
           ? const EdgeInsets.fromLTRB(16, 2, 16, 10)
           : const EdgeInsets.fromLTRB(28, 0, 28, 12),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Icon(Icons.history_rounded, size: 15, color: skin.textTertiary),
-          const SizedBox(width: 6),
-          Text(
-            '按最近播放时间排序',
-            style: TextStyle(fontSize: 12, color: skin.textTertiary),
+          Row(
+            children: [
+              Icon(Icons.history_rounded, size: 15, color: skin.textTertiary),
+              const SizedBox(width: 6),
+              Text(
+                '按最近播放时间排序',
+                style: TextStyle(fontSize: 12, color: skin.textTertiary),
+              ),
+              const SizedBox(width: 12),
+              // 观看历史同样是列表，放大镜与普通工具栏共用同一套展开与查询逻辑。
+              _buildKeywordToggle(compact: compact),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: Text(
+                    _pageStatusText,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.right,
+                    style: TextStyle(fontSize: 12, color: skin.textSecondary),
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              _pageStatusText,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.right,
-              style: TextStyle(fontSize: 12, color: skin.textSecondary),
-            ),
+          // 搜索条在说明行下方展开，宽度规则与普通工具栏保持一致。
+          AnimatedSize(
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOut,
+            alignment: Alignment.topCenter,
+            child: _keywordBarVisible
+                ? Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: SizedBox(
+                        width: compact ? double.infinity : 320,
+                        child: _buildKeywordSearchBar(),
+                      ),
+                    ),
+                  )
+                : const SizedBox(width: double.infinity),
           ),
         ],
       ),

@@ -147,6 +147,10 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
   final Set<String> _favoriteBusyIds = {};
   final Set<String> _libraryActionBusyIds = {};
   final Set<String> _mediaActionBusyIds = {};
+  // 列表页关键词沿用首页搜索的短防抖，连续输入时只执行最后一次查询。
+  Timer? _searchDebounceTimer;
+  // 列表页搜索条默认收起，点工具栏放大镜展开；两类列表共用同一份展开状态。
+  bool _keywordBarVisible = false;
   Timer? _loadMoreDebounceTimer;
   // 视图切换历史：页头的后退/前进按钮复用同一份栈，避免做成装饰按钮。
   final List<_WorkspaceViewEntry> _viewHistory = [];
@@ -522,7 +526,9 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
   }
 
   void _resetQueryControllers() {
+    _searchDebounceTimer?.cancel();
     _searchController.clear();
+    _keywordBarVisible = false;
     _yearController.clear();
     _personController.clear();
     // 查询条件统一由 controller 清理，避免遗漏新增筛选项。
@@ -530,8 +536,43 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
   }
 
   Future<void> _applyQuery() async {
+    _searchDebounceTimer?.cancel();
     _syncQueryInput();
     await _c.applyQuery();
+  }
+
+  // 列表页放大镜：在原统计文本的位置展开/收起关键词搜索条。
+  void _toggleKeywordBar() {
+    setState(() => _keywordBarVisible = !_keywordBarVisible);
+  }
+
+  // 关键词输入防抖：输入变化立即让旧请求失效，避免旧结果覆盖新输入。
+  void _scheduleSearch(String value) {
+    _searchDebounceTimer?.cancel();
+    _c.queryVersion++;
+    setState(() {});
+    if (value.trim().isEmpty) {
+      unawaited(_applyQuery());
+      return;
+    }
+    _searchDebounceTimer = Timer(
+      const Duration(milliseconds: 300),
+      () => unawaited(_applyQuery()),
+    );
+  }
+
+  // 回车提交关键词时跳过等待，并取消尚未执行的防抖查询。
+  void _submitKeyword() {
+    _c.queryVersion++;
+    unawaited(_applyQuery());
+  }
+
+  // 清空关键词后立即回到未筛选状态，搜索条保持展开便于继续输入。
+  Future<void> _clearKeyword() async {
+    if (_searchController.text.isEmpty) return;
+    _c.queryVersion++;
+    setState(_searchController.clear);
+    await _applyQuery();
   }
 
   Future<void> _openGlobalSearch() async {
@@ -840,6 +881,7 @@ class _EmbyPcWorkspaceState extends State<EmbyPcWorkspace>
     EmbyPcService.instance.unauthorizedRevision.removeListener(
       _handleSessionExpired,
     );
+    _searchDebounceTimer?.cancel();
     _searchController.dispose();
     _yearController.dispose();
     _personController.dispose();
